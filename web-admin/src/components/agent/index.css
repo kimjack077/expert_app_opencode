@@ -1,0 +1,219 @@
+.agent-message-renderer .message-bubble {
+  padding: 12px 14px;
+  border-radius: 12px;
+  word-break: break-word;
+}
+
+.agent-message-renderer .message-bubble.user {
+  background: #1677FF;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.agent-message-renderer .message-bubble.assistant {
+  background: #F5F5F5;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+
+.agent-message-renderer .message-text {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.agent-message-renderer .message-text strong {
+  font-weight: 600;
+}
+
+.agent-message-renderer .list-number {
+  font-weight: 600;
+  color: #1677FF;
+}
+
+.agent-message-renderer .tool-calls-section {
+  margin-bottom: 8px;
+}
+
+.agent-message-renderer .tool-calls-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent-message-renderer .tool-calls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-message-renderer .tool-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: #FAFAFA;
+  border-radius: 6px;
+}
+
+.agent-message-renderer .tool-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: #E6F4FF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1677FF;
+  font-size: 12px;
+}
+
+.agent-message-renderer .tool-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.agent-message-renderer .tool-name {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.agent-message-renderer .citations-section {
+  margin-top: 8px;
+}
+
+.agent-message-renderer .citations-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent-message-renderer .citations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-message-renderer .citation-card {
+  background: #FAFAFA;
+}
+
+.agent-message-renderer .citation-source {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.agent-message-renderer .citation-relevance {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.agent-message-renderer .citation-content {
+  font-size: 12px;
+  margin-bottom: 0 !important;
+}
+
+.agent-message-renderer .action-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.agent-message-renderer .action-status.confirmed {
+  background: #F6FFED;
+  color: #52C41A;
+}
+
+.agent-message-renderer .action-status.cancelled {
+  background: #FFF2F0;
+  color: #FF4D4F;
+}
+
+.agent-action-confirm {
+  margin-top: 8px;
+}
+
+.agent-action-confirm .action-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.agent-action-confirm .judgment-content,
+.agent-action-confirm .operation-content {
+  padding: 8px 0;
+}
+
+.agent-action-confirm .judgment-item {
+  margin-bottom: 12px;
+}
+
+.agent-action-confirm .judgment-item .label {
+  color: var(--text-muted);
+  font-size: 13px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.agent-action-confirm .judgment-item .value {
+  font-size: 14px;
+}
+
+.agent-action-confirm .description-box {
+  background: #FAFAFA;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.agent-action-confirm .edit-form {
+  padding: 8px 0;
+}
+
+.agent-action-confirm .edit-item {
+  margin-bottom: 12px;
+}
+
+.agent-action-confirm .edit-item label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent-action-confirm .edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.agent-action-confirm .action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.agent-action-confirm .operation-content pre {
+  margin: 0;
+  font-size: 12px;
+  background: #FAFAFA;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+}

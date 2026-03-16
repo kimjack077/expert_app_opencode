@@ -1,0 +1,17 @@
+我的需求是写一个辅助专家现场工作的一个APP，后端有管理平台，可使用web管理。前端APP。应用场景：专家现场进行检查、审查、
+、监管等工作，都需要按照法规、标准进行操作，专家需要记录检查结果、审查意见、监管情况，现场照片等信息。这个APP可以帮助专家更高效地进行工作，提供一个便捷的界面来输入和管理这些信息，另外就是，根据不同检查内容，可以点击建议，直接给出监管建议，也可以点击提示，给出改条检查或者监管的依据。这块都要调用LLM来获取建议。同时后端管理平台，记录所有现场工作人员的操作记录，可以让管理员查看和分析这些数据，以便做出更好的决策和改进工作流程。这是一个多用户的应用，需要考虑用户权限、数据安全、数据备份等问题。这个系统使用虚拟目录运行，在.venv里。前端APP只是执行检查任务为主。检查模板需要从后端的web页面设置，你要有个后端管理的页面，能够由管理员根据不同的政策标准要求，分解成不同层级的检查条目，然后根据不同的检查任务，选择不同的检查项目，形成检查模板。你先根据这个，给我一份设计文档。数据库是Postgres，配置在这里：DEFAULT_PG_HOST = "62.234.0.182"
+DEFAULT_PG_PORT = 5432
+DEFAULT_PG_DB = "db_expert_opencode"
+DEFAULT_PG_USER = "db_admin"
+DEFAULT_PG_PASSWORD = "1234567890@sdtj"
+大语言模型在这里：        BASE_URL: 'https://integrate.api.nvidia.com/v1',
+        MODEL: 'deepseek-ai/deepseek-v3.2',
+        //MODEL: 'deepseek-ai/deepseek-v3.1',
+        //MODEL: 'qwen/qwen3-coder-480b-a35b-instruct',
+        //MODEL: 'minimaxai/minimax-m2.1',
+        //MODEL: 'moonshotai/kimi-k2.5',
+        //MODEL: 'moonshotai/kimi-k2-thinking',
+        //MODEL: 'openai/gpt-oss-120b',
+        //MODEL: 'z-ai/glm4.7',
+        API_KEY: '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',
+        TIMEOUT: 30000, MAX_TOKENS: 8192, TEMPERATURE: 1, TOP_P: 0.95

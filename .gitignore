@@ -1,0 +1,104 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+venv39/
+pyenv/
+virtualenv/
+.pyenv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+.opencode/
+.qwen/
+.trae/
+*.swp
+*~
+.DS_Store
+
+# All dot folders (except .git)
+.*/
+!.git/
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# Database backups
+*.sql.gz
+*.sql
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Alembic
+alembic/versions/*.pyc
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads
+uploads/
+media/
+
+# Deployment and test scripts
+deploy.py
+redeploy_h5.py
+setup_nginx.py
+update_frontend_serving.py
+test_ssh.py
+check_h5.py
+clear_db.py
+create_template.py
+test_upload.png
+main_new.py
+*.service
+*.conf

@@ -1,0 +1,144 @@
+.login-page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #1677ff 0%, #0958d9 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px;
+}
+
+.login-header {
+  padding-top: 80px;
+  text-align: center;
+  color: white;
+}
+
+.logo {
+  margin-bottom: 24px;
+}
+
+.logo-icon {
+  width: 80px;
+  height: 80px;
+  background: white;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  font-size: 36px;
+  font-weight: bold;
+  color: #1677ff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.login-form-container {
+  flex: 1;
+  background: white;
+  border-radius: 16px 16px 0 0;
+  margin: 40px -24px 0;
+  padding: 32px 24px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.form-input {
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  font-size: 16px;
+  box-sizing: border-box;
+  transition: border-color 0.3s;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #1677ff;
+}
+
+.login-btn {
+  margin-top: 24px;
+  height: 48px;
+  font-size: 17px;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+.demo-accounts {
+  margin-top: 32px;
+  padding: 16px;
+  background: #f5f5f5;
+  border-radius: 8px;
+}
+
+.demo-title {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 12px;
+}
+
+.demo-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.demo-role {
+  background: #1677ff;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.demo-info {
+  font-size: 14px;
+  color: #666;
+  font-family: monospace;
+}
+
+.login-footer {
+  background: white;
+  padding: 16px;
+  text-align: center;
+  margin: 0 -24px;
+}
+
+.login-footer p {
+  font-size: 12px;
+  color: #999;
+}
+
+/* 表单样式覆盖 */
+.login-form-container .adm-form-item-label {
+  font-size: 14px;
+  color: #333;
+}
+
+.login-form-container .adm-input-element {
+  font-size: 16px;
+}

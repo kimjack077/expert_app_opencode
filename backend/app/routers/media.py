@@ -1,0 +1,118 @@
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.database import get_db
+from app.models.user import User
+from app.models.task import InspectionTask
+from app.models.media import MediaFile
+from app.schemas import ApiResponse, MediaFileResponse
+from app.utils.security import get_current_user
+from app.utils.file_handler import save_upload_file
+from app.services import AuditService
+
+router = APIRouter()
+
+
+def make_response(data=None, code=200, message="success"):
+    return ApiResponse(
+        code=code, message=message, data=data, timestamp=datetime.utcnow()
+    )
+
+
+@router.post("/upload", response_model=ApiResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    task_id: str = Form(None),
+    record_id: str = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if task_id:
+        task = await db.get(InspectionTask, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if str(task.assigned_to) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    stored_name, file_path, file_size = await save_upload_file(file, "inspections")
+
+    media = MediaFile(
+        task_id=task_id,
+        record_id=record_id,
+        file_type="image"
+        if file.content_type and file.content_type.startswith("image/")
+        else "document",
+        original_name=file.filename,
+        stored_name=stored_name,
+        file_path=file_path,
+        file_size=file_size,
+        mime_type=file.content_type,
+        uploaded_by=current_user.id,
+    )
+    db.add(media)
+    await db.commit()
+    await db.refresh(media)
+
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "upload_file",
+        "media",
+        str(media.id),
+    )
+
+    return make_response(data=MediaFileResponse.model_validate(media).model_dump())
+
+
+@router.get("/task/{task_id}", response_model=ApiResponse)
+async def get_task_media(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    task = await db.get(InspectionTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    result = await db.execute(
+        select(MediaFile)
+        .where(MediaFile.task_id == task_id)
+        .order_by(MediaFile.uploaded_at.desc())
+    )
+    files = result.scalars().all()
+
+    return make_response(
+        data=[MediaFileResponse.model_validate(f).model_dump() for f in files]
+    )
+
+
+@router.delete("/{media_id}", response_model=ApiResponse)
+async def delete_media(
+    media_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    media = await db.get(MediaFile, media_id)
+    if not media:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    if str(media.uploaded_by) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    await db.delete(media)
+    await db.commit()
+
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "delete_file",
+        "media",
+        media_id,
+    )
+
+    return make_response(message="Media deleted")
