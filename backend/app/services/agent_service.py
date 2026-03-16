@@ -22,11 +22,14 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 - 法规依据：{legal_basis}
 
 你可以调用以下工具：
-1. get_check_item_details - 获取检查项的详细信息
-2. get_inspection_summary - 获取当前检查的汇总情况
-3. generate_final_verdict - 基于所有检查项结果，生成最终判定建议
+1. list_check_items - 列出所有检查项及其ID、标题和判定结果。当用户询问"第一个检查项"或"某项检查"时，**必须先调用此工具**获取检查项ID
+2. get_check_item_details - 获取指定检查项的详细信息
+3. get_inspection_summary - 获取当前检查的汇总情况
+4. generate_final_verdict - 基于所有检查项结果，生成最终判定建议
 
-重要：当用户询问检查汇总或生成最终判定时，你应该**主动调用** get_inspection_summary 或 generate_final_verdict 工具来获取数据，不要询问用户！
+重要规则：
+- 当用户询问某个检查项（如"第一个检查项"、"第二项"等）时，**必须先调用 list_check_items 获取检查项列表和ID**，然后再调用 get_check_item_details 获取详情
+- 当用户询问检查汇总或生成最终判定时，你应该**主动调用** get_inspection_summary 或 generate_final_verdict 工具来获取数据，不要询问用户！
 
 回答要求：
 - 简洁专业，适合手机端阅读
@@ -37,6 +40,23 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 """
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_check_items",
+            "description": "列出当前检查记录中的所有检查项，包括ID、标题、顺序和当前判定结果。当用户询问某个检查项（如'第一个检查项'）时，应先调用此工具获取检查项列表和ID",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {
+                        "type": "string",
+                        "description": "检查记录ID"
+                    }
+                },
+                "required": ["record_id"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -256,7 +276,9 @@ class AgentService:
         context: dict,
         db: AsyncSession,
     ) -> dict:
-        if tool_name == "get_check_item_details":
+        if tool_name == "list_check_items":
+            return await self._tool_list_check_items(args.get("record_id"), context, db)
+        elif tool_name == "get_check_item_details":
             return await self._tool_get_check_item_details(args.get("item_id"), context, db)
         elif tool_name == "get_inspection_summary":
             return await self._tool_get_inspection_summary(args.get("record_id"), db)
@@ -264,6 +286,52 @@ class AgentService:
             return await self._tool_generate_final_verdict(args.get("record_id"), db)
         else:
             return {"error": f"Unknown tool: {tool_name}"}
+
+    async def _tool_list_check_items(
+        self,
+        record_id: Optional[str],
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        if not record_id:
+            record_id = context.get("record_id")
+        
+        if not record_id:
+            return {"error": "未指定检查记录ID"}
+
+        result = await db.execute(
+            select(InspectionRecordItem)
+            .where(InspectionRecordItem.record_id == record_id)
+            .order_by(InspectionRecordItem.recorded_at)
+        )
+        items = result.scalars().all()
+
+        if not items:
+            return {"error": "检查记录无检查项", "items": []}
+
+        items_list = []
+        for idx, item in enumerate(items, 1):
+            radio = item.radio_value
+            if radio == "pass":
+                result_text = "合格"
+            elif radio == "fail":
+                result_text = "不合格"
+            elif radio == "na":
+                result_text = "不适用"
+            else:
+                result_text = "未检查"
+            
+            items_list.append({
+                "index": idx,
+                "id": str(item.id),
+                "title": item.item_title,
+                "result": result_text,
+            })
+
+        return {
+            "total": len(items_list),
+            "items": items_list,
+        }
 
     async def _tool_get_check_item_details(
         self,
