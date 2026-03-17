@@ -48,6 +48,9 @@ package-lock.json
 .opencode/
 .qwen/
 .trae/
+
+# Test files
+backend/test_files/
 *.swp
 *~
 .DS_Store
