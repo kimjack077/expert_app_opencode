@@ -21,6 +21,7 @@ from app.routers import (
     industries_router,
     users_router,
     agent_router,
+    ai_enhanced_router,
 )
 from app.middleware import AuditMiddleware
 
@@ -68,6 +69,7 @@ app.include_router(ai_extract_router, prefix="/api/ai-extract", tags=["AI辅助�
 app.include_router(industries_router, prefix="/api/industries", tags=["行业分类"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
 app.include_router(agent_router, prefix="/api/agent", tags=["AI助手"])
+app.include_router(ai_enhanced_router, prefix="/api/ai-enhanced", tags=["AI增强功能"])
 
 
 @app.exception_handler(Exception)

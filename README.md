@@ -7,6 +7,8 @@
 本系统为专家现场工作提供信息化支持，主要功能包括：
 - **现场检查记录**：记录检查结果、审查意见、监管情况、现场照片等信息
 - **智能辅助**：通过LLM获取检查建议和法规依据
+- **照片智能分析**：多模态AI自动识别检查照片中的合规问题
+- **知识库向量检索**：基于嵌入模型的语义搜索，智能关联检查项与法规
 - **模板管理**：管理员可自定义检查模板，按不同政策标准分解检查条目
 - **企业信息管理**：管理被检查企业的基础信息、资质、产品、设备等
 - **知识库管理**：管理政策法规、审查细则等文档
@@ -20,6 +22,11 @@
 - PostgreSQL
 - SQLAlchemy + Alembic
 - JWT认证
+
+### AI模型
+- **主LLM**: DeepSeek-V3.2 (文本生成、检查建议)
+- **多模态模型**: 通义千问 Qwen3.5 Plus (照片智能分析)
+- **嵌入模型**: BAAI/bge-m3 (知识库向量检索)
 
 ### 前端
 - **Web管理后台**: React + Vite + TypeScript + Ant Design
@@ -154,6 +161,16 @@ npm run dev
 - `POST /api/llm/basis` - 获取法规依据
 - `GET /api/records/{record_id}/items/{item_id}/ai-stream` - 流式生成AI建议（SSE）
 
+#### AI照片分析
+- `POST /api/ai-enhanced/photo/analyze` - 单张照片分析
+- `POST /api/ai-enhanced/photo/analyze/stream` - 流式照片分析（SSE）
+- `POST /api/ai-enhanced/photo/batch-analyze` - 批量照片分析
+
+#### 知识库向量检索
+- `POST /api/knowledge/embeddings/create` - 为文档创建向量嵌入
+- `POST /api/knowledge/search` - 语义搜索知识库
+- `POST /api/ai-enhanced/link-regulations` - 自动关联检查项与法规
+
 #### 媒体管理
 - `POST /api/media/upload` - 上传文件
 - `GET /api/media/task/{task_id}` - 获取任务媒体文件
@@ -279,6 +296,19 @@ docker-compose up -d
 5. 创建 Pull Request
 
 ## 更新日志
+
+### v1.4.0 (2026-03-17)
+- 新增多模态照片智能分析功能
+  - 集成通义千问 Qwen3.5 Plus 多模态模型
+  - 支持单张/批量/流式照片分析
+  - 自动识别照片中的合规问题、安全隐患
+  - 分析结果包含问题描述、严重程度、改进建议
+- 新增知识库向量检索功能 (RAG)
+  - 集成 BAAI/bge-m3 嵌入模型
+  - 支持文档自动分块与向量化
+  - 支持语义搜索知识库
+  - 支持自动关联检查项与相关法规
+- 新增详细使用文档 `backend/docs/multimodal-usage.md`
 
 ### v1.3.0 (2026-03-07)
 - 新增检查结果统计汇总功能

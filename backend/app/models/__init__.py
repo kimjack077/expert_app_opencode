@@ -16,6 +16,13 @@ from .enterprise import (
     RectificationRecord,
 )
 from .knowledge import KnowledgeCategory, KnowledgeDocument, InspectionGuideline
+from .rag import (
+    KnowledgeEmbedding,
+    CheckItemRegulation,
+    AgentMemory,
+    TemplateRecommendation,
+    PhotoAnalysis,
+)
 
 __all__ = [
     "Base",
@@ -41,4 +48,10 @@ __all__ = [
     "KnowledgeCategory",
     "KnowledgeDocument",
     "InspectionGuideline",
+    # RAG and Agent models
+    "KnowledgeEmbedding",
+    "CheckItemRegulation",
+    "AgentMemory",
+    "TemplateRecommendation",
+    "PhotoAnalysis",
 ]

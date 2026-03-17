@@ -36,10 +36,25 @@ class Settings(BaseSettings):
     LLM_TOP_P: float = 0.95
     LLM_TIMEOUT: int = 180
 
+    # Embedding model for RAG (NVIDIA API - backup)
+    NVIDIA_API_KEY: str = "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"
+    NVIDIA_EMBEDDING_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
+    NVIDIA_EMBEDDING_MODEL: str = "nvidia/nv-embed-v1"
+
+    # Primary Embedding model for RAG (BGE-M3 via OpenAI-compatible API)
+    EMBEDDING_BASE_URL: str = "https://api.edgefn.net/v1"
+    EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    EMBEDDING_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+
     MINIMAX_BASE_URL: str = "https://api.edgefn.net/v1"
     MINIMAX_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
     MINIMAX_MODEL: str = "DeepSeek-V3.2"
     MINIMAX_GROUP_ID: str = ""
+
+    # Vision/Multimodal LLM for image analysis (Qwen3.5 Plus)
+    VISION_LLM_BASE_URL: str = "https://coding.dashscope.aliyuncs.com/v1"
+    VISION_LLM_MODEL: str = "qwen3.5-plus"
+    VISION_LLM_API_KEY: str = "sk-sp-473938c68b6d4027b4c0f7754c8028db"
 
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024
