@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Text, Integer, Numeric, Date
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -31,6 +31,23 @@ class Enterprise(Base):
     annual_output = Column(Numeric(15, 2))
     annual_tax = Column(Numeric(15, 2))
     remarks = Column(Text)
+    
+    # 认证信息（新增）
+    current_certs = Column(
+        JSON,
+        default=list,
+        comment="当前证书列表：[{system: 'Q', cert_no: 'xxx', valid_until: 'yyyy-mm-dd'}]"
+    )
+    certification_scope = Column(
+        Text,
+        comment="认证范围描述，用于信息确认单"
+    )
+    last_audit_date = Column(Date, comment="上次审核时间")
+    last_audit_type = Column(
+        String(50),
+        comment="上次审核类型：initial/surveillance/recertification/expansion"
+    )
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

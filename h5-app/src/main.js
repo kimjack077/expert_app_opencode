@@ -26,6 +26,9 @@ import Statistics from './views/Statistics.vue'
 import Settings from './views/Settings.vue'
 import About from './views/About.vue'
 import ReportPreview from './views/ReportPreview.vue'
+// 审核项目模块
+import AuditTasks from './views/AuditTasks.vue'
+import AuditTaskDetail from './views/AuditTaskDetail.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -45,6 +48,9 @@ const routes = [
   { path: '/statistics', component: Statistics },
   { path: '/settings', component: Settings },
   { path: '/about', component: About },
+  // 审核项目模块
+  { path: '/audit-tasks', component: AuditTasks },
+  { path: '/audit-task/:id', component: AuditTaskDetail, name: 'AuditTaskDetail' },
 ]
 
 const router = createRouter({

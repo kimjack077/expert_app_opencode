@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
 
@@ -42,7 +42,7 @@ class LLMResponse(BaseModel):
 class ApiResponse(BaseModel):
     code: int = 200
     message: str = "success"
-    data: Optional[dict | list] = None
+    data: Optional[Any] = None
     timestamp: datetime
 
     class Config:

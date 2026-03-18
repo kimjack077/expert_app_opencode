@@ -23,6 +23,16 @@ from .rag import (
     TemplateRecommendation,
     PhotoAnalysis,
 )
+from .audit_project import (
+    AuditProject,
+    AuditTeamMember,
+    AuditPlanItem,
+    AuditArea,
+    AuditAreaRecord,
+    Nonconformity,
+    AuditReport,
+    CommunicationMeeting,
+)
 
 __all__ = [
     "Base",
@@ -54,4 +64,13 @@ __all__ = [
     "AgentMemory",
     "TemplateRecommendation",
     "PhotoAnalysis",
+    # Audit Project models
+    "AuditProject",
+    "AuditTeamMember",
+    "AuditPlanItem",
+    "AuditArea",
+    "AuditAreaRecord",
+    "Nonconformity",
+    "AuditReport",
+    "CommunicationMeeting",
 ]

@@ -15,6 +15,10 @@ import NewInspection from '@/pages/NewInspection'
 import RecordInspection from '@/pages/RecordInspection'
 import Users from '@/pages/Users'
 import Industries from '@/pages/Industries'
+// 审核项目模块
+import AuditProjects from '@/pages/AuditProjects'
+import CreateAuditProject from '@/pages/AuditProjects/Create'
+import AuditProjectDetail from '@/pages/AuditProjects/Detail'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -48,6 +52,10 @@ function App() {
           <Route path="records" element={<Records />} />
           <Route path="users" element={<Users />} />
           <Route path="industries" element={<Industries />} />
+          {/* 审核项目模块 */}
+          <Route path="audit-projects" element={<AuditProjects />} />
+          <Route path="audit-projects/create" element={<CreateAuditProject />} />
+          <Route path="audit-projects/:id" element={<AuditProjectDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>

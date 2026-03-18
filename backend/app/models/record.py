@@ -88,8 +88,16 @@ class InspectionRecordItem(Base):
     record_id = Column(
         UUID(as_uuid=True),
         ForeignKey("inspection_records.id", ondelete="CASCADE"),
-        nullable=False,
-        comment="所属检查记录 ID"
+        nullable=True,
+        comment="所属检查记录 ID（快速检查模式）"
+    )
+    
+    # 关联审核区域记录（新增）
+    audit_area_record_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("audit_area_records.id", ondelete="CASCADE"),
+        nullable=True,
+        comment="所属审核区域记录 ID（审核项目模式）"
     )
     
     # 关联模板检查项
@@ -115,6 +123,28 @@ class InspectionRecordItem(Base):
     # 问题描述和整改建议
     problem_description = Column(Text, comment="问题描述（发现的问题）")
     rectification_suggestion = Column(Text, comment="整改建议")
+
+    # 审核专用字段（新增）
+    audit_evidence = Column(
+        Text,
+        comment="审核证据（现场查阅到的证据描述）"
+    )
+    evaluation_3level = Column(
+        String(10),
+        comment="三级评估：1(符合)/2(基本符合)/3(不符合)"
+    )
+    audit_findings = Column(
+        Text,
+        comment="审核发现（发现问题时填写）"
+    )
+    certification_system = Column(
+        String(10),
+        comment="适用体系快照：Q/E/S/En"
+    )
+    clause_no_snapshot = Column(
+        String(50),
+        comment="条款号快照"
+    )
 
     # AI 辅助相关
     ai_generated = Column(Boolean, default=False, comment="是否为AI生成")
@@ -154,6 +184,7 @@ class InspectionRecordItem(Base):
     
     # 关联关系
     record = relationship("InspectionRecord", back_populates="items")
+    audit_area_record = relationship("AuditAreaRecord", back_populates="items")
     template_item = relationship("TemplateItem")
 
     def __repr__(self):

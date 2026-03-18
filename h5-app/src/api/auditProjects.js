@@ -1,0 +1,81 @@
+import request from './request'
+
+// 获取我的审核任务列表
+export function getMyAuditTasks(params) {
+  return request({
+    url: '/api/v1/audit-projects/my-tasks',
+    method: 'get',
+    params
+  })
+}
+
+// 获取审核计划项详情
+export function getAuditPlanItem(id) {
+  return request({
+    url: `/api/v1/audit-projects/plan/${id}`,
+    method: 'get'
+  })
+}
+
+// 创建审核区域记录
+export function createAuditRecord(projectId, data) {
+  return request({
+    url: `/api/v1/audit-projects/${projectId}/records`,
+    method: 'post',
+    data
+  })
+}
+
+// 获取审核区域记录详情
+export function getAuditRecord(recordId) {
+  return request({
+    url: `/api/v1/audit-projects/records/${recordId}`,
+    method: 'get'
+  })
+}
+
+// 更新审核区域记录
+export function updateAuditRecord(recordId, data) {
+  return request({
+    url: `/api/v1/audit-projects/records/${recordId}`,
+    method: 'put',
+    data
+  })
+}
+
+// 创建不符合项
+export function createNonconformity(projectId, data) {
+  return request({
+    url: `/api/v1/audit-projects/${projectId}/nonconformities`,
+    method: 'post',
+    data
+  })
+}
+
+// 获取审核项目进度
+export function getAuditProgress(projectId) {
+  return request({
+    url: `/api/v1/audit-projects/${projectId}/progress`,
+    method: 'get'
+  })
+}
+
+// ==================== AI Agent API ====================
+
+// AI 证据充分性评估
+export function evaluateEvidenceWithAI(projectId, params) {
+  return request({
+    url: `/api/v1/audit-projects/${projectId}/ai/evaluate-evidence`,
+    method: 'post',
+    params
+  })
+}
+
+// AI 建议不符合项
+export function suggestNCWithAI(projectId, params) {
+  return request({
+    url: `/api/v1/audit-projects/${projectId}/ai/suggest-nc`,
+    method: 'post',
+    params
+  })
+}

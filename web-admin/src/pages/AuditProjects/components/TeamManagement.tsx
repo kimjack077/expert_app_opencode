@@ -1,0 +1,247 @@
+import { useState, useEffect } from 'react'
+import { Table, Button, Space, Tag, Modal, Form, Select, message } from 'antd'
+import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import { auditTeamApi } from '@/services/auditProjectApi'
+import { userApi } from '@/services/api'
+import type { ColumnsType } from 'antd/es/table'
+
+interface TeamMember {
+  id: string
+  member_id: string
+  role: string
+  responsible_systems: string[]
+  qualification_codes: string[]
+  registration_no: string
+  registration_level: string
+  status: string
+}
+
+interface Props {
+  projectId: string
+}
+
+const roleMap: Record<string, string> = {
+  leader: '组长',
+  member: '组员',
+  trainee: '被验证审核员',
+  observer: '观察员',
+  expert: '技术专家',
+}
+
+export default function TeamManagement({ projectId }: Props) {
+  const [loading, setLoading] = useState(false)
+  const [members, setMembers] = useState<TeamMember[]>([])
+  const [modalVisible, setModalVisible] = useState(false)
+  const [users, setUsers] = useState<any[]>([])
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    fetchMembers()
+    fetchUsers()
+  }, [projectId])
+
+  const fetchMembers = async () => {
+    setLoading(true)
+    try {
+      const response = await auditTeamApi.list(projectId)
+      setMembers(response.data || [])
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '获取审核组成员失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response: any = await userApi.getUsers({ limit: 100 })
+      setUsers(response.data?.items || [])
+    } catch (error) {
+      console.error('获取用户列表失败:', error)
+    }
+  }
+
+  const handleAdd = async (values: any) => {
+    try {
+      await auditTeamApi.add(projectId, values)
+      message.success('添加成员成功')
+      setModalVisible(false)
+      form.resetFields()
+      fetchMembers()
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '添加成员失败')
+    }
+  }
+
+  const handleRemove = (id: string) => {
+    Modal.confirm({
+      title: '确认移除',
+      content: '确定要移除这个审核组成员吗？',
+      okText: '确定',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await auditTeamApi.remove(id)
+          message.success('移除成功')
+          fetchMembers()
+        } catch (error: any) {
+          message.error(error.response?.data?.message || '移除失败')
+        }
+      },
+    })
+  }
+
+  const columns: ColumnsType<TeamMember> = [
+    {
+      title: '成员ID',
+      dataIndex: 'member_id',
+      key: 'member_id',
+      width: 200,
+      ellipsis: true,
+    },
+    {
+      title: '角色',
+      dataIndex: 'role',
+      key: 'role',
+      width: 120,
+      render: (role: string) => roleMap[role] || role,
+    },
+    {
+      title: '负责体系',
+      dataIndex: 'responsible_systems',
+      key: 'responsible_systems',
+      width: 150,
+      render: (systems: string[]) => (
+        <Space size={4}>
+          {systems?.map((sys) => (
+            <Tag key={sys}>{sys}</Tag>
+          ))}
+        </Space>
+      ),
+    },
+    {
+      title: '专业代码',
+      dataIndex: 'qualification_codes',
+      key: 'qualification_codes',
+      width: 150,
+      render: (codes: string[]) => codes?.join(', ') || '-',
+    },
+    {
+      title: '注册编号',
+      dataIndex: 'registration_no',
+      key: 'registration_no',
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: '注册级别',
+      dataIndex: 'registration_level',
+      key: 'registration_level',
+      width: 120,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button
+          type="link"
+          danger
+          size="small"
+          icon={<DeleteOutlined />}
+          onClick={() => handleRemove(record.id)}
+        >
+          移除
+        </Button>
+      ),
+    },
+  ]
+
+  return (
+    <>
+      <div style={{ marginBottom: 16 }}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
+          添加成员
+        </Button>
+      </div>
+
+      <Table
+        columns={columns}
+        dataSource={members}
+        rowKey="id"
+        loading={loading}
+        pagination={false}
+        scroll={{ x: 1000 }}
+      />
+
+      <Modal
+        title="添加审核组成员"
+        open={modalVisible}
+        onCancel={() => {
+          setModalVisible(false)
+          form.resetFields()
+        }}
+        onOk={() => form.submit()}
+      >
+        <Form form={form} layout="vertical" onFinish={handleAdd}>
+          <Form.Item
+            label="选择成员"
+            name="member_id"
+            rules={[{ required: true, message: '请选择成员' }]}
+          >
+            <Select
+              placeholder="请选择审核员"
+              showSearch
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={users.map((u) => ({
+                label: `${u.full_name || u.username} (${u.email})`,
+                value: u.id,
+              }))}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="角色"
+            name="role"
+            rules={[{ required: true, message: '请选择角色' }]}
+            initialValue="member"
+          >
+            <Select>
+              <Select.Option value="leader">组长</Select.Option>
+              <Select.Option value="member">组员</Select.Option>
+              <Select.Option value="trainee">被验证审核员</Select.Option>
+              <Select.Option value="observer">观察员</Select.Option>
+              <Select.Option value="expert">技术专家</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="负责体系"
+            name="responsible_systems"
+            rules={[{ required: true, message: '请选择负责体系' }]}
+          >
+            <Select mode="multiple" placeholder="请选择负责的认证体系">
+              <Select.Option value="Q">Q - 质量</Select.Option>
+              <Select.Option value="E">E - 环境</Select.Option>
+              <Select.Option value="S">S - 职业健康安全</Select.Option>
+              <Select.Option value="En">En - 能源</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item label="专业代码" name="qualification_codes">
+            <Select mode="tags" placeholder="请输入专业代码，如 10.01">
+              <Select.Option value="10.01">10.01</Select.Option>
+              <Select.Option value="12.01">12.01</Select.Option>
+              <Select.Option value="15.01">15.01</Select.Option>
+            </Select>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  )
+}

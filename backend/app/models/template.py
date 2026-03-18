@@ -29,6 +29,16 @@ class InspectionTemplate(Base):
     category = Column(String(100), comment="模板类别，如：食品安全、安全生产")
     industry_id = Column(UUID(as_uuid=True), ForeignKey("industries.id", ondelete="SET NULL"), nullable=True)
     version = Column(String(20), default="1.0", comment="版本号")
+    
+    # 认证审核专用字段（新增）
+    certification_system = Column(
+        String(20),
+        comment="适用认证体系：Q(质量)/E(环境)/S(职业健康安全)/En(能源)/QES/QESEn"
+    )
+    applicable_area_type = Column(
+        String(100),
+        comment="适用区域类型：高层领导/车间/职能部门/通用"
+    )
     is_published = Column(Boolean, default=False, comment="是否已发布")
     is_public = Column(Boolean, default=False, comment="是否公共模板（公共模板所有专家可见，个人模板仅创建者可见）")
     is_quantified = Column(Boolean, default=False, comment="是否量化")
@@ -72,9 +82,24 @@ class TemplateItem(Base):
     legal_basis = Column(Text, comment="法律依据")
     standard_ref = Column(String(200), comment="标准依据")
     
+    # 认证审核专用字段（新增）
+    clause_no = Column(
+        String(50),
+        comment="标准条款号，如 '8.5.1' 或 '6.1.2'"
+    )
+    applicable_systems = Column(
+        JSON,
+        default=list,
+        comment="适用体系列表，如 ['Q', 'E', 'S']"
+    )
+    evidence_hint = Column(
+        Text,
+        comment="审核员填写提示（应查什么证据）"
+    )
+    
     # 检查结论配置
-    # check_type 支持: score(打分)/radio(单选)/numeric(数值)/text(文本)/multi_check(多选)
-    check_type = Column(String(20), default="radio", comment="检查类型：score/radio/numeric/text/multi_check")
+    # check_type 支持: score(打分)/radio(单选)/numeric(数值)/text(文本)/multi_check(多选)/audit_3level(审核三级评估)
+    check_type = Column(String(20), default="radio", comment="检查类型：score/radio/numeric/text/multi_check/audit_3level")
     # 旧字段兼容
     result_type = Column(String(20), default="pass_fail", comment="结论类型：pass_fail/numeric/text（已废弃，使用check_type）")
     result_options = Column(JSON, comment="结论选项，用于 radio/multi_check 类型的选项配置")
