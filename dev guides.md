@@ -242,7 +242,7 @@ efis/
 ```python
 # backend/app/config.py
 DATABASE_CONFIG = {
-    "host": "62.234.0.182",
+    "host": "117.72.77.52",
     "port": 5432,
     "database": "db_expert_opencode",
     "user": "db_admin",
@@ -250,7 +250,7 @@ DATABASE_CONFIG = {
 }
 
 # 异步连接字符串
-DATABASE_URL = "postgresql+asyncpg://db_admin:1234567890%40sdtj@62.234.0.182:5432/db_expert_opencode"
+DATABASE_URL = "postgresql+asyncpg://db_admin:1234567890%40sdtj@117.72.77.52:5432/db_expert_opencode"
 ```
 
 ### 4.2 核心数据表设计
@@ -495,7 +495,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # 数据库
-    PG_HOST: str = "62.234.0.182"
+    PG_HOST: str = "117.72.77.52"
     PG_PORT: int = 5432
     PG_DB: str = "db_expert_opencode"
     PG_USER: str = "db_admin"
@@ -893,7 +893,7 @@ Token 吊销：
 ```bash
 # PostgreSQL 定时备份脚本（建议配置 cron）
 # 每天凌晨2点全量备份，保留30天
-0 2 * * * pg_dump -h 62.234.0.182 -U db_admin db_expert_opencode | gzip > /backup/efis_$(date +%Y%m%d).sql.gz
+0 2 * * * pg_dump -h 117.72.77.52 -U db_admin db_expert_opencode | gzip > /backup/efis_$(date +%Y%m%d).sql.gz
 
 # 上传文件目录同步备份
 # 建议每天同步到另一台服务器或对象存储
@@ -1124,7 +1124,7 @@ GET    /api/llm/logs/                   # LLM调用记录（分页）
 ### 13.1 数据库连接
 
 ```
-Host:     62.234.0.182
+Host:     117.72.77.52
 Port:     5432
 Database: db_expert_opencode
 User:     db_admin
@@ -1158,7 +1158,7 @@ z-ai/glm4.7
 
 ```env
 # 数据库
-PG_HOST=62.234.0.182
+PG_HOST=117.72.77.52
 PG_PORT=5432
 PG_DB=db_expert_opencode
 PG_USER=db_admin

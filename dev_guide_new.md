@@ -64,7 +64,7 @@
 
 ```
 数据库:
-  PG_HOST: 62.234.0.182
+  PG_HOST: 117.72.77.52
   PG_PORT: 5432
   PG_DB: expert_new_mvp1
   PG_USER: expert_new_mvp1
@@ -1098,7 +1098,7 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
     
     # 数据库
-    PG_HOST = os.getenv('PG_HOST', '62.234.0.182')
+    PG_HOST = os.getenv('PG_HOST', '117.72.77.52')
     PG_PORT = int(os.getenv('PG_PORT', 5432))
     PG_DB = os.getenv('PG_DB', 'expert_new_mvp1')
     PG_USER = os.getenv('PG_USER', 'expert_new_mvp1')
@@ -1260,7 +1260,7 @@ SECRET_KEY=your-secret-key-here
 JWT_SECRET_KEY=your-jwt-secret-here
 
 # PostgreSQL
-PG_HOST=62.234.0.182
+PG_HOST=117.72.77.52
 PG_PORT=5432
 PG_DB=expert_new_mvp1
 PG_USER=expert_new_mvp1

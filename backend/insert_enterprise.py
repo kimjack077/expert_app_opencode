@@ -4,7 +4,7 @@ from datetime import datetime
 
 async def insert_enterprise():
     conn = await asyncpg.connect(
-        host='62.234.0.182',
+        host='117.72.77.52',
         port=5432,
         user='db_admin',
         password='1234567890@sdtj',

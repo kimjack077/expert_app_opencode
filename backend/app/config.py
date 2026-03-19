@@ -3,10 +3,10 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    PG_HOST: str = "62.234.0.182"
+    PG_HOST: str = "117.72.77.52"
     PG_PORT: int = 5432
     PG_DB: str = "db_expert_opencode"
-    PG_USER: str = "db_admin"
+    PG_USER: str = "ad_admin"
     PG_PASSWORD: str = "1234567890@sdtj"
 
     @property
