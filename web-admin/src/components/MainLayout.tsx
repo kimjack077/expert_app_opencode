@@ -16,6 +16,7 @@ import {
   TeamOutlined,
   AppstoreOutlined,
   AuditOutlined,
+  PieChartOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
@@ -36,6 +37,7 @@ export default function MainLayout() {
     { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘', adminOnly: false },
     { key: '/enterprises', icon: <BankOutlined />, label: '企业管理', adminOnly: false },
     { key: '/audit-projects', icon: <AuditOutlined />, label: '审核项目', adminOnly: false },
+    { key: '/audit-statistics', icon: <PieChartOutlined />, label: '审核统计', adminOnly: false },
     { key: '/templates', icon: <FileTextOutlined />, label: '检查模板', adminOnly: false },
     { key: '/records', icon: <FileDoneOutlined />, label: '检查记录', adminOnly: false },
     { key: '/tasks', icon: <UnorderedListOutlined />, label: '检查任务', adminOnly: false },

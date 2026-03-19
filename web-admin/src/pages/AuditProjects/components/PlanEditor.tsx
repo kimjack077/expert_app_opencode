@@ -175,7 +175,7 @@ export default function PlanEditor({ projectId }: Props) {
       render: (systems: string[]) => (
         <Space size={4}>
           {systems?.map((sys) => (
-            <Tag key={sys} size="small">{sys}</Tag>
+            <Tag key={sys}>{sys}</Tag>
           ))}
         </Space>
       ),
@@ -278,7 +278,7 @@ export default function PlanEditor({ projectId }: Props) {
                       <div>
                         <Space size={4}>
                           {item.certification_systems?.map((sys) => (
-                            <Tag key={sys} size="small">{sys}</Tag>
+                            <Tag key={sys}>{sys}</Tag>
                           ))}
                         </Space>
                       </div>

@@ -19,6 +19,8 @@ import Industries from '@/pages/Industries'
 import AuditProjects from '@/pages/AuditProjects'
 import CreateAuditProject from '@/pages/AuditProjects/Create'
 import AuditProjectDetail from '@/pages/AuditProjects/Detail'
+// 审核统计模块
+import AuditStatistics from '@/pages/AuditStatistics'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -56,6 +58,8 @@ function App() {
           <Route path="audit-projects" element={<AuditProjects />} />
           <Route path="audit-projects/create" element={<CreateAuditProject />} />
           <Route path="audit-projects/:id" element={<AuditProjectDetail />} />
+          {/* 审核统计模块 */}
+          <Route path="audit-statistics" element={<AuditStatistics />} />
         </Route>
       </Routes>
     </BrowserRouter>

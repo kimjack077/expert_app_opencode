@@ -12,6 +12,7 @@ from .industries import router as industries_router
 from .users import router as users_router
 from .agent import router as agent_router
 from .ai_enhanced import router as ai_enhanced_router
+from .statistics import router as statistics_router
 
 __all__ = [
     "auth_router",
@@ -28,4 +29,5 @@ __all__ = [
     "users_router",
     "agent_router",
     "ai_enhanced_router",
+    "statistics_router",
 ]

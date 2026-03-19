@@ -261,3 +261,40 @@ export const userApi = {
   updateUser: (id: string, data: any) => api.put(`/users/${id}`, data),
   deleteUser: (id: string) => api.delete(`/users/${id}`),
 }
+
+export const statisticsApi = {
+  // 项目概览统计
+  getOverview: () => api.get('/statistics/overview'),
+
+  // 项目分布统计
+  getProjectDistribution: (params?: { by?: 'status' | 'type' }) =>
+    api.get('/statistics/projects/distribution', { params }),
+
+  // 项目趋势统计
+  getProjectTrend: (params?: { months?: number }) =>
+    api.get('/statistics/projects/trend', { params }),
+
+  // 不符合项严重程度分布
+  getNCDistribution: (params?: { project_id?: string }) =>
+    api.get('/statistics/nonconformities/distribution', { params }),
+
+  // 不符合项按体系分布
+  getNCBySystem: (params?: { project_id?: string }) =>
+    api.get('/statistics/nonconformities/by-system', { params }),
+
+  // 不符合项按条款TOP N
+  getNCByClause: (params?: { project_id?: string; limit?: number }) =>
+    api.get('/statistics/nonconformities/by-clause', { params }),
+
+  // 不符合项趋势统计
+  getNCTrend: (params?: { months?: number }) =>
+    api.get('/statistics/nonconformities/trend', { params }),
+
+  // 审核员工作量统计
+  getAuditorWorkload: (params?: { project_id?: string }) =>
+    api.get('/statistics/auditors/workload', { params }),
+
+  // 审核员排名
+  getAuditorRanking: (params?: { metric?: 'projects' | 'areas' | 'ncs'; limit?: number }) =>
+    api.get('/statistics/auditors/ranking', { params }),
+}
