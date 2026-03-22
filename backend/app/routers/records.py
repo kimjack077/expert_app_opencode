@@ -829,14 +829,24 @@ async def create_or_update_record_item(
     ):
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # 查找是否已存在
-    result = await db.execute(
-        select(InspectionRecordItem).where(
-            InspectionRecordItem.record_id == record_id,
-            InspectionRecordItem.template_item_id == item_data.template_item_id,
+    # 查找是否已存在（优先按 id 查找，其次按 template_item_id 查找）
+    record_item = None
+    if item_data.id:
+        result = await db.execute(
+            select(InspectionRecordItem).where(
+                InspectionRecordItem.record_id == record_id,
+                InspectionRecordItem.id == item_data.id,
+            )
         )
-    )
-    record_item = result.scalar_one_or_none()
+        record_item = result.scalar_one_or_none()
+    elif item_data.template_item_id:
+        result = await db.execute(
+            select(InspectionRecordItem).where(
+                InspectionRecordItem.record_id == record_id,
+                InspectionRecordItem.template_item_id == item_data.template_item_id,
+            )
+        )
+        record_item = result.scalar_one_or_none()
 
     if record_item:
         # 更新现有记录

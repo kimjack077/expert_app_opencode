@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag } from 'antd'
 import { PlusOutlined, EyeOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { taskApi, templateApi, authApi } from '@/services/api'
+import { taskApi, templateApi, userApi } from '@/services/api'
 import dayjs from 'dayjs'
 
 const { TextArea } = Input
@@ -25,12 +25,9 @@ export default function Tasks() {
 
   const fetchUsers = async () => {
     try {
-      // 获取专家用户列表用于分配任务
-      const res: any = await authApi.getMe()
-      // 暂时使用当前用户，后续可以添加获取用户列表的API
-      setUsers([
-        { id: res.data?.id, username: res.data?.username, real_name: res.data?.real_name || res.data?.username }
-      ])
+      const res: any = await userApi.getUsers()
+      const userList = res.data || res || []
+      setUsers(Array.isArray(userList) ? userList : [])
     } catch (error) {
       console.error('Failed to fetch users:', error)
     }

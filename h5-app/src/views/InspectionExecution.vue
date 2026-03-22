@@ -366,7 +366,8 @@
 import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showSuccessToast, showConfirmDialog } from 'vant'
-import { getRecord, submitRecord, updateRecord, createOrUpdateRecordItem, getEnterpriseRiskProfile } from '../api/records'
+import { getRecord, submitRecord, updateRecord, createRecord, createOrUpdateRecordItem, getEnterpriseRiskProfile } from '../api/records'
+import { getTask } from '../api/tasks'
 import RiskAlertPopup from '../components/RiskAlertPopup.vue'
 import AgentFab from '../components/agent/AgentFab.vue'
 import AgentChatPanel from '../components/agent/AgentChatPanel.vue'
@@ -579,8 +580,12 @@ const submitButtonText = computed(() => {
   return '提交检查结果'
 })
 
+const actualRecordId = ref(null)
+
+const currentRecordId = computed(() => actualRecordId.value || record.value?.id || route.params.id)
+
 const agentContext = computed(() => ({
-  recordId: route.params.id,
+  recordId: currentRecordId.value,
   currentItemTitle: currentItemId.value ? flattenItems.value.find(i => i.id === currentItemId.value)?.title : '',
   currentItemId: currentItemId.value,
   enterpriseId: record.value?.enterprise_id
@@ -588,29 +593,71 @@ const agentContext = computed(() => ({
 
 const fetchRecord = async () => {
   try {
-    const recordId = route.params.id
-    const res = await getRecord(recordId)
-    if (res.code === 200) {
-      record.value = res.data
-      loadExistingResults()
-      await initQuickInputs()
-      if (res.data.overall_result) {
-        finalJudgment.result = res.data.overall_result
+    const id = route.params.id
+    let recordId = id
+
+    // First try to get as a record
+    try {
+      const res = await getRecord(id)
+      if (res.code === 200) {
+        actualRecordId.value = id
+        record.value = res.data
+        loadExistingResults()
+        await initQuickInputs()
+        if (res.data.overall_result) {
+          finalJudgment.result = res.data.overall_result
+        }
+        if (res.data.remarks) {
+          finalJudgment.remarks = res.data.remarks
+        }
+        initExpandedItems()
+
+        const shownRecordId = sessionStorage.getItem('riskAlertShownRecordId')
+        if (shownRecordId !== recordId && res.data.enterprise_id) {
+          await fetchAndShowRiskProfile(res.data.enterprise_id, recordId)
+        } else if (res.data.enterprise_id) {
+          fetchRiskProfileSilent(res.data.enterprise_id)
+        }
+        return
       }
-      if (res.data.remarks) {
-        finalJudgment.remarks = res.data.remarks
-      }
-      initExpandedItems()
-      
-      const shownRecordId = sessionStorage.getItem('riskAlertShownRecordId')
-      if (shownRecordId !== recordId && res.data.enterprise_id) {
-        await fetchAndShowRiskProfile(res.data.enterprise_id, recordId)
-      } else if (res.data.enterprise_id) {
-        fetchRiskProfileSilent(res.data.enterprise_id)
-      }
-    } else {
-      showToast(res.message || '获取记录失败')
+    } catch (e) {
+      // Not a record, try as a task
+      console.log('Not a record, trying as task...')
     }
+
+    // If record not found, try to get as a task and create a record
+    try {
+      const taskRes = await getTask(id)
+      if (taskRes.code === 200) {
+        const task = taskRes.data
+        // Create a new record from the task
+        const createRes = await createRecord({
+          template_id: task.template_id,
+          enterprise_name: task.target_name,
+          enterprise_address: task.target_address,
+          contact_person: task.target_contact,
+          contact_phone: task.target_phone,
+          remarks: task.remarks
+        })
+        if (createRes.code === 200) {
+          recordId = createRes.data.id
+          actualRecordId.value = recordId
+          // Now fetch the newly created record
+          const res = await getRecord(recordId)
+          if (res.code === 200) {
+            record.value = res.data
+            loadExistingResults()
+            await initQuickInputs()
+            initExpandedItems()
+            return
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to create record from task:', e)
+    }
+
+    showToast('获取记录失败')
   } catch (error) {
     console.error('获取记录失败:', error)
     showToast('获取记录失败')
@@ -939,7 +986,7 @@ const onQuickInput = async (item, field, value) => {
       data.problem_description = quickInputs.value[item.id].problem_description || ''
     }
 
-    await createOrUpdateRecordItem(route.params.id, data)
+    await createOrUpdateRecordItem(currentRecordId.value, data)
   } catch (error) {
     console.error('保存失败:', error)
     showToast('保存失败')
@@ -953,7 +1000,7 @@ const goToItem = (item) => {
   )
 
   const itemId = recordItem?.id || item.id
-  router.push(`/inspection/${route.params.id}/item/${itemId}`)
+  router.push(`/inspection/${currentRecordId.value}/item/${itemId}`)
 }
 
 const showSubmitConfirm = async () => {
@@ -990,7 +1037,7 @@ const showSubmitConfirm = async () => {
 
     await completeInspection()
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('提交确认失败:', error)
     }
   }
@@ -1002,14 +1049,14 @@ const completeInspection = async () => {
   submitting.value = true
   try {
     // 先保存最终判定
-    await updateRecord(route.params.id, {
+    await updateRecord(currentRecordId.value, {
       overall_result: finalJudgment.result,
       remarks: finalJudgment.remarks,
       total_score: totalScore.value
     })
 
     // 再提交记录
-    const res = await submitRecord(route.params.id)
+    const res = await submitRecord(currentRecordId.value)
     if (res.code === 200) {
       showSuccessToast('检查已完成')
       setTimeout(() => {
@@ -1039,10 +1086,11 @@ const generateFinalJudgment = async () => {
   aiJudgmentResultType.value = ''
   
   try {
-    const recordId = route.params.id
+    const recordId = currentRecordId.value
     const token = localStorage.getItem('token')
     
-    const response = await fetch(`/api/records/${recordId}/final-judgment-stream`, {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/final-judgment-stream`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'text/event-stream',

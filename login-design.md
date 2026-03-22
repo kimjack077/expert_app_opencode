@@ -1,0 +1,201 @@
+> <!DOCTYPE html>
+>
+> <html class="light" lang="en"><head>
+> <meta charset="utf-8"/>
+> <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+> <title>Enterprise Field Inspection System | Ledger Pro Login</title>
+> <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+> <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+> <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+> <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+> <script id="tailwind-config">
+>         tailwind.config = {
+>             darkMode: "class",
+>             theme: {
+>                 extend: {
+>                     colors: {
+>                         "surface-tint": "#006689",
+>                         "secondary-fixed-dim": "#c3c0ff",
+>                         "tertiary": "#9d4300",
+>                         "error-container": "#ffdad6",
+>                         "on-secondary-fixed": "#0f0069",
+>                         "inverse-primary": "#78d1ff",
+>                         "tertiary-fixed-dim": "#ffb690",
+>                         "on-error-container": "#93000a",
+>                         "surface-container-low": "#eff4ff",
+>                         "primary": "#006689",
+>                         "inverse-on-surface": "#eaf1ff",
+>                         "on-tertiary-container": "#5c2400",
+>                         "tertiary-container": "#fd761a",
+>                         "on-surface": "#0b1c30",
+>                         "on-secondary-fixed-variant": "#3323cc",
+>                         "surface": "#f8f9ff",
+>                         "secondary-container": "#645efb",
+>                         "background": "#f8f9ff",
+>                         "on-tertiary-fixed-variant": "#783200",
+>                         "primary-fixed": "#c3e8ff",
+>                         "outline": "#6e7980",
+>                         "surface-container": "#e5eeff",
+>                         "on-surface-variant": "#3e484f",
+>                         "error": "#ba1a1a",
+>                         "surface-variant": "#d3e4fe",
+>                         "on-tertiary": "#ffffff",
+>                         "on-primary-container": "#00394f",
+>                         "on-primary": "#ffffff",
+>                         "surface-container-highest": "#d3e4fe",
+>                         "surface-container-high": "#dce9ff",
+>                         "on-secondary": "#ffffff",
+>                         "on-tertiary-fixed": "#341100",
+>                         "surface-dim": "#cbdbf5",
+>                         "surface-container-lowest": "#ffffff",
+>                         "on-primary-fixed": "#001e2c",
+>                         "primary-container": "#1ca9df",
+>                         "tertiary-fixed": "#ffdbca",
+>                         "on-background": "#0b1c30",
+>                         "outline-variant": "#bdc8d0",
+>                         "on-secondary-container": "#fffbff",
+>                         "on-primary-fixed-variant": "#004c68",
+>                         "primary-fixed-dim": "#78d1ff",
+>                         "inverse-surface": "#213145",
+>                         "secondary-fixed": "#e2dfff",
+>                         "on-error": "#ffffff",
+>                         "secondary": "#4b41e1",
+>                         "surface-bright": "#f8f9ff"
+>                     },
+>                     fontFamily: {
+>                         "headline": ["Inter"],
+>                         "body": ["Inter"],
+>                         "label": ["Inter"]
+>                     },
+>                     borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+>                 },
+>             },
+>         }
+>     </script>
+> <style>
+>         body { font-family: 'Inter', sans-serif; }
+>         .material-symbols-outlined {
+>             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+>         }
+>         .bg-gradient-primary {
+>             background: linear-gradient(135deg, #006689 0%, #1ca9df 100%);
+>         }
+>         .glass-panel {
+>             background: rgba(255, 255, 255, 0.85);
+>             backdrop-filter: blur(24px);
+>         }
+>         input:focus {
+>             outline: none;
+>             border-bottom-color: #006689 !important;
+>             box-shadow: 0 4px 0 -2px rgba(0, 102, 137, 0.1);
+>         }
+>     </style>
+> </head>
+> <body class="bg-surface text-on-surface overflow-hidden">
+> <div class="flex h-screen w-full">
+> <!-- Left Side: Editorial Visual Shell -->
+> <div class="hidden lg:flex lg:w-7/12 relative overflow-hidden bg-on-surface">
+> <div class="absolute inset-0 z-0 opacity-60">
+> <img class="w-full h-full object-cover grayscale contrast-125" data-alt="Professional architectural structure with high-tech structural overlay" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB59WFcam1qUV8ltcrodLFp2Cv5E8Gjx0KLLu7ncRG3TdalQ6mIY1NTqWJpeNcQo_o9fh-BmO0VwQhtaFgw5gnFfXGJMz1xhd3Dge1qSob40rlCMxOxTJZK7vwJAT3LC9DJMrPCdiyaVyluIK2N-9N8bh6VsOIJ6IYGMfe8wQkzDbxoWZbI39-lALbIKh1LT_tpJGPD7hDrzaGeoTofampDq5swKsZQxQP0EvHElP8PiotIg5lbUqjeBokUM2ykBhcFLs85MqFJFFY"/>
+> </div>
+> <div class="absolute inset-0 z-10 bg-gradient-to-br from-on-surface/80 via-on-surface/40 to-transparent"></div>
+> <div class="relative z-20 flex flex-col justify-between p-16 w-full">
+> <div>
+> <div class="flex items-center gap-3 mb-12">
+> <div class="w-10 h-10 bg-primary-container rounded flex items-center justify-center">
+> <span class="material-symbols-outlined text-on-primary-container" style="font-variation-settings: 'FILL' 1;">architecture</span>
+> </div>
+> <span class="text-xl font-black tracking-tighter text-white">Ledger Pro</span>
+> </div>
+> <div class="max-w-2xl">
+> <h1 class="text-[3.5rem] leading-[1.1] font-extrabold tracking-tight text-white mb-6">
+>                             Enterprise Field <br/>
+> <span class="text-primary-container">Inspection System</span>
+> </h1>
+> <p class="text-lg text-surface-variant font-medium max-w-lg leading-relaxed">
+>                             A sophisticated, editorial-grade interface for expert inspectors. Precision-engineered for compliance and field intelligence.
+>                         </p>
+> </div>
+> </div>
+> <div class="flex gap-12">
+> <div>
+> <div class="text-white text-3xl font-bold tracking-tighter">0.02mm</div>
+> <div class="text-[11px] uppercase tracking-widest font-semibold text-outline-variant mt-1">Precision Threshold</div>
+> </div>
+> <div>
+> <div class="text-white text-3xl font-bold tracking-tighter">v1.0.0</div>
+> <div class="text-[11px] uppercase tracking-widest font-semibold text-outline-variant mt-1">Core Architecture</div>
+> </div>
+> </div>
+> </div>
+> </div>
+> <!-- Right Side: The Ledger Login Form -->
+> <div class="w-full lg:w-5/12 bg-surface-container-low flex flex-col justify-center items-center px-8 lg:px-24">
+> <div class="w-full max-w-md">
+> <div class="mb-12">
+> <h2 class="text-headline-sm font-bold text-on-surface mb-2">Expert Inspection System</h2>
+> <p class="text-on-surface-variant text-sm font-medium">Authentication required for ledger access.</p>
+> </div>
+> <form class="space-y-8">
+> <!-- Toggle Switch -->
+> <div class="flex items-center p-1 bg-surface-container-high rounded-lg w-fit">
+> <button class="px-6 py-2 text-[11px] uppercase tracking-widest font-bold bg-surface-container-lowest text-primary rounded shadow-sm" type="button">
+>                             Inspector
+>                         </button>
+> <button class="px-6 py-2 text-[11px] uppercase tracking-widest font-bold text-on-surface-variant hover:text-on-surface transition-colors" type="button">
+>                             Administrator
+>                         </button>
+> </div>
+> <!-- Input Fields -->
+> <div class="space-y-6">
+> <div class="relative group">
+> <label class="text-[11px] uppercase tracking-widest font-bold text-outline block mb-1" for="username">User ID</label>
+> <input class="w-full bg-transparent border-0 border-b-2 border-outline-variant py-3 text-on-surface placeholder:text-outline-variant/50 focus:ring-0 transition-all" id="username" name="username" placeholder="EX-4829" type="text"/>
+> </div>
+> <div class="relative group">
+> <label class="text-[11px] uppercase tracking-widest font-bold text-outline block mb-1" for="password">Password</label>
+> <input class="w-full bg-transparent border-0 border-b-2 border-outline-variant py-3 text-on-surface placeholder:text-outline-variant/50 focus:ring-0 transition-all" id="password" name="password" placeholder="••••••••" type="password"/>
+> </div>
+> </div>
+> <div class="flex items-center justify-between">
+> <label class="flex items-center gap-2 cursor-pointer group">
+> <input class="w-4 h-4 rounded border-outline-variant text-primary focus:ring-primary/20" type="checkbox"/>
+> <span class="text-sm font-medium text-on-surface-variant group-hover:text-on-surface transition-colors">Remember Me</span>
+> </label>
+> <a class="text-sm font-semibold text-primary hover:text-primary-container transition-colors" href="#">Forgot Password?</a>
+> </div>
+> <button class="w-full bg-gradient-primary text-on-primary py-4 rounded-xl font-bold tracking-tight shadow-xl shadow-primary/20 hover:scale-[1.01] active:scale-[0.99] transition-all" type="submit">
+>                         Access Inspection Ledger
+>                     </button>
+> </form>
+> <!-- Demo Account Section -->
+> <div class="mt-16 pt-8 border-t border-outline-variant/20">
+> <p class="text-[11px] uppercase tracking-widest font-bold text-outline mb-4 text-center">Quick Access Profiles</p>
+> <div class="grid grid-cols-2 gap-4">
+> <button class="flex items-center gap-3 p-3 rounded-xl bg-surface-container-lowest border border-outline-variant/10 hover:border-primary/30 transition-all text-left">
+> <div class="w-8 h-8 rounded-full bg-secondary-fixed-dim flex items-center justify-center">
+> <span class="material-symbols-outlined text-on-secondary-fixed text-sm" style="font-variation-settings: 'FILL' 1;">engineering</span>
+> </div>
+> <div>
+> <div class="text-xs font-bold text-on-surface">Field Lead</div>
+> <div class="text-[10px] text-on-surface-variant">Demo User</div>
+> </div>
+> </button>
+> <button class="flex items-center gap-3 p-3 rounded-xl bg-surface-container-lowest border border-outline-variant/10 hover:border-primary/30 transition-all text-left">
+> <div class="w-8 h-8 rounded-full bg-tertiary-fixed-dim flex items-center justify-center">
+> <span class="material-symbols-outlined text-on-tertiary-fixed text-sm" style="font-variation-settings: 'FILL' 1;">security</span>
+> </div>
+> <div>
+> <div class="text-xs font-bold text-on-surface">Senior Auditor</div>
+> <div class="text-[10px] text-on-surface-variant">Demo Admin</div>
+> </div>
+> </button>
+> </div>
+> </div>
+> </div>
+> <!-- Global Footer for Login -->
+> <footer class="absolute bottom-8 flex gap-8 text-[11px] uppercase tracking-widest font-semibold text-outline">
+> </footer>
+> </div>
+> </div>
+> </body></html>

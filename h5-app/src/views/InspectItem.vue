@@ -834,7 +834,8 @@ const generateAI = async () => {
     const itemId = route.params.itemId
     const token = localStorage.getItem('token')
     
-    const response = await fetch(`/api/records/${recordId}/items/${itemId}/ai-stream`, {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/items/${itemId}/ai-stream`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'text/event-stream',
@@ -926,6 +927,7 @@ const saveItem = async () => {
     }
 
     const saveData = {
+      id: itemData.value.id,
       template_item_id: itemData.value.template_item_id,
       ...formData.value,
     }

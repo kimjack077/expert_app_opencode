@@ -179,7 +179,7 @@ const clearCache = async () => {
     localStorage.removeItem('cached_templates')
     showToast({ type: 'success', message: '缓存已清除' })
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('清除缓存失败:', error)
     }
   }

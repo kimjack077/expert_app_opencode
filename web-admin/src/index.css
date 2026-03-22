@@ -111,6 +111,34 @@ body {
   border-radius: 2px;
 }
 
+.login-input:focus,
+.login-input-focused {
+  border-bottom-color: #006689 !important;
+  box-shadow: none !important;
+}
+
+.login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0,102,137,0.35) !important;
+}
+
+.quick-login-btn:hover {
+  background: rgba(0,102,137,0.04) !important;
+  border-color: rgba(0,102,137,0.2) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,102,137,0.1);
+}
+
+@media (max-width: 1024px) {
+  .login-left-panel {
+    display: none !important;
+  }
+  
+  .login-right-panel {
+    flex: '0 0 100%' !important;
+  }
+}
+
 .layout-container {
   min-height: 100vh;
 }

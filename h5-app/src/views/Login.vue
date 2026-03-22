@@ -148,10 +148,14 @@ const onSubmit = async () => {
     console.log('响应消息:', res.message)
     
     const token = res.data?.access_token
+    const refreshToken = res.data?.refresh_token
     console.log('获取到的 token:', token ? token.substring(0, 50) + '...' : 'null')
     
     if (token) {
       localStorage.setItem('token', token)
+      if (refreshToken) {
+        localStorage.setItem('refresh_token', refreshToken)
+      }
       if (rememberMe.value) {
         localStorage.setItem('rememberedUsername', form.username)
       }

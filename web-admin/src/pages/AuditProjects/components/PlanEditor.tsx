@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Card, Button, Space, Modal, Form, Input, DatePicker, TimePicker, Select, message, Table, Tag } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, CalendarOutlined } from '@ant-design/icons'
 import { auditPlanApi, auditTeamApi } from '@/services/auditProjectApi'
+import { userApi } from '@/services/api'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 
@@ -44,12 +45,14 @@ export default function PlanEditor({ projectId }: Props) {
   const [modalVisible, setModalVisible] = useState(false)
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null)
   const [teamMembers, setTeamMembers] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table')
   const [form] = Form.useForm()
 
   useEffect(() => {
     fetchPlanItems()
     fetchTeamMembers()
+    fetchUsers()
   }, [projectId])
 
   const fetchPlanItems = async () => {
@@ -71,6 +74,20 @@ export default function PlanEditor({ projectId }: Props) {
     } catch (error) {
       console.error('获取审核组成员失败:', error)
     }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response: any = await userApi.getUsers({ limit: 100 })
+      setUsers(response.data || [])
+    } catch (error) {
+      console.error('获取用户列表失败:', error)
+    }
+  }
+
+  const getMemberName = (memberId: string) => {
+    const user = users.find((u) => u.id === memberId)
+    return user ? `${user.full_name || user.username}` : memberId
   }
 
   const handleAdd = () => {
@@ -116,6 +133,7 @@ export default function PlanEditor({ projectId }: Props) {
         plan_date: values.plan_date.format('YYYY-MM-DD'),
         time_start: values.time_start.format('HH:mm'),
         time_end: values.time_end.format('HH:mm'),
+        project_id: projectId,
       }
 
       if (editingItem) {
@@ -370,7 +388,7 @@ export default function PlanEditor({ projectId }: Props) {
             <Select mode="multiple" placeholder="请选择审核员">
               {teamMembers.map((member) => (
                 <Select.Option key={member.id} value={member.member_id}>
-                  {member.member_id}
+                  {getMemberName(member.member_id)}
                 </Select.Option>
               ))}
             </Select>

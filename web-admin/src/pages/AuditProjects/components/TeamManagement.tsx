@@ -55,7 +55,7 @@ export default function TeamManagement({ projectId }: Props) {
   const fetchUsers = async () => {
     try {
       const response: any = await userApi.getUsers({ limit: 100 })
-      setUsers(response.data?.items || [])
+      setUsers(response.data || [])
     } catch (error) {
       console.error('获取用户列表失败:', error)
     }
@@ -63,7 +63,7 @@ export default function TeamManagement({ projectId }: Props) {
 
   const handleAdd = async (values: any) => {
     try {
-      await auditTeamApi.add(projectId, values)
+      await auditTeamApi.add(projectId, { ...values, project_id: projectId })
       message.success('添加成员成功')
       setModalVisible(false)
       form.resetFields()
@@ -92,13 +92,19 @@ export default function TeamManagement({ projectId }: Props) {
     })
   }
 
+  const getMemberName = (memberId: string) => {
+    const user = users.find((u) => u.id === memberId)
+    return user ? `${user.full_name || user.username}` : memberId
+  }
+
   const columns: ColumnsType<TeamMember> = [
     {
-      title: '成员ID',
+      title: '成员姓名',
       dataIndex: 'member_id',
       key: 'member_id',
       width: 200,
       ellipsis: true,
+      render: (memberId: string) => getMemberName(memberId),
     },
     {
       title: '角色',

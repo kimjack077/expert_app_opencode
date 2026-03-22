@@ -211,12 +211,12 @@ const pendingRate = computed(() => {
 const fetchData = async () => {
   try {
     const [tasksRes, recordsRes] = await Promise.all([
-      getTasks({ page: 1, page_size: 100 }),
-      getRecords({ page: 1, page_size: 100 })
+      getTasks({ page: 1, limit: 100 }),
+      getRecords({ page: 1, limit: 100 })
     ])
     
-    const tasks = tasksRes.items || tasksRes.data?.items || []
-    const records = recordsRes.items || recordsRes.data?.items || []
+    const tasks = tasksRes?.data?.items || tasksRes?.items || []
+    const records = recordsRes?.data?.items || recordsRes?.items || []
     
     stats.value = {
       totalTasks: tasks.length,

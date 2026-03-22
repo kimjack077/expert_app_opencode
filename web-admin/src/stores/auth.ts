@@ -32,7 +32,7 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (username: string, password: string) => {
         const res: any = await authApi.login(username, password)
-        const { access_token, refresh_token, user } = res.data
+        const { access_token, refresh_token, user } = res.data || res
         set({
           token: access_token,
           refreshToken: refresh_token,
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthState>()(
 
       fetchUser: async () => {
         const res: any = await authApi.getMe()
-        set({ user: res.data })
+        set({ user: res.data || res })
       },
     }),
     {

@@ -325,8 +325,9 @@ async def update_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     task = await db.get(InspectionTask, record.task_id)
-    if task and str(task.assigned_to) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    if task:
+        if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized")
 
     update_data = record_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():

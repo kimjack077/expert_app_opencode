@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.user import User
 from app.services.agent_service import agent_service
+from app.utils.security import get_current_user
 
 
 router = APIRouter()
@@ -33,12 +35,17 @@ class ChatRequest(BaseModel):
 async def chat(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     async def event_generator():
         try:
             context = request.context.model_dump() if request.context else {}
-            conversation = [msg.model_dump() for msg in request.conversation] if request.conversation else []
-            
+            conversation = (
+                [msg.model_dump() for msg in request.conversation]
+                if request.conversation
+                else []
+            )
+
             async for event in agent_service.chat_stream(
                 message=request.message,
                 context=context,
@@ -46,7 +53,7 @@ async def chat(
                 db=db,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                
+
         except Exception as e:
             error_event = {"type": "error", "content": str(e)}
             yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
@@ -58,5 +65,5 @@ async def chat(
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )

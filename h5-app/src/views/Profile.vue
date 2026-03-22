@@ -263,7 +263,7 @@ const logout = async () => {
     showToast({ type: 'success', message: '已退出登录' })
     router.push('/login')
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('退出失败:', error)
     }
   }

@@ -252,7 +252,7 @@ const startTask = async () => {
       showToast({ type: 'fail', message: res.message || '操作失败' })
     }
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('开始任务失败:', error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.message || '开始任务失败'
       showToast({ type: 'fail', message: errorMsg })
@@ -275,7 +275,7 @@ const completeTask = async () => {
       showToast({ type: 'fail', message: res.message || '操作失败' })
     }
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('完成任务失败:', error)
       const errorMsg = error.response?.data?.detail || error.response?.data?.message || '完成任务失败'
       showToast({ type: 'fail', message: errorMsg })

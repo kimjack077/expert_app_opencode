@@ -54,7 +54,8 @@ class InspectionRecordDetail(InspectionRecordResponse):
 
 
 class InspectionRecordItemBase(BaseModel):
-    template_item_id: UUID = Field(..., description="模板检查项 ID")
+    id: Optional[UUID] = Field(None, description="记录项 ID（用于更新已有记录）")
+    template_item_id: Optional[UUID] = Field(None, description="模板检查项 ID")
     title: Optional[str] = Field(None, description="检查项标题")
     description: Optional[str] = Field(None, description="检查项描述")
     check_method: Optional[str] = Field(None, description="检查方法")

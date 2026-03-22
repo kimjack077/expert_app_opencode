@@ -278,7 +278,8 @@ const downloadPdf = async () => {
   
   try {
     showToast('正在生成PDF...')
-    const response = await fetch(`/api/records/${recordId}/report/pdf`, {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/report/pdf`, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },

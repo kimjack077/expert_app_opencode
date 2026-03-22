@@ -309,7 +309,7 @@ const completeInspection = async () => {
     showSuccessToast('检查已完成')
     router.push('/records')
   } catch (error) {
-    if (error !== 'cancel') {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('提交失败:', error)
       showToast('提交失败')
     }
@@ -337,7 +337,7 @@ const fetchRecord = async () => {
   loading.value = true
   try {
     const res = await request.get(`/records/${route.params.id}`)
-    record.value = res.data.data
+    record.value = res.data || res
 
     // 初始化展开项
     if (record.value?.template?.items) {
@@ -357,7 +357,7 @@ const fetchRecord = async () => {
 const loadItemResults = async () => {
   try {
     const res = await request.get(`/records/${route.params.id}/items`)
-    const items = res.data.data || []
+    const items = res.data?.items || res.data || []
 
     items.forEach(item => {
       // 使用 item.is_category !== true 确保只处理真正的检查项

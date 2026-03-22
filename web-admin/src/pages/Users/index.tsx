@@ -96,9 +96,11 @@ const Users: React.FC = () => {
             key: 'role',
             render: (role: string) => {
                 const roles: Record<string, string> = {
+                    super_admin: '超级管理员',
                     admin: '管理员',
                     manager: '主管',
                     expert: '专家',
+                    auditor: '审核员',
                 };
                 return roles[role] || role;
             },
@@ -189,9 +191,11 @@ const Users: React.FC = () => {
                             dropdownStyle={{ zIndex: 9999 }}
                             listHeight={200}
                         >
+                            <Option value="super_admin">超级管理员 (Super Admin)</Option>
                             <Option value="admin">管理员 (Admin)</Option>
                             <Option value="manager">主管 (Manager)</Option>
                             <Option value="expert">专家 (Expert)</Option>
+                            <Option value="auditor">审核员 (Auditor)</Option>
                         </Select>
                     </Form.Item>
                     <Form.Item name="is_active" label="状态" valuePropName="checked">
