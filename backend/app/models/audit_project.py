@@ -282,6 +282,13 @@ class AuditPlanItem(Base):
         comment="关联的检查模板 ID（可后期绑定）"
     )
     
+    # 关联检查任务（自动创建）
+    inspection_task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("inspection_tasks.id", ondelete="SET NULL"),
+        comment="关联的检查任务 ID（创建计划项时自动生成）"
+    )
+    
     # 联合审核标识
     is_joint = Column(Boolean, default=False, comment="是否为联合审核（如AB共同审核S）")
     joint_group_ids = Column(

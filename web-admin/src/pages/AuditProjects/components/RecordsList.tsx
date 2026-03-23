@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Table, Tag, Button, Space, message, Modal, Form, DatePicker, Select } from 'antd'
-import { EyeOutlined, PlusOutlined, EditOutlined } from '@ant-design/icons'
+import { Table, Tag, Button, Space, message, Empty } from 'antd'
+import { EyeOutlined, EditOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import dayjs from 'dayjs'
-import { auditRecordApi, auditPlanApi } from '@/services/auditProjectApi'
-import { templateApi } from '@/services/api'
+import { auditRecordApi } from '@/services/auditProjectApi'
 
 interface Props {
   projectId: string
@@ -14,15 +12,9 @@ export default function RecordsList({ projectId }: Props) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [records, setRecords] = useState<any[]>([])
-  const [modalVisible, setModalVisible] = useState(false)
-  const [planItems, setPlanItems] = useState<any[]>([])
-  const [templates, setTemplates] = useState<any[]>([])
-  const [form] = Form.useForm()
 
   useEffect(() => {
     fetchRecords()
-    fetchPlanItems()
-    fetchTemplates()
   }, [projectId])
 
   const fetchRecords = async () => {
@@ -35,28 +27,6 @@ export default function RecordsList({ projectId }: Props) {
     } finally {
       setLoading(false)
     }
-  }
-
-  const fetchPlanItems = async () => {
-    try {
-      const response = await auditPlanApi.list(projectId)
-      setPlanItems(response.data || [])
-    } catch (error: any) {
-      console.error('获取审核计划失败:', error)
-    }
-  }
-
-  const fetchTemplates = async () => {
-    try {
-      const response = await templateApi.getTemplates({ limit: 100 })
-      setTemplates(response.data?.items || response.data || [])
-    } catch (error: any) {
-      console.error('获取模板失败:', error)
-    }
-  }
-
-  const handleCreateRecord = () => {
-    navigate(`/audit-projects/${projectId}/records/new`)
   }
 
   const handleEditRecord = (recordId: string) => {
@@ -117,14 +87,20 @@ export default function RecordsList({ projectId }: Props) {
     },
   ]
 
+  if (records.length === 0 && !loading) {
+    return (
+      <Empty
+        description="暂无审核记录"
+        style={{ padding: '40px 0' }}
+      >
+        <span style={{ color: '#999', fontSize: 13 }}>
+          审核记录由审核员在现场检查时自动生成，无需手动创建
+        </span>
+      </Empty>
+    )
+  }
+
   return (
-    <>
-      <div style={{ marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateRecord}>
-          创建审核记录
-        </Button>
-      </div>
-      <Table columns={columns} dataSource={records} rowKey="id" loading={loading} />
-    </>
+    <Table columns={columns} dataSource={records} rowKey="id" loading={loading} />
   )
 }

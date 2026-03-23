@@ -98,6 +98,8 @@ class AuditTeamMemberResponse(AuditTeamMemberBase):
     id: UUID
     project_id: UUID
     status: str
+    member_name: Optional[str] = Field(None, description="审核员姓名")
+    member_username: Optional[str] = Field(None, description="审核员用户名")
     created_at: datetime
     updated_at: datetime
 
@@ -153,6 +155,7 @@ class AuditPlanItemResponse(AuditPlanItemBase):
     """审核计划项响应"""
     id: UUID
     project_id: UUID
+    inspection_task_id: Optional[UUID] = None
     status: str
     created_at: datetime
     updated_at: datetime

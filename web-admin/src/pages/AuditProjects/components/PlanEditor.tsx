@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Card, Button, Space, Modal, Form, Input, DatePicker, TimePicker, Select, message, Table, Tag } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, CalendarOutlined } from '@ant-design/icons'
-import { auditPlanApi, auditTeamApi } from '@/services/auditProjectApi'
-import { userApi } from '@/services/api'
+import { auditPlanApi, auditTeamApi, auditProjectApi } from '@/services/auditProjectApi'
+import { templateApi } from '@/services/api'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 
@@ -21,8 +21,16 @@ interface PlanItem {
   assigned_member_ids: string[]
   certification_systems: string[]
   clauses: string[]
+  template_id: string
   activity_type: string
   status: string
+}
+
+interface ProjectDetail {
+  id: string
+  scheduled_start: string
+  scheduled_end: string
+  certification_systems: string[]
 }
 
 const activityTypeMap: Record<string, string> = {
@@ -45,15 +53,26 @@ export default function PlanEditor({ projectId }: Props) {
   const [modalVisible, setModalVisible] = useState(false)
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null)
   const [teamMembers, setTeamMembers] = useState<any[]>([])
-  const [users, setUsers] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
+  const [project, setProject] = useState<ProjectDetail | null>(null)
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table')
   const [form] = Form.useForm()
 
   useEffect(() => {
+    fetchProject()
     fetchPlanItems()
     fetchTeamMembers()
-    fetchUsers()
+    fetchTemplates()
   }, [projectId])
+
+  const fetchProject = async () => {
+    try {
+      const response = await auditProjectApi.get(projectId)
+      setProject(response.data)
+    } catch (error) {
+      console.error('获取项目详情失败:', error)
+    }
+  }
 
   const fetchPlanItems = async () => {
     setLoading(true)
@@ -76,23 +95,40 @@ export default function PlanEditor({ projectId }: Props) {
     }
   }
 
-  const fetchUsers = async () => {
+  const fetchTemplates = async () => {
     try {
-      const response: any = await userApi.getUsers({ limit: 100 })
-      setUsers(response.data || [])
+      const response: any = await templateApi.getTemplates({ limit: 100 })
+      setTemplates(response.data?.items || response.data || [])
     } catch (error) {
-      console.error('获取用户列表失败:', error)
+      console.error('获取模板列表失败:', error)
     }
   }
 
   const getMemberName = (memberId: string) => {
-    const user = users.find((u) => u.id === memberId)
-    return user ? `${user.full_name || user.username}` : memberId
+    const member = teamMembers.find((m) => m.member_id === memberId)
+    if (member?.member_name || member?.member_username) {
+      return member.member_name || member.member_username
+    }
+    return memberId
+  }
+
+  const getTemplateName = (templateId: string) => {
+    const template = templates.find((t) => t.id === templateId)
+    return template ? template.name : templateId
   }
 
   const handleAdd = () => {
     setEditingItem(null)
+    const defaultDate = project?.scheduled_start ? dayjs(project.scheduled_start) : dayjs()
     form.resetFields()
+    form.setFieldsValue({
+      plan_date: defaultDate,
+      time_start: dayjs('09:00', 'HH:mm'),
+      time_end: dayjs('17:00', 'HH:mm'),
+      group_no: 'A',
+      activity_type: 'normal',
+      certification_systems: project?.certification_systems || ['Q', 'E', 'S'],
+    })
     setModalVisible(true)
   }
 
@@ -163,14 +199,14 @@ export default function PlanEditor({ projectId }: Props) {
     {
       title: '时间',
       key: 'time',
-      width: 150,
+      width: 130,
       render: (_, record) => `${record.time_start} - ${record.time_end}`,
     },
     {
       title: '工作组',
       dataIndex: 'group_no',
       key: 'group_no',
-      width: 100,
+      width: 80,
     },
     {
       title: '区域',
@@ -179,17 +215,25 @@ export default function PlanEditor({ projectId }: Props) {
       ellipsis: true,
     },
     {
+      title: '检查模板',
+      dataIndex: 'template_id',
+      key: 'template_id',
+      width: 150,
+      ellipsis: true,
+      render: (templateId: string) => getTemplateName(templateId),
+    },
+    {
       title: '活动类型',
       dataIndex: 'activity_type',
       key: 'activity_type',
-      width: 120,
+      width: 100,
       render: (type: string) => activityTypeMap[type] || type,
     },
     {
       title: '认证体系',
       dataIndex: 'certification_systems',
       key: 'certification_systems',
-      width: 150,
+      width: 120,
       render: (systems: string[]) => (
         <Space size={4}>
           {systems?.map((sys) => (
@@ -202,7 +246,7 @@ export default function PlanEditor({ projectId }: Props) {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 80,
       render: (status: string) => (
         <Tag color={statusColorMap[status]}>{status}</Tag>
       ),
@@ -210,7 +254,7 @@ export default function PlanEditor({ projectId }: Props) {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 120,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -236,7 +280,6 @@ export default function PlanEditor({ projectId }: Props) {
     },
   ]
 
-  // 按日期分组显示
   const groupedByDate = planItems.reduce((acc, item) => {
     if (!acc[item.plan_date]) {
       acc[item.plan_date] = []
@@ -244,6 +287,15 @@ export default function PlanEditor({ projectId }: Props) {
     acc[item.plan_date].push(item)
     return acc
   }, {} as Record<string, PlanItem[]>)
+
+  const disabledDate = (current: dayjs.Dayjs) => {
+    if (!project) return false
+    const start = project.scheduled_start ? dayjs(project.scheduled_start).startOf('day') : null
+    const end = project.scheduled_end ? dayjs(project.scheduled_end).endOf('day') : null
+    if (start && current < start) return true
+    if (end && current > end) return true
+    return false
+  }
 
   return (
     <div>
@@ -323,26 +375,26 @@ export default function PlanEditor({ projectId }: Props) {
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
-          initialValues={{
-            activity_type: 'normal',
-            certification_systems: ['Q', 'E', 'S'],
-          }}
         >
-          <Form.Item
-            label="审核日期"
-            name="plan_date"
-            rules={[{ required: true, message: '请选择审核日期' }]}
-          >
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-
           <Space style={{ width: '100%' }} size="large">
+            <Form.Item
+              label="审核日期"
+              name="plan_date"
+              rules={[{ required: true, message: '请选择审核日期' }]}
+            >
+              <DatePicker 
+                style={{ width: 200 }} 
+                disabledDate={disabledDate}
+                placeholder={project ? `${project.scheduled_start || ''} ~ ${project.scheduled_end || ''}` : '选择日期'}
+              />
+            </Form.Item>
+
             <Form.Item
               label="开始时间"
               name="time_start"
               rules={[{ required: true, message: '请选择开始时间' }]}
             >
-              <TimePicker format="HH:mm" />
+              <TimePicker format="HH:mm" style={{ width: 120 }} />
             </Form.Item>
 
             <Form.Item
@@ -350,17 +402,29 @@ export default function PlanEditor({ projectId }: Props) {
               name="time_end"
               rules={[{ required: true, message: '请选择结束时间' }]}
             >
-              <TimePicker format="HH:mm" />
+              <TimePicker format="HH:mm" style={{ width: 120 }} />
             </Form.Item>
           </Space>
 
-          <Form.Item
-            label="工作组编号"
-            name="group_no"
-            rules={[{ required: true, message: '请输入工作组编号' }]}
-          >
-            <Input placeholder="如：A、B、C、ABCDE" />
-          </Form.Item>
+          <Space style={{ width: '100%' }} size="large">
+            <Form.Item
+              label="工作组编号"
+              name="group_no"
+              rules={[{ required: true, message: '请输入工作组编号' }]}
+            >
+              <Input placeholder="如：A、B、C" style={{ width: 120 }} />
+            </Form.Item>
+
+            <Form.Item label="活动类型" name="activity_type" style={{ flex: 1 }}>
+              <Select style={{ width: 150 }}>
+                <Select.Option value="normal">正常审核</Select.Option>
+                <Select.Option value="opening_meeting">首次会议</Select.Option>
+                <Select.Option value="closing_meeting">末次会议</Select.Option>
+                <Select.Option value="night_inspection">夜间巡视</Select.Option>
+                <Select.Option value="internal_meeting">内部沟通</Select.Option>
+              </Select>
+            </Form.Item>
+          </Space>
 
           <Form.Item
             label="审核区域"
@@ -371,13 +435,33 @@ export default function PlanEditor({ projectId }: Props) {
           </Form.Item>
 
           <Form.Item label="区域类型" name="area_type">
-            <Select>
+            <Select placeholder="选择区域类型" allowClear>
               <Select.Option value="department">职能部门</Select.Option>
               <Select.Option value="workshop">车间</Select.Option>
               <Select.Option value="office">办公室</Select.Option>
               <Select.Option value="site">现场</Select.Option>
               <Select.Option value="leadership">高层领导</Select.Option>
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="检查模板"
+            name="template_id"
+            rules={[{ required: true, message: '请选择检查模板' }]}
+            extra="选择检查模板后，模板中的检查项将作为本次审核的检查条款"
+          >
+            <Select 
+              placeholder="请选择检查模板" 
+              showSearch
+              optionFilterProp="children"
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={templates.map((t) => ({
+                label: t.name,
+                value: t.id,
+              }))}
+            />
           </Form.Item>
 
           <Form.Item
@@ -399,31 +483,11 @@ export default function PlanEditor({ projectId }: Props) {
             name="certification_systems"
             rules={[{ required: true, message: '请选择认证体系' }]}
           >
-            <Select mode="multiple">
+            <Select mode="multiple" placeholder="请选择认证体系">
               <Select.Option value="Q">Q - 质量</Select.Option>
               <Select.Option value="E">E - 环境</Select.Option>
               <Select.Option value="S">S - 职业健康安全</Select.Option>
               <Select.Option value="En">En - 能源</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item label="审核条款" name="clauses">
-            <Select mode="tags" placeholder="请输入条款号，如 8.5.1">
-              <Select.Option value="4-5.3">4-5.3</Select.Option>
-              <Select.Option value="6.1">6.1</Select.Option>
-              <Select.Option value="7.1">7.1</Select.Option>
-              <Select.Option value="8.5.1">8.5.1</Select.Option>
-              <Select.Option value="9.1">9.1</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item label="活动类型" name="activity_type">
-            <Select>
-              <Select.Option value="normal">正常审核</Select.Option>
-              <Select.Option value="opening_meeting">首次会议</Select.Option>
-              <Select.Option value="closing_meeting">末次会议</Select.Option>
-              <Select.Option value="night_inspection">夜间巡视</Select.Option>
-              <Select.Option value="internal_meeting">内部沟通</Select.Option>
             </Select>
           </Form.Item>
         </Form>

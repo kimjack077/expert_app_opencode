@@ -8,6 +8,8 @@ import type { ColumnsType } from 'antd/es/table'
 interface TeamMember {
   id: string
   member_id: string
+  member_name: string
+  member_username: string
   role: string
   responsible_systems: string[]
   qualification_codes: string[]
@@ -93,6 +95,10 @@ export default function TeamManagement({ projectId }: Props) {
   }
 
   const getMemberName = (memberId: string) => {
+    const member = members.find((m) => m.member_id === memberId)
+    if (member?.member_name || member?.member_username) {
+      return member.member_name || member.member_username
+    }
     const user = users.find((u) => u.id === memberId)
     return user ? `${user.full_name || user.username}` : memberId
   }
@@ -100,11 +106,10 @@ export default function TeamManagement({ projectId }: Props) {
   const columns: ColumnsType<TeamMember> = [
     {
       title: '成员姓名',
-      dataIndex: 'member_id',
-      key: 'member_id',
+      key: 'member_name',
       width: 200,
       ellipsis: true,
-      render: (memberId: string) => getMemberName(memberId),
+      render: (_, record) => record.member_name || record.member_username || getMemberName(record.member_id),
     },
     {
       title: '角色',

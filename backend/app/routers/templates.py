@@ -108,21 +108,21 @@ async def get_templates(
         check_items = sum(1 for item in items if item.is_category is not True)
 
         template_list.append({
-            "id": str(t.id),
-            "name": t.name,
-            "code": t.code,
-            "category": t.category,
-            "version": t.version,
-            "is_published": t.is_published,
-            "is_public": t.is_public if t.is_public is not None else False,
-            "is_quantified": t.is_quantified,
-            "created_by": str(t.created_by) if t.created_by else None,
-            "can_edit": can_modify_template(current_user, t),
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-            "stats": {
-                "total_items": total_items,
-                "categories": categories,
-                "check_items": check_items,
+            'id': str(t.id),
+            'name': t.name,
+            'code': t.code,
+            'category': t.category,
+            'version': t.version,
+            'is_published': t.is_published,
+            'is_public': t.is_public if t.is_public is not None else False,
+            'is_quantified': t.is_quantified,
+            'created_by': str(t.created_by) if t.created_by else None,
+            'can_edit': can_modify_template(current_user, t),
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+            'stats': {
+                'total_items': total_items,
+                'categories': categories,
+                'check_items': check_items,
             }
         })
 

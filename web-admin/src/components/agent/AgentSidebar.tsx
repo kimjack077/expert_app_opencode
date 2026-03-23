@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import AgentMessageRenderer from './AgentMessageRenderer'
 import AgentActionConfirm from './AgentActionConfirm'
+import { useAuthStore } from '@/stores/auth'
 import './AgentSidebar.css'
 
 interface Message {
@@ -71,6 +72,7 @@ export default function AgentSidebar({ context }: AgentSidebarProps) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const token = useAuthStore((state) => state.token)
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -114,7 +116,6 @@ export default function AgentSidebar({ context }: AgentSidebarProps) {
     abortControllerRef.current = new AbortController()
 
     try {
-      const token = localStorage.getItem('token')
       const response = await fetch('/api/agent/chat', {
         method: 'POST',
         headers: {

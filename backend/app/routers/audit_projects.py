@@ -25,7 +25,9 @@ from app.models.audit_project import (
     AuditReport,
     CommunicationMeeting,
 )
+from app.models.task import InspectionTask
 from app.models.user import User
+from app.models.enterprise import Enterprise
 from app.schemas import ApiResponse
 from app.schemas.audit_project import (
     AuditProjectCreate,
@@ -257,7 +259,27 @@ async def list_team_members(
         .where(AuditTeamMember.project_id == project_id)
         .order_by(AuditTeamMember.created_at)
     )
-    return make_response(result.scalars().all())
+    members = result.scalars().all()
+    
+    member_ids = [m.member_id for m in members]
+    if member_ids:
+        users_result = await db.execute(
+            select(User).where(User.id.in_(member_ids))
+        )
+        users = {u.id: u for u in users_result.scalars().all()}
+    else:
+        users = {}
+    
+    response_data = []
+    for m in members:
+        user = users.get(m.member_id)
+        response_data.append({
+            **AuditTeamMemberResponse.model_validate(m).model_dump(),
+            "member_name": user.full_name if user else None,
+            "member_username": user.username if user else None,
+        })
+    
+    return make_response(response_data)
 
 
 @router.put("/team/{member_id}")
@@ -311,9 +333,37 @@ async def create_plan_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """创建审核计划项"""
+    """创建审核计划项，同时自动创建检查任务下达给审核员"""
+    project = await db.get(AuditProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="审核项目不存在")
+    
+    enterprise = await db.get(Enterprise, project.enterprise_id)
+    
+    import random
+    random_suffix = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+    task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{random_suffix}"
+    task_title = f"{project.title} - {plan_item.area_name} - {plan_item.plan_date}"
+    
+    assigned_to = plan_item.assigned_member_ids[0] if plan_item.assigned_member_ids else None
+    
+    inspection_task = InspectionTask(
+        task_no=task_no,
+        title=task_title,
+        template_id=plan_item.template_id,
+        assigned_to=assigned_to,
+        assigned_by=current_user.id,
+        target_name=enterprise.name if enterprise else project.title,
+        target_address=enterprise.address if enterprise else None,
+        scheduled_at=datetime.combine(plan_item.plan_date, datetime.min.time()),
+        status="pending",
+    )
+    db.add(inspection_task)
+    await db.flush()
+    
     db_plan_item = AuditPlanItem(
         project_id=project_id,
+        inspection_task_id=inspection_task.id,
         **plan_item.model_dump(exclude={"project_id"}),
     )
     db.add(db_plan_item)

@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Modal, Form, Input, Select, Switch, message } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, Select, Switch, message, Tag, Divider, Typography } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { userApi } from '@/services/api';
 
 const { Option } = Select;
+const { Text } = Typography;
+
+const auditorLevelMap: Record<string, string> = {
+    basic: '初级审核员',
+    intermediate: '中级审核员',
+    senior: '高级审核员',
+};
 
 const Users: React.FC = () => {
     const [data, setData] = useState<any[]>([]);
@@ -36,7 +43,11 @@ const Users: React.FC = () => {
 
     const handleEdit = (record: any) => {
         setEditingId(record.id);
-        form.setFieldsValue(record);
+        form.setFieldsValue({
+            ...record,
+            qualified_systems: record.qualified_systems || [],
+            qualified_industry_codes: record.qualified_industry_codes || [],
+        });
         setModalVisible(true);
     };
 
@@ -106,6 +117,24 @@ const Users: React.FC = () => {
             },
         },
         {
+            title: '注册编号',
+            dataIndex: 'auditor_registration_no',
+            key: 'auditor_registration_no',
+            render: (val: string) => val || '-',
+        },
+        {
+            title: '注册级别',
+            dataIndex: 'auditor_level',
+            key: 'auditor_level',
+            render: (level: string) => level ? <Tag color="blue">{auditorLevelMap[level] || level}</Tag> : '-',
+        },
+        {
+            title: '专业代码',
+            dataIndex: 'qualified_industry_codes',
+            key: 'qualified_industry_codes',
+            render: (codes: string[]) => codes?.length > 0 ? codes.join(', ') : '-',
+        },
+        {
             title: '联系方式',
             dataIndex: 'phone',
             key: 'phone',
@@ -148,6 +177,7 @@ const Users: React.FC = () => {
                     rowKey="id"
                     loading={loading}
                     pagination={{ defaultPageSize: 10 }}
+                    scroll={{ x: 1200 }}
                 />
             </Card>
 
@@ -159,8 +189,9 @@ const Users: React.FC = () => {
                 destroyOnClose
                 zIndex={1000}
                 maskClosable={false}
+                width={700}
             >
-                <Form form={form} layout="vertical" initialValues={{ role: 'expert', is_active: true }}>
+                <Form form={form} layout="vertical" initialValues={{ role: 'expert', is_active: true, qualified_systems: [], qualified_industry_codes: [] }}>
                     <Form.Item
                         name="username"
                         label="登录名"
@@ -200,6 +231,38 @@ const Users: React.FC = () => {
                     </Form.Item>
                     <Form.Item name="is_active" label="状态" valuePropName="checked">
                         <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+                    </Form.Item>
+
+                    <Divider orientation="left">
+                        <Text type="secondary">审核员资质信息</Text>
+                    </Divider>
+
+                    <Form.Item name="auditor_registration_no" label="注册编号">
+                        <Input placeholder="如：2022-N1QMS-2215455" />
+                    </Form.Item>
+                    <Form.Item name="auditor_level" label="注册级别">
+                        <Select placeholder="请选择注册级别" allowClear>
+                            <Option value="basic">初级审核员</Option>
+                            <Option value="intermediate">中级审核员</Option>
+                            <Option value="senior">高级审核员</Option>
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="qualified_systems" label="注册体系">
+                        <Select mode="multiple" placeholder="请选择注册体系">
+                            <Option value="Q">Q - 质量</Option>
+                            <Option value="E">E - 环境</Option>
+                            <Option value="S">S - 职业健康安全</Option>
+                            <Option value="En">En - 能源</Option>
+                        </Select>
+                    </Form.Item>
+                    <Form.Item name="qualified_industry_codes" label="专业代码">
+                        <Select mode="tags" placeholder="请输入专业代码，如 10.01、12.01">
+                            <Option value="10.01">10.01</Option>
+                            <Option value="12.01">12.01</Option>
+                            <Option value="15.01">15.01</Option>
+                            <Option value="17.01">17.01</Option>
+                            <Option value="18.01">18.01</Option>
+                        </Select>
                     </Form.Item>
                 </Form>
             </Modal>

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
@@ -29,6 +29,10 @@ class UserCreate(UserBase):
     org_id: Optional[UUID] = None
     industry_id: Optional[UUID] = None
     is_active: bool = True
+    auditor_registration_no: Optional[str] = Field(None, description="注册审核员编号")
+    auditor_level: Optional[str] = Field(None, description="注册级别：basic/intermediate/senior")
+    qualified_systems: List[str] = Field(default=[], description="注册体系列表")
+    qualified_industry_codes: List[str] = Field(default=[], description="专业代码列表")
 
 
 class UserUpdate(BaseModel):
@@ -41,6 +45,10 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     org_id: Optional[UUID] = None
     industry_id: Optional[UUID] = None
+    auditor_registration_no: Optional[str] = None
+    auditor_level: Optional[str] = None
+    qualified_systems: Optional[List[str]] = None
+    qualified_industry_codes: Optional[List[str]] = None
 
 
 class UserResponse(UserBase):
@@ -49,8 +57,19 @@ class UserResponse(UserBase):
     is_active: bool
     org_id: Optional[UUID] = None
     industry_id: Optional[UUID] = None
+    auditor_registration_no: Optional[str] = None
+    auditor_level: Optional[str] = None
+    qualified_systems: List[str] = []
+    qualified_industry_codes: List[str] = []
     last_login_at: Optional[datetime] = None
     created_at: datetime
+
+    @field_validator('qualified_systems', 'qualified_industry_codes', mode='before')
+    @classmethod
+    def ensure_list(cls, v):
+        if v is None:
+            return []
+        return v
 
     class Config:
         from_attributes = True
