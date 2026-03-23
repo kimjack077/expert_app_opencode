@@ -132,19 +132,112 @@ export default function Records() {
   }
 
   const handleSubmit = async (id: string) => {
-    Modal.confirm({
-      title: '确认提交',
-      content: '确定要提交这条检查记录吗？提交后将不能修改。',
-      onOk: async () => {
-        try {
-          await recordApi.submitRecord(id)
-          message.success('记录已提交')
-          fetchRecords()
-        } catch (error) {
-          message.error('提交失败')
+    // 先获取记录详情进行校验
+    try {
+      const res: any = await recordApi.getRecord(id)
+      const recordData = res.data
+
+      // 扁平化检查项
+      const flattenItems = (items: any[], result: any[] = []): any[] => {
+        for (const item of items) {
+          if (!item.is_category) {
+            result.push(item)
+          }
+          if (item.children && item.children.length > 0) {
+            flattenItems(item.children, result)
+          }
         }
-      },
-    })
+        return result
+      }
+
+      const flatItems = flattenItems(recordData?.template?.items || [])
+
+      // 校验必填项和必传附件
+      const incompleteItems: string[] = []
+      const missingAttachments: string[] = []
+
+      flatItems.forEach((item, index) => {
+        // 检查必填项是否已填写
+        if (item.is_required !== false) {
+          const hasResult = item.radio_value ||
+            item.numeric_value !== undefined ||
+            item.text_value ||
+            item.score_value !== undefined
+          if (!hasResult) {
+            incompleteItems.push(`第${index + 1}项: ${item.title || '未命名'}`)
+          }
+        }
+
+        // 检查必传附件是否已上传
+        if (item.attachment_required) {
+          const hasPhotos = item.photos && item.photos.length > 0
+          if (!hasPhotos) {
+            missingAttachments.push(`第${index + 1}项: ${item.title || '未命名'}`)
+          }
+        }
+      })
+
+      // 如果有未完成的必填项或缺少附件，显示错误
+      if (incompleteItems.length > 0 || missingAttachments.length > 0) {
+        Modal.error({
+          title: '提交失败',
+          width: 520,
+          content: (
+            <div>
+              {incompleteItems.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4, color: '#ff4d4f' }}>
+                    以下必填项未完成：
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 20, color: '#666', maxHeight: 150, overflow: 'auto' }}>
+                    {incompleteItems.slice(0, 10).map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                    {incompleteItems.length > 10 && (
+                      <li>... 还有 {incompleteItems.length - 10} 项未完成</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              {missingAttachments.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 500, marginBottom: 4, color: '#faad14' }}>
+                    以下检查项需要上传照片：
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 20, color: '#666', maxHeight: 150, overflow: 'auto' }}>
+                    {missingAttachments.slice(0, 10).map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                    {missingAttachments.length > 10 && (
+                      <li>... 还有 {missingAttachments.length - 10} 项需要上传</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ),
+        })
+        return
+      }
+
+      // 校验通过，显示确认对话框
+      Modal.confirm({
+        title: '确认提交',
+        content: '确定要提交这条检查记录吗？提交后将不能修改。',
+        onOk: async () => {
+          try {
+            await recordApi.submitRecord(id)
+            message.success('记录已提交')
+            fetchRecords()
+          } catch (error) {
+            message.error('提交失败')
+          }
+        },
+      })
+    } catch (error) {
+      console.error('Failed to validate record:', error)
+      message.error('获取记录详情失败')
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -201,13 +294,6 @@ export default function Records() {
 
 
   const columns = [
-    {
-      title: '记录 ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 90,
-      render: (id: string) => `${id.substring(0, 8)}...`,
-    },
     {
       title: '被检查对象',
       key: 'enterprise',

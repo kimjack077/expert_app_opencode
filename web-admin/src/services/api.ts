@@ -172,6 +172,17 @@ export const recordApi = {
   // 记录检查项
   getRecordItems: (recordId: string) => api.get(`/records/${recordId}/items`),
   createRecordItem: (recordId: string, data: any) => api.post(`/records/${recordId}/items`, data),
+  updateRecordItem: (recordId: string, itemId: string, data: any) =>
+    api.put(`/records/${recordId}/items/${itemId}`, data),
+  deleteRecordItem: (recordId: string, itemId: string) =>
+    api.delete(`/records/${recordId}/items/${itemId}`),
+
+  // 报告相关
+  getRecordReport: (recordId: string) => api.get(`/records/${recordId}/report`),
+  downloadReportPdf: (recordId: string) => {
+    const token = useAuthStore.getState().token
+    return `${API_BASE_URL}/api/records/${recordId}/report/pdf?token=${token}`
+  },
 }
 
 export const aiExtractApi = {

@@ -21,6 +21,12 @@ import CreateAuditProject from '@/pages/AuditProjects/Create'
 import AuditProjectDetail from '@/pages/AuditProjects/Detail'
 // 审核统计模块
 import AuditStatistics from '@/pages/AuditStatistics'
+// 我的审核任务
+import MyAuditTasks from '@/pages/MyAuditTasks'
+// 检查项详情
+import AuditItemDetail from '@/pages/AuditItemDetail'
+// 审核记录编辑
+import AuditRecordEdit from '@/pages/AuditRecordEdit'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
@@ -58,8 +64,13 @@ function App() {
           <Route path="audit-projects" element={<AuditProjects />} />
           <Route path="audit-projects/create" element={<CreateAuditProject />} />
           <Route path="audit-projects/:id" element={<AuditProjectDetail />} />
+          <Route path="audit-projects/:projectId/records/:recordId" element={<AuditRecordEdit />} />
           {/* 审核统计模块 */}
           <Route path="audit-statistics" element={<AuditStatistics />} />
+          {/* 我的审核任务 */}
+          <Route path="my-audit-tasks" element={<MyAuditTasks />} />
+          {/* 检查项详情 */}
+          <Route path="audit-item/:recordId/:itemId" element={<AuditItemDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>
