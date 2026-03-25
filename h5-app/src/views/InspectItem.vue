@@ -368,7 +368,7 @@
           class="ai-button"
         >
           <van-icon name="chat-o" size="18" />
-          AI 生成检查结论
+          AI 审核建议
         </van-button>
 
         <div v-if="aiThinking || aiResult" class="ai-result">
@@ -379,15 +379,15 @@
             </div>
             <div class="ai-thinking-content">{{ aiThinkingContent }}</div>
           </div>
-          
+
           <div v-if="aiResult" class="ai-final">
             <div class="ai-result-header">
               <van-icon name="success" color="#4CAF50" />
-              <span>AI 建议已生成</span>
+              <span>AI 审核建议已生成</span>
             </div>
             <div class="ai-result-content">
               <div v-if="aiResult.suggestion" class="ai-section">
-                <div class="ai-label">检查建议</div>
+                <div class="ai-label">审核建议</div>
                 <div class="ai-value">{{ aiResult.suggestion }}</div>
               </div>
             </div>

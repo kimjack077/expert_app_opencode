@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  MinusCircleOutlined, BulbOutlined, BookOutlined, CameraOutlined,
+  MinusCircleOutlined, BulbOutlined, CameraOutlined,
   LoadingOutlined
 } from '@ant-design/icons'
 import { taskApi, llmApi, mediaApi } from '@/services/api'
@@ -23,7 +23,6 @@ export default function Inspection() {
   const [saving, setSaving] = useState(false)
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmContent, setLlmContent] = useState<string | null>(null)
-  const [llmType, setLlmType] = useState<'suggestion' | 'basis'>('suggestion')
   const [drawerVisible, setDrawerVisible] = useState(false)
 
   const currentRecord = records[currentIndex]
@@ -89,15 +88,12 @@ export default function Inspection() {
     }
   }
 
-  const handleLLMRequest = async (type: 'suggestion' | 'basis') => {
+  const handleLLMRequest = async () => {
     if (!currentRecord || !id) return
     setLlmLoading(true)
-    setLlmType(type)
     setDrawerVisible(true)
     try {
-      const res: any = type === 'suggestion'
-        ? await llmApi.getSuggestion({ task_id: id, record_id: currentRecord.id })
-        : await llmApi.getBasis({ task_id: id, record_id: currentRecord.id })
+      const res: any = await llmApi.getSuggestion({ task_id: id, record_id: currentRecord.id })
       setLlmContent(res.data?.content || '暂无内容')
     } catch (error) {
       setLlmContent('获取失败，请稍后重试')
@@ -334,17 +330,10 @@ export default function Inspection() {
               <Space>
                 <Button
                   icon={<BulbOutlined />}
-                  onClick={() => handleLLMRequest('suggestion')}
+                  onClick={handleLLMRequest}
                   style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
                 >
                   AI建议
-                </Button>
-                <Button
-                  icon={<BookOutlined />}
-                  onClick={() => handleLLMRequest('basis')}
-                  style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
-                >
-                  法规依据
                 </Button>
               </Space>
             </div>
@@ -481,7 +470,7 @@ export default function Inspection() {
       </div>
 
       <Drawer
-        title={llmType === 'suggestion' ? 'AI 监管建议' : '法规标准依据'}
+        title="AI 监管建议"
         placement="right"
         width={480}
         onClose={() => setDrawerVisible(false)}

@@ -6,13 +6,12 @@ import Dashboard from '@/pages/Dashboard'
 import Templates from '@/pages/Templates'
 import Tasks from '@/pages/Tasks'
 import TaskDetail from '@/pages/TaskDetail'
-import Inspection from '@/pages/Inspection'
+import InspectionForm from '@/components/InspectionForm'
 import Analytics from '@/pages/Analytics'
 import Enterprises from '@/pages/Enterprises'
 import Knowledge from '@/pages/Knowledge'
 import Records from '@/pages/Records'
 import NewInspection from '@/pages/NewInspection'
-import RecordInspection from '@/pages/RecordInspection'
 import Users from '@/pages/Users'
 import Industries from '@/pages/Industries'
 // 审核项目模块
@@ -51,9 +50,9 @@ function App() {
           <Route path="templates" element={<Templates />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/:id" element={<TaskDetail />} />
-          <Route path="inspection/:id" element={<Inspection />} />
+          <Route path="inspection/:id" element={<InspectionForm backPath="/tasks" />} />
           <Route path="inspection/new" element={<NewInspection />} />
-          <Route path="record/:id" element={<RecordInspection />} />
+          <Route path="record/:id" element={<InspectionForm backPath="/records" />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="enterprises" element={<Enterprises />} />
           <Route path="knowledge" element={<Knowledge />} />

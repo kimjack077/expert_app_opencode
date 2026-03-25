@@ -7,7 +7,7 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
-  BulbOutlined, BookOutlined, CameraOutlined,
+  BulbOutlined, CameraOutlined,
   LoadingOutlined, SaveOutlined, SendOutlined, InfoCircleOutlined,
   SafetyCertificateOutlined, RobotOutlined
 } from '@ant-design/icons'
@@ -28,7 +28,6 @@ export default function RecordInspection() {
   const [saving, setSaving] = useState(false)
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmContent, setLlmContent] = useState<string | null>(null)
-  const [llmType, setLlmType] = useState<'suggestion' | 'basis'>('suggestion')
   const [drawerVisible, setDrawerVisible] = useState(false)
 
   // 最终判定状态
@@ -112,7 +111,7 @@ export default function RecordInspection() {
     }
   }
 
-  const handleLLMRequest = async (type: 'suggestion' | 'basis') => {
+  const handleLLMRequest = async () => {
     if (!currentItem || !id) return
     if (!currentItem.id || currentItem.id === currentItem.template_item_id) {
       setLlmContent('请先填写检查结果后再获取AI建议')
@@ -120,12 +119,9 @@ export default function RecordInspection() {
       return
     }
     setLlmLoading(true)
-    setLlmType(type)
     setDrawerVisible(true)
     try {
-      const res: any = type === 'suggestion'
-        ? await llmApi.getSuggestion({ task_id: id, record_id: currentItem.id, use_cache: false })
-        : await llmApi.getBasis({ task_id: id, record_id: currentItem.id, use_cache: false })
+      const res: any = await llmApi.getSuggestion({ task_id: id, record_id: currentItem.id, use_cache: false })
       setLlmContent(res.data?.content || '暂无内容')
     } catch (error) {
       setLlmContent('获取失败，请稍后重试')
@@ -503,17 +499,10 @@ export default function RecordInspection() {
               <Space>
                 <Button
                   icon={<BulbOutlined />}
-                  onClick={() => handleLLMRequest('suggestion')}
+                  onClick={handleLLMRequest}
                   style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
                 >
                   AI建议
-                </Button>
-                <Button
-                  icon={<BookOutlined />}
-                  onClick={() => handleLLMRequest('basis')}
-                  style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
-                >
-                  法规依据
                 </Button>
               </Space>
             }
@@ -898,7 +887,7 @@ export default function RecordInspection() {
       </div>
 
       <Drawer
-        title={llmType === 'suggestion' ? 'AI 监管建议' : '法规标准依据'}
+        title="AI 监管建议"
         placement="right"
         width={480}
         onClose={() => setDrawerVisible(false)}

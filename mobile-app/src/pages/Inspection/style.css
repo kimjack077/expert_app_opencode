@@ -219,4 +219,22 @@
   line-height: 1.8;
   color: #333;
   white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #f9f9f9;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.ai-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.ai-actions .adm-button {
+  min-width: 100px;
 }

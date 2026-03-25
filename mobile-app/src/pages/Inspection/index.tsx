@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   NavBar,
@@ -22,7 +22,6 @@ import {
   CameraOutline,
   AudioOutline,
   SetOutline,
-  FileOutline,
   CheckCircleOutline,
 } from 'antd-mobile-icons'
 import { taskApi, recordApi, aiApi } from '../../services/api'
@@ -59,7 +58,7 @@ const Inspection: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false)
   const [showAiResult, setShowAiResult] = useState(false)
   const [aiResult, setAiResult] = useState('')
-  const commentRef = useRef('')
+  const [commentValue, setCommentValue] = useState('')
 
   useEffect(() => {
     fetchTaskDetail()
@@ -104,7 +103,7 @@ const Inspection: React.FC = () => {
     try {
       await recordApi.updateRecord(currentItem.id, {
         result: currentItem.result,
-        comment: commentRef.current,
+        comment: commentValue,
       })
     } catch (error) {
       console.error('保存失败', error)
@@ -117,7 +116,7 @@ const Inspection: React.FC = () => {
     if (!task) return
     if (currentIndex < task.check_items.length - 1) {
       setCurrentIndex(currentIndex + 1)
-      commentRef.current = ''
+      setCommentValue('')
     } else {
       // 完成检查
       Dialog.confirm({
@@ -138,7 +137,7 @@ const Inspection: React.FC = () => {
   const handlePrev = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1)
-      commentRef.current = ''
+      setCommentValue('')
     }
   }
 
@@ -146,6 +145,7 @@ const Inspection: React.FC = () => {
     if (!task) return
     setAiLoading(true)
     setShowAiResult(true)
+    setAiResult('')
     try {
       const res: any = await aiApi.getSuggestion(task.check_items[currentIndex].id)
       if (res.code === 200) {
@@ -156,28 +156,38 @@ const Inspection: React.FC = () => {
         icon: 'fail',
         content: '获取AI建议失败',
       })
+      setShowAiResult(false)
     } finally {
       setAiLoading(false)
     }
   }
 
-  const handleLegalBasis = async () => {
-    if (!task) return
-    setAiLoading(true)
-    setShowAiResult(true)
+  // 采纳AI建议
+  const acceptAI = async () => {
+    if (!task || !aiResult) return
+
+    // 更新审核记录
+    setCommentValue(aiResult)
+
+    // 保存到后端
     try {
-      const res: any = await aiApi.getLegalBasis(task.check_items[currentIndex].id)
-      if (res.code === 200) {
-        setAiResult(res.data.legal_basis)
-      }
-    } catch (error) {
-      Toast.show({
-        icon: 'fail',
-        content: '获取法规依据失败',
+      const currentItem = task.check_items[currentIndex]
+      await recordApi.updateRecord(currentItem.id, {
+        result: currentItem.result,
+        comment: aiResult,
       })
-    } finally {
-      setAiLoading(false)
+    } catch (error) {
+      console.error('保存失败', error)
     }
+
+    // 关闭AI结果面板
+    setShowAiResult(false)
+    setAiResult('')
+
+    Toast.show({
+      icon: 'success',
+      content: '已采纳AI建议',
+    })
   }
 
   const handlePhotoUpload = async (file: File) => {
@@ -331,8 +341,9 @@ const Inspection: React.FC = () => {
             rows={3}
             maxLength={500}
             showCount
+            value={commentValue}
             onChange={(val) => {
-              commentRef.current = val
+              setCommentValue(val)
             }}
           />
         </div>
@@ -357,14 +368,7 @@ const Inspection: React.FC = () => {
             onClick={handleAiSuggestion}
             loading={aiLoading}
           >
-            <SetOutline /> AI监管建议
-          </Button>
-          <Button
-            className="ai-btn"
-            onClick={handleLegalBasis}
-            loading={aiLoading}
-          >
-            <FileOutline /> 法规依据
+            <SetOutline /> AI审核建议
           </Button>
         </div>
       </div>
@@ -395,14 +399,36 @@ const Inspection: React.FC = () => {
         onClose={() => setShowAiResult(false)}
       >
         <div className="ai-result-panel">
-          <h4>AI 分析结果</h4>
+          <h4>AI 审核建议</h4>
           {aiLoading ? (
             <div className="ai-loading">
               <SpinLoading color="primary" />
               <p>AI正在分析...</p>
             </div>
           ) : (
-            <div className="ai-result-content">{aiResult}</div>
+            <>
+              <div className="ai-result-content">{aiResult}</div>
+              {aiResult && (
+                <div className="ai-actions">
+                  <Button
+                    color="primary"
+                    size="small"
+                    onClick={acceptAI}
+                  >
+                    采纳建议
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setShowAiResult(false)
+                      setAiResult('')
+                    }}
+                  >
+                    取消
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </FloatingPanel>
