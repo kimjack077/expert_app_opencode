@@ -6,10 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 专家现场工作辅助系统 (Expert Field Inspection System - EFIS) - A system for field inspection experts to conduct inspections, record results, and receive AI-powered regulatory suggestions.
 
-**Architecture**: Three-tier application
+**Architecture**: Multi-tier application with multiple clients
 - **Backend**: FastAPI (Python 3.11+) with PostgreSQL
 - **Web Admin**: React 18 + TypeScript + Ant Design + Vite
-- **H5 Mobile App**: Vue 3 + Vant UI + Vite (for field inspectors)
+- **H5 Mobile App**: Vue 3 + Vant UI + Vite (for field inspectors, base path `/h5/`)
+- **Mobile App**: React 18 + TypeScript + antd-mobile + Vite (port 3001)
+- **Inspection App (Flutter)**: Flutter 3.x + Riverpod (in development)
 
 ## Development Commands
 
@@ -47,6 +49,25 @@ npm run format   # Format code with oxfmt
 
 **Node version requirement**: `^20.19.0 || >=22.12.0`
 
+### Mobile App (React)
+```bash
+cd mobile-app
+npm install
+npm run dev      # Development server on port 3001
+npm run build    # Production build
+```
+
+### Inspection App (Flutter)
+```bash
+cd inspection_app
+flutter pub get          # Install dependencies
+flutter run              # Development (select device)
+flutter build apk        # Build Android APK
+flutter build appbundle  # Build Android App Bundle
+flutter build ios        # Build iOS
+```
+**Flutter SDK requirement**: `>=3.0.0`
+
 ## Environment Configuration
 
 Each module has its own environment configuration:
@@ -64,28 +85,24 @@ Key environment variables:
 ## Project Structure
 
 ```
-backend/
-├── app/
-│   ├── main.py           # FastAPI entry point, router registration
-│   ├── config.py         # Settings via pydantic-settings
-│   ├── database.py       # SQLAlchemy async engine
-│   ├── models/           # ORM models
-│   │   ├── user.py       # User, Organization
-│   │   ├── template.py   # InspectionTemplate, TemplateItem
-│   │   ├── task.py       # InspectionTask, TaskItemRecord
-│   │   ├── record.py     # InspectionRecord, InspectionRecordItem
-│   │   ├── enterprise.py # Enterprise and related entities
-│   │   ├── media.py      # MediaFile
-│   │   ├── audit.py      # AuditLog, LLMCallLog
-│   │   └── knowledge.py  # Knowledge management
-│   ├── schemas/          # Pydantic request/response models
-│   ├── routers/          # API endpoints
-│   ├── services/         # Business logic
-│   │   └── llm_service.py  # LLM integration (suggestions, basis, final judgment)
-│   ├── middleware/       # AuditMiddleware for logging
-│   └── utils/            # security.py (JWT, password), file_handler.py
-├── alembic/              # Database migrations
-└── requirements.txt
+backend/app/models/
+├── user.py           # User, Organization
+├── template.py       # InspectionTemplate, TemplateItem
+├── task.py           # InspectionTask, TaskItemRecord
+├── record.py         # InspectionRecord, InspectionRecordItem
+├── enterprise.py     # Enterprise and related entities
+├── media.py          # MediaFile
+├── audit.py          # AuditLog, LLMCallLog
+├── knowledge.py      # Knowledge management
+├── audit_project.py  # AuditProject, AuditTeamMember, AuditPlanItem, Nonconformity, etc.
+├── rag.py            # KnowledgeEmbedding, AgentMemory, PhotoAnalysis
+└── industry.py       # Industry classification
+
+backend/app/services/
+├── llm_service.py      # LLM integration (suggestions, basis, final judgment)
+├── ai_extract_service.py # AI-assisted document parsing
+├── audit_agent.py      # AI agent for audit preparation and report generation
+└── report_generator.py # Word/PDF report generation
 
 web-admin/src/
 ├── pages/                # Page components
@@ -99,6 +116,20 @@ h5-app/src/
 ├── utils/                # photoUtils.js, offlineStorage.js, uploadQueue.js
 └── main.js               # Vue app entry with Vant components
 
+mobile-app/src/
+├── pages/                # Page components (Login, TaskList, QuickCheck, Profile, Inspection)
+├── components/           # Shared components (BottomNav)
+├── services/api.ts       # Axios API client
+└── stores/auth.ts        # Zustand state
+
+inspection_app/lib/
+├── models/               # Data models
+├── screens/              # Page screens
+├── services/             # API service layer
+├── providers/            # State management (Riverpod)
+├── router/               # GoRouter configuration
+└── theme/                # App theme
+
 ## Backend Dependencies
 
 Core packages (see `backend/requirements.txt`):
@@ -106,6 +137,7 @@ Core packages (see `backend/requirements.txt`):
 - **SQLAlchemy + asyncpg + Alembic** - Async ORM and migrations
 - **python-jose + passlib** - JWT and password hashing
 - **openai** - LLM client (compatible with various providers)
+- **redis** - Caching and session storage
 - **Document processing**: PyMuPDF (PDF), python-docx (Word), openpyxl (Excel), reportlab (PDF generation)
 - **Pillow** - Image processing
 
@@ -130,11 +162,17 @@ All endpoints return unified format:
 
 ### Database Models - Key Relationships
 ```
+# Inspection workflow
 InspectionTemplate → TemplateItem (one-to-many)
 InspectionTask → TaskItemRecord (one-to-many)
 TaskItemRecord → TemplateItem (links to check item)
 MediaFile → InspectionTask or TaskItemRecord (optional link)
 Enterprise → EnterpriseQualification, EnterpriseProduct, EnterpriseEquipment, etc.
+
+# Audit project workflow (certification audits)
+AuditProject → AuditTeamMember, AuditPlanItem, AuditArea, AuditAreaRecord, Nonconformity, AuditReport, CommunicationMeeting
+AuditPlanItem → InspectionTask (auto-created when plan item is created)
+AuditAreaRecord → InspectionRecordItem (check item results)
 ```
 
 ### LLM Integration (services/llm_service.py)
@@ -147,6 +185,24 @@ Features:
 - Streaming API support for real-time response display
 - Result caching in `TaskItemRecord.llm_suggestion` and `llm_basis`
 - All calls logged to `LLMCallLog` table
+
+### Audit Project Workflow (Certification Audits)
+The system supports two workflows:
+1. **Simple Inspection**: InspectionTask → TaskItemRecord → InspectionRecordItem
+2. **Certification Audit**: AuditProject → AuditPlanItem → InspectionTask (auto-created)
+
+Key audit project entities:
+- `AuditProject` - Top-level container for certification audits (initial, surveillance, recertification)
+- `AuditPlanItem` - Work task unit; creates `InspectionTask` automatically when created
+- `AuditAreaRecord` - Collaborative field record with multiple co-recorders
+- `Nonconformity` - Tracks issues with severity levels (major/minor/observation)
+- `AuditReport` - Report with Word/PDF export via `/api/v1/audit-projects/{id}/export/word|pdf`
+
+### AI Agent Features (services/audit_agent.py)
+- `prepare_audit_with_ai` - AI audit preparation suggestions
+- `evaluate_evidence_with_ai` - Evidence sufficiency assessment
+- `generate_report_with_ai` - Generate narrative evaluation text
+- `suggest_nc_with_ai` - Suggest nonconformity based on evidence
 
 ### User Roles
 - `super_admin` - Full system access
@@ -176,6 +232,10 @@ Features:
 | `/api/ai-extract` | AI-assisted template extraction from documents (PDF/Word/Excel) |
 | `/api/industries` | Industry classification |
 | `/api/users` | User management |
+| `/api/agent` | AI assistant endpoints |
+| `/api/ai-enhanced` | AI enhanced features (photo analysis, etc.) |
+| `/api/statistics` | Audit statistics dashboard |
+| `/api/v1/audit-projects` | Audit project management (certification audits) |
 | `/api/health` | Health check endpoint |
 
 ## Important Conventions

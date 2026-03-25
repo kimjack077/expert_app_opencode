@@ -7,7 +7,7 @@ import {
 import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
   MinusCircleOutlined, BulbOutlined, CameraOutlined,
-  LoadingOutlined
+  LoadingOutlined, BookOutlined
 } from '@ant-design/icons'
 import { taskApi, llmApi, mediaApi } from '@/services/api'
 
