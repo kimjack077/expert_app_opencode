@@ -15,7 +15,7 @@
         <!-- 通过/不通过类型 -->
         <van-tag
           v-if="item.radio_value"
-          :type="item.radio_value === 'pass' ? 'success' : item.radio_value === 'fail' ? 'danger' : 'warning'"
+          :type="getRadioTagType(item.radio_value)"
           size="medium"
         >
           {{ getRadioText(item.radio_value) }}
@@ -101,7 +101,7 @@
         </div>
         
         <div v-if="item.inspector_note" class="detail-item">
-          <b>备注说明：</b>
+          <b>审核记录：</b>
           <span>{{ item.inspector_note }}</span>
         </div>
         
@@ -138,6 +138,7 @@
         :index="childIndex"
         :get-check-type-text="getCheckTypeText"
         :get-radio-text="getRadioText"
+        :get-radio-tag-type="getRadioTagType"
         :format-range="formatRange"
         :preview-image="previewImage"
         :get-item-score="getItemScore"
@@ -163,6 +164,10 @@ const props = defineProps({
     required: true,
   },
   getRadioText: {
+    type: Function,
+    required: true,
+  },
+  getRadioTagType: {
     type: Function,
     required: true,
   },

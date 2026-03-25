@@ -933,7 +933,7 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
 
             {item.inspector_note && (
               <div style={{ display: 'flex', gap: 8 }}>
-                <b style={{ color: '#1e293b', flexShrink: 0 }}>备注说明：</b>
+                <b style={{ color: '#1e293b', flexShrink: 0 }}>审核记录：</b>
                 <span>{item.inspector_note}</span>
               </div>
             )}

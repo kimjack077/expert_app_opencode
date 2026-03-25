@@ -615,10 +615,10 @@ export default function AuditRecordEdit() {
               )}
 
               <div style={{ marginBottom: 16 }}>
-                <div style={{ marginBottom: 8, fontWeight: 500 }}>检查说明</div>
+                <div style={{ marginBottom: 8, fontWeight: 500 }}>审核记录</div>
                 <TextArea
                   rows={2}
-                  placeholder="请输入检查说明"
+                  placeholder="请输入审核记录"
                   value={selectedItem.inspector_note || ''}
                   onChange={(e) => handleItemChange(selectedItem, 'inspector_note', e.target.value)}
                 />

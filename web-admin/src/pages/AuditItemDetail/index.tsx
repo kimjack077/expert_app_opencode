@@ -295,24 +295,22 @@ export default function AuditItemDetail() {
               </Tag>
             )}
           </Space>
-          {itemData.use_ai && (
-            <Space>
-              <Button
-                icon={<BulbOutlined />}
-                onClick={() => handleLLMRequest('suggestion')}
-                style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
-              >
-                AI建议
-              </Button>
-              <Button
-                icon={<InfoCircleOutlined />}
-                onClick={() => handleLLMRequest('basis')}
-                style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
-              >
-                法规依据
-              </Button>
-            </Space>
-          )}
+          <Space>
+            <Button
+              icon={<BulbOutlined />}
+              onClick={() => handleLLMRequest('suggestion')}
+              style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
+            >
+              AI建议
+            </Button>
+            <Button
+              icon={<InfoCircleOutlined />}
+              onClick={() => handleLLMRequest('basis')}
+              style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
+            >
+              法规依据
+            </Button>
+          </Space>
         </div>
       </div>
 
@@ -502,12 +500,12 @@ export default function AuditItemDetail() {
               </div>
             )}
 
-            {/* 检查说明 */}
+            {/* 审核记录 */}
             <div style={{ marginBottom: 24 }}>
-              <div style={{ marginBottom: 8, fontWeight: 500 }}>检查说明</div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>审核记录</div>
               <TextArea
                 rows={3}
-                placeholder="请输入检查说明..."
+                placeholder="请输入审核记录..."
                 value={result.inspector_note || ''}
                 onChange={(e) => setResult(prev => ({ ...prev, inspector_note: e.target.value }))}
                 onBlur={() => handleSaveResult('inspector_note', result.inspector_note)}
@@ -577,7 +575,7 @@ export default function AuditItemDetail() {
           <Card title="操作提示" size="small">
             <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
               <p>1. 选择检查结论或填写检查结果</p>
-              <p>2. 填写检查说明（可选）</p>
+              <p>2. 填写审核记录（可选）</p>
               <p>3. 上传现场照片（如需要）</p>
               <p>4. 点击AI建议获取智能分析</p>
             </div>

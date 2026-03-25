@@ -323,11 +323,11 @@ const Inspection: React.FC = () => {
           </div>
         </div>
 
-        {/* 检查说明 */}
+        {/* 审核记录 */}
         <div className="comment-section">
-          <h4 className="section-title">检查说明</h4>
+          <h4 className="section-title">审核记录</h4>
           <TextArea
-            placeholder="请输入检查说明..."
+            placeholder="请输入审核记录..."
             rows={3}
             maxLength={500}
             showCount

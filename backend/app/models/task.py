@@ -54,7 +54,7 @@ class TaskItemRecord(Base):
         ForeignKey("template_items.id"),
         comment="模板项目 ID"
     )
-    result = Column(String(20), comment="检查结果：pass/fail 等")
+    result = Column(String(30), comment="检查结果：pass/fail/pending_rectification 等")
     result_value = Column(String(50), comment="数值结果")
     result_text = Column(Text, comment="文字结论")
     inspector_note = Column(Text, comment="检查员备注")

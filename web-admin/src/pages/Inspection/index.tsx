@@ -134,7 +134,10 @@ export default function Inspection() {
     const resultMap: Record<string, { color: string; icon: any; text: string }> = {
       compliant: { color: 'success', icon: <CheckCircleOutlined />, text: '合规' },
       non_compliant: { color: 'error', icon: <CloseCircleOutlined />, text: '不合规' },
-      not_applicable: { color: 'default', icon: <MinusCircleOutlined />, text: '不适用' },
+      pass: { color: 'success', icon: <CheckCircleOutlined />, text: '合格' },
+      fail: { color: 'error', icon: <CloseCircleOutlined />, text: '不合格' },
+      pending_rectification: { color: 'warning', icon: <MinusCircleOutlined />, text: '待整改' },
+      not_applicable: { color: 'default', icon: <MinusCircleOutlined />, text: '未涉及' },
     }
     const item = resultMap[result] || { color: 'default', icon: null, text: '未填写' }
     return <Tag color={item.color} icon={item.icon}>{item.text}</Tag>
@@ -171,28 +174,163 @@ export default function Inspection() {
         </div>
       </div>
 
-      <div style={{ padding: '0 24px', maxWidth: 1200, margin: '0 auto' }}>
-        <Card style={{ marginBottom: 16 }}>
-          <Steps
-            current={currentIndex}
-            onChange={(current) => setCurrentIndex(current)}
-            items={records.map((r, idx) => ({
-              title: `条目 ${idx + 1}`,
-              status: r.result ? 'finish' : 'wait',
-            }))}
-            size="small"
-          />
+      <div style={{ padding: '0 24px', maxWidth: 1400, margin: '0 auto', display: 'flex', gap: 24 }}>
+        {/* 左侧：条目列表导航 */}
+        <Card 
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 600 }}>检查条目列表</span>
+              <span style={{ fontSize: 13, color: '#666', fontWeight: 400 }}>
+                已完成 {completedCount} / 共 {records.length} 项
+              </span>
+            </div>
+          }
+          style={{ width: 380, flexShrink: 0, maxHeight: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}
+          bodyStyle={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}
+        >
+          {/* 进度条 */}
+          <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: '#666' }}>总体进度</span>
+              <span style={{ fontSize: 14, color: '#1890ff', fontWeight: 600 }}>{progress}%</span>
+            </div>
+            <Progress
+              percent={progress}
+              status={progress === 100 ? 'success' : 'active'}
+              showInfo={false}
+              strokeColor={{ from: '#108ee9', to: '#87d068' }}
+            />
+          </div>
+          
+          {/* 条目列表 */}
+          <div style={{ 
+            flex: 1, 
+            overflowY: 'auto',
+            padding: '8px 0'
+          }}>
+            {records.map((r, idx) => (
+              <div
+                key={idx}
+                onClick={() => setCurrentIndex(idx)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '12px 16px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  background: idx === currentIndex ? '#e6f7ff' : 'transparent',
+                  borderLeft: `3px solid ${idx === currentIndex ? '#1890ff' : 'transparent'}`,
+                  borderBottom: '1px solid #f5f5f5'
+                }}
+              >
+                {/* 序号 */}
+                <div style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  background: idx === currentIndex ? '#1890ff' : r.result ? '#52c41a' : '#f0f0f0',
+                  color: idx === currentIndex || r.result ? '#fff' : '#999'
+                }}>
+                  {idx + 1}
+                </div>
+                
+                {/* 条目内容 */}
+                <div style={{ 
+                  flex: 1, 
+                  marginLeft: 12, 
+                  overflow: 'hidden',
+                  opacity: idx === currentIndex ? 1 : 0.85
+                }}>
+                  <div style={{ 
+                    fontSize: 14, 
+                    fontWeight: idx === currentIndex ? 500 : 400,
+                    color: idx === currentIndex ? '#1890ff' : '#333',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    marginBottom: 4
+                  }}>
+                    {r.check_item?.title || `检查条目 ${idx + 1}`}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {getResultTag(r.result)}
+                    {r.inspector_note && (
+                      <span style={{ fontSize: 12, color: '#999' }}>
+                        <BookOutlined style={{ fontSize: 10, marginRight: 2 }} />
+                        有备注
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* 当前指示器 */}
+                {idx === currentIndex && (
+                  <div style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: '#1890ff',
+                    marginLeft: 8
+                  }} />
+                )}
+              </div>
+            ))}
+          </div>
+          
+          {/* 底部图例 */}
+          <div style={{ 
+            padding: '12px 16px', 
+            borderTop: '1px solid #f0f0f0',
+            display: 'flex', 
+            gap: 16, 
+            fontSize: 12, 
+            color: '#666',
+            background: '#fafafa'
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, background: '#1890ff', borderRadius: '50%' }}></span>
+              当前
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, background: '#52c41a', borderRadius: '50%' }}></span>
+              已完成
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 10, height: 10, background: '#f0f0f0', borderRadius: '50%' }}></span>
+              未完成
+            </span>
+          </div>
         </Card>
+        
+        {/* 右侧：检查详情 */}
+        <div style={{ flex: 1, minWidth: 0 }}>
 
         {currentRecord && (
-          <Card
-            title={
-              <Space>
-                <span>检查条目 {currentIndex + 1}/{records.length}</span>
-                {getResultTag(currentRecord.result)}
-              </Space>
-            }
-            extra={
+          <Card>
+            {/* 卡片头部：条目信息和AI按钮 */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'flex-start',
+              marginBottom: 20,
+              paddingBottom: 16,
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+                  检查条目 {currentIndex + 1}/{records.length}
+                  <span style={{ marginLeft: 12 }}>{getResultTag(currentRecord.result)}</span>
+                </div>
+                <div style={{ fontSize: 13, color: '#999' }}>
+                  点击左侧列表可快速切换条目
+                </div>
+              </div>
               <Space>
                 <Button
                   icon={<BulbOutlined />}
@@ -209,8 +347,7 @@ export default function Inspection() {
                   法规依据
                 </Button>
               </Space>
-            }
-          >
+            </div>
             <div style={{ marginBottom: 24 }}>
               <h3 style={{ fontSize: 18, marginBottom: 8 }}>
                 {currentRecord.check_item?.title}
@@ -235,23 +372,24 @@ export default function Inspection() {
                 buttonStyle="solid"
                 size="large"
               >
-                <Radio.Button value="compliant">
-                  <CheckCircleOutlined /> 合规
-                </Radio.Button>
-                <Radio.Button value="non_compliant">
-                  <CloseCircleOutlined /> 不合规
-                </Radio.Button>
-                <Radio.Button value="not_applicable">
-                  <MinusCircleOutlined /> 不适用
-                </Radio.Button>
+                {(currentRecord.check_item?.result_options || currentRecord.result_options || [
+                  { value: 'pass', label: '合格' },
+                  { value: 'fail', label: '不合格' },
+                  { value: 'pending_rectification', label: '待整改' },
+                  { value: 'not_applicable', label: '未涉及' },
+                ]).map((opt: any) => (
+                  <Radio.Button key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </Radio.Button>
+                ))}
               </Radio.Group>
             </div>
 
             <div style={{ marginBottom: 24 }}>
-              <div style={{ marginBottom: 8, fontWeight: 500 }}>检查说明</div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>审核记录</div>
               <TextArea
                 rows={4}
-                placeholder="请输入检查说明..."
+                placeholder="请输入审核记录..."
                 value={currentRecord.result_text || ''}
                 onChange={handleNoteChange}
                 onBlur={saveNote}
@@ -288,30 +426,58 @@ export default function Inspection() {
               </Upload>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32 }}>
+            {/* 底部导航区域 */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginTop: 32,
+              paddingTop: 20,
+              borderTop: '1px solid #f0f0f0'
+            }}>
               <Button
+                size="large"
                 disabled={currentIndex === 0}
                 onClick={() => setCurrentIndex(currentIndex - 1)}
+                style={{ minWidth: 100 }}
               >
-                上一条
+                ← 上一条
               </Button>
-              <Space>
+              
+              <Space size="middle">
+                {currentIndex > 0 && (
+                  <Button 
+                    onClick={() => setCurrentIndex(0)}
+                    style={{ color: '#666' }}
+                  >
+                    回到首条
+                  </Button>
+                )}
                 {currentIndex === records.length - 1 && progress === 100 && (
-                  <Button type="primary" onClick={handleComplete}>
-                    完成检查
+                  <Button 
+                    type="primary" 
+                    size="large"
+                    onClick={handleComplete}
+                    style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                  >
+                    ✓ 完成检查
                   </Button>
                 )}
               </Space>
+              
               <Button
                 type="primary"
+                size="large"
                 disabled={currentIndex === records.length - 1}
                 onClick={() => setCurrentIndex(currentIndex + 1)}
+                style={{ minWidth: 100 }}
               >
-                下一条
+                下一条 →
               </Button>
             </div>
           </Card>
         )}
+        </div>
       </div>
 
       <Drawer

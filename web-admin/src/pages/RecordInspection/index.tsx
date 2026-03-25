@@ -317,10 +317,11 @@ export default function RecordInspection() {
       content: (
         <div>
           <div style={{ marginBottom: 12 }}>检查结果汇总：</div>
-          <div style={{ display: 'flex', gap: 24, marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
             <span>✅ 合格：{passCount} 项</span>
             {failCount > 0 && <span style={{ color: '#ff4d4f' }}>❌ 不合格：{failCount} 项</span>}
-            {naCount > 0 && <span style={{ color: '#999' }}>⚪ 不适用：{naCount} 项</span>}
+            {pendingRectificationCount > 0 && <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>}
+            {notApplicableCount > 0 && <span style={{ color: '#999' }}>⚪ 未涉及：{notApplicableCount} 项</span>}
           </div>
           <div style={{ marginBottom: 8 }}>
             <strong>最终判定：</strong>
@@ -389,7 +390,8 @@ export default function RecordInspection() {
   // 统计各项数量
   const passCount = flatItems.filter(item => item.radio_value === 'pass').length
   const failCount = flatItems.filter(item => item.radio_value === 'fail').length
-  const naCount = flatItems.filter(item => item.radio_value === 'na').length
+  const pendingRectificationCount = flatItems.filter(item => item.radio_value === 'pending_rectification').length
+  const notApplicableCount = flatItems.filter(item => item.radio_value === 'not_applicable').length
 
   // 是否可以提交
   const canSubmit = progress === 100 && finalJudgment.result && record?.status === 'draft'
@@ -399,7 +401,8 @@ export default function RecordInspection() {
       const valueMap: Record<string, { color: string; text: string }> = {
         'pass': { color: 'success', text: '合格' },
         'fail': { color: 'error', text: '不合格' },
-        'na': { color: 'default', text: '不适用' },
+        'pending_rectification': { color: 'warning', text: '待整改' },
+        'not_applicable': { color: 'default', text: '未涉及' },
         'complete': { color: 'success', text: '全部整改完成' },
         'partial': { color: 'warning', text: '部分整改' },
         'none': { color: 'error', text: '未整改' },
@@ -498,24 +501,20 @@ export default function RecordInspection() {
             }
             extra={
               <Space>
-                {currentItem.use_ai && (
-                  <>
-                    <Button
-                      icon={<BulbOutlined />}
-                      onClick={() => handleLLMRequest('suggestion')}
-                      style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
-                    >
-                      AI建议
-                    </Button>
-                    <Button
-                      icon={<BookOutlined />}
-                      onClick={() => handleLLMRequest('basis')}
-                      style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
-                    >
-                      法规依据
-                    </Button>
-                  </>
-                )}
+                <Button
+                  icon={<BulbOutlined />}
+                  onClick={() => handleLLMRequest('suggestion')}
+                  style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
+                >
+                  AI建议
+                </Button>
+                <Button
+                  icon={<BookOutlined />}
+                  onClick={() => handleLLMRequest('basis')}
+                  style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
+                >
+                  法规依据
+                </Button>
               </Space>
             }
           >
@@ -554,7 +553,7 @@ export default function RecordInspection() {
                   {(currentItem.result_options?.options || currentItem.result_options || [
                     { value: 'pass', label: '合格' },
                     { value: 'fail', label: '不合格' },
-                    { value: 'na', label: '不适用' },
+                    { value: 'not_applicable', label: '未涉及' },
                   ]).map((opt: any) => (
                     <Radio.Button key={opt.value} value={opt.value}>
                       {opt.label}
@@ -631,10 +630,10 @@ export default function RecordInspection() {
             </div>
 
             <div style={{ marginBottom: 24 }}>
-              <div style={{ marginBottom: 8, fontWeight: 500 }}>检查说明</div>
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>审核记录</div>
               <TextArea
                 rows={2}
-                placeholder="请输入检查说明..."
+                placeholder="请输入审核记录..."
                 value={currentItem.inspector_note || ''}
                 onChange={(e) => {
                   const updatedItems = flatItems.map((item, idx) => {
@@ -710,24 +709,29 @@ export default function RecordInspection() {
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontWeight: 500, marginBottom: 12 }}>检查结果汇总</div>
               <Row gutter={16}>
-                <Col span={6}>
+                <Col span={4}>
                   <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
-                    <Statistic title="合格项" value={passCount} valueStyle={{ color: '#52c41a' }} />
+                    <Statistic title="合格" value={passCount} valueStyle={{ color: '#52c41a' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                <Col span={4}>
                   <Card size="small" style={{ background: '#fff2f0', borderColor: '#ffccc7' }}>
-                    <Statistic title="不合格项" value={failCount} valueStyle={{ color: '#ff4d4f' }} />
+                    <Statistic title="不合格" value={failCount} valueStyle={{ color: '#ff4d4f' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                <Col span={4}>
+                  <Card size="small" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
+                    <Statistic title="待整改" value={pendingRectificationCount} valueStyle={{ color: '#faad14' }} />
+                  </Card>
+                </Col>
+                <Col span={4}>
                   <Card size="small" style={{ background: '#fafafa', borderColor: '#d9d9d9' }}>
-                    <Statistic title="不适用项" value={naCount} valueStyle={{ color: '#999' }} />
+                    <Statistic title="未涉及" value={notApplicableCount} valueStyle={{ color: '#999' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                <Col span={4}>
                   <Card size="small">
-                    <Statistic title="总检查项" value={flatItems.length} />
+                    <Statistic title="总计" value={flatItems.length} />
                   </Card>
                 </Col>
               </Row>

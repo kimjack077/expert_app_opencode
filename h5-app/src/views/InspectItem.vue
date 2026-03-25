@@ -95,7 +95,7 @@
           <span class="last-result-label">上次检查：</span>
           <span class="last-result-value" :class="historyStats.last_result">
             <van-icon :name="historyStats.last_result === 'pass' ? 'success' : (historyStats.last_result === 'fail' ? 'cross' : 'minus')" />
-            {{ historyStats.last_result === 'pass' ? '合格' : (historyStats.last_result === 'fail' ? '不合格' : '不适用') }}
+            {{ getResultLabel(historyStats.last_result) }}
           </span>
           <span v-if="historyStats.last_inspection_date" class="last-result-date">
             {{ formatDate(historyStats.last_inspection_date) }}
@@ -292,7 +292,7 @@
             <van-radio-group v-model="formData.radio_value" direction="horizontal">
               <van-radio name="pass" shape="square">合格</van-radio>
               <van-radio name="fail" shape="square">不合格</van-radio>
-              <van-radio name="na" shape="square">不适用</van-radio>
+              <van-radio name="not_applicable" shape="square">未涉及</van-radio>
             </van-radio-group>
           </div>
         </div>
@@ -399,16 +399,16 @@
         </div>
       </div>
 
-      <!-- 备注说明 -->
+      <!-- 审核记录 -->
       <div class="note-card">
         <div class="card-header">
-          <span class="card-title">备注说明</span>
+          <span class="card-title">审核记录</span>
         </div>
         <van-field
           v-model="formData.inspector_note"
           type="textarea"
           rows="2"
-          placeholder="添加备注（可选）"
+          placeholder="添加审核记录（可选）"
           autosize
         />
       </div>
@@ -475,7 +475,8 @@ const resultOptions = computed(() => {
   return [
     { label: '合格', value: 'pass' },
     { label: '不合格', value: 'fail' },
-    { label: '不适用', value: 'na' }
+    { label: '待整改', value: 'pending_rectification' },
+    { label: '未涉及', value: 'not_applicable' }
   ]
 })
 
@@ -528,6 +529,26 @@ const scoreJudgmentIcon = computed(() => {
 const scoreJudgmentText = computed(() => {
   return scoreJudgmentClass.value === 'pass' ? '合格' : '不合格'
 })
+
+const getResultLabel = (value) => {
+  const labelMap = {
+    'pass': '合格',
+    'fail': '不合格',
+    'pending_rectification': '待整改',
+    'not_applicable': '未涉及'
+  }
+  return labelMap[value] || value
+}
+
+const getResultIcon = (value) => {
+  const iconMap = {
+    'pass': 'success',
+    'fail': 'cross',
+    'pending_rectification': 'warning-o',
+    'not_applicable': 'minus'
+  }
+  return iconMap[value] || 'minus'
+}
 
 // 数值类型自动判定
 const numericJudgmentClass = computed(() => {

@@ -34,7 +34,10 @@ async def upload_file(
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
 
-        if str(task.assigned_to) != str(current_user.id):
+        # 允许任务分配人、管理员上传
+        is_assignee = str(task.assigned_to) == str(current_user.id)
+        is_admin = current_user.role in ("super_admin", "admin")
+        if not is_assignee and not is_admin:
             raise HTTPException(status_code=403, detail="Not authorized")
 
     stored_name, file_path, file_size = await save_upload_file(file, "inspections")
