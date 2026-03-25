@@ -229,6 +229,35 @@ async def complete_task(
     return make_response(message="Task completed")
 
 
+@router.delete("/{task_id}", response_model=ApiResponse)
+async def delete_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除检查任务（仅管理员可删除）"""
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admin can delete tasks")
+
+    task = await db.get(InspectionTask, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    await db.delete(task)
+    await db.commit()
+
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "delete_task",
+        "task",
+        task_id,
+    )
+
+    return make_response(message="Task deleted")
+
+
 @router.get("/{task_id}/records", response_model=ApiResponse)
 async def get_task_records(
     task_id: str,

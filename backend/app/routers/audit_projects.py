@@ -416,7 +416,7 @@ async def update_plan_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新审核计划项"""
+    """更新审核计划项，同时同步更新关联的检查任务"""
     result = await db.execute(
         select(AuditPlanItem).where(AuditPlanItem.id == plan_item_id)
     )
@@ -424,8 +424,42 @@ async def update_plan_item(
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
 
+    # 更新审核计划项字段
     for field, value in plan_item_update.model_dump(exclude_unset=True).items():
         setattr(plan_item, field, value)
+
+    # 同步更新关联的检查任务
+    if plan_item.inspection_task_id:
+        inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
+        if inspection_task:
+            # 获取项目和企业信息
+            project = await db.get(AuditProject, plan_item.project_id)
+            enterprise = None
+            if project:
+                enterprise = await db.get(Enterprise, project.enterprise_id)
+
+            # 更新检查任务标题（包含区域信息）
+            if project and plan_item.area_name:
+                inspection_task.title = f"{project.title} - {plan_item.area_name} - {plan_item.plan_date}"
+
+            # 更新检查任务分配人
+            if plan_item.assigned_member_ids and len(plan_item.assigned_member_ids) > 0:
+                inspection_task.assigned_to = plan_item.assigned_member_ids[0]
+
+            # 更新检查任务模板
+            if plan_item.template_id:
+                inspection_task.template_id = plan_item.template_id
+
+            # 更新检查任务时间
+            if plan_item.plan_date:
+                inspection_task.scheduled_at = datetime.combine(plan_item.plan_date, datetime.min.time())
+
+            # 确保 target_name 和 target_address 始终是企业信息
+            if enterprise:
+                inspection_task.target_name = enterprise.name
+                inspection_task.target_address = enterprise.address
+            elif project:
+                inspection_task.target_name = project.title
 
     await db.commit()
     await db.refresh(plan_item)
@@ -438,7 +472,7 @@ async def delete_plan_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除审核计划项"""
+    """删除审核计划项，同时删除关联的检查任务"""
     result = await db.execute(
         select(AuditPlanItem).where(AuditPlanItem.id == plan_item_id)
     )
@@ -446,9 +480,15 @@ async def delete_plan_item(
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
 
+    # 删除关联的检查任务
+    if plan_item.inspection_task_id:
+        inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
+        if inspection_task:
+            await db.delete(inspection_task)
+
     await db.delete(plan_item)
     await db.commit()
-    return make_response(message="审核计划项已删除")
+    return make_response(message="审核计划项及关联的检查任务已删除")
 
 
 # ==================== AuditAreaRecord Routes ====================

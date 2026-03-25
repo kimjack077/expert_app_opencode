@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag } from 'antd'
-import { PlusOutlined, EyeOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm } from 'antd'
+import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
 import dayjs from 'dayjs'
@@ -82,6 +82,16 @@ export default function Tasks() {
     }
   }
 
+  const handleDelete = async (id: string) => {
+    try {
+      await taskApi.deleteTask(id)
+      message.success('任务已删除')
+      fetchTasks()
+    } catch (error) {
+      message.error('删除失败')
+    }
+  }
+
   const getStatusTag = (status: string) => {
     const statusMap: Record<string, { color: string; text: string }> = {
       pending: { color: 'default', text: '待开始' },
@@ -143,6 +153,17 @@ export default function Tasks() {
               继续检查
             </Button>
           )}
+          <Popconfirm
+            title="确认删除"
+            description="确定要删除这个任务吗？"
+            onConfirm={() => handleDelete(record.id)}
+            okText="确认"
+            cancelText="取消"
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },

@@ -64,6 +64,7 @@ function App() {
           <Route path="audit-projects" element={<AuditProjects />} />
           <Route path="audit-projects/create" element={<CreateAuditProject />} />
           <Route path="audit-projects/:id" element={<AuditProjectDetail />} />
+          <Route path="audit-projects/:id/edit" element={<CreateAuditProject />} />
           <Route path="audit-projects/:projectId/records/:recordId" element={<AuditRecordEdit />} />
           {/* 审核统计模块 */}
           <Route path="audit-statistics" element={<AuditStatistics />} />

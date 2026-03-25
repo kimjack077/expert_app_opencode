@@ -83,6 +83,7 @@ export const taskApi = {
   getTask: (id: string) => api.get(`/tasks/${id}`),
   createTask: (data: any) => api.post('/tasks', data),
   updateTask: (id: string, data: any) => api.put(`/tasks/${id}`, data),
+  deleteTask: (id: string) => api.delete(`/tasks/${id}`),
   startTask: (id: string) => api.post(`/tasks/${id}/start`),
   completeTask: (id: string) => api.post(`/tasks/${id}/complete`),
 
