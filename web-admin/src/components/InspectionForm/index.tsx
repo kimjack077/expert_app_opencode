@@ -56,6 +56,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   // 实际的记录ID（可能从任务创建）
   const [actualRecordId, setActualRecordId] = useState<string | null>(null)
+  // 原始任务ID（如果是从任务创建的记录）
+  const [originalTaskId, setOriginalTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -95,6 +97,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         const taskRes: any = await taskApi.getTask(id)
         if (taskRes.code === 200 && taskRes.data) {
           const task = taskRes.data
+          // 保存原始任务ID
+          setOriginalTaskId(id)
           // 从任务创建检查记录
           const createRes: any = await recordApi.createRecord({
             template_id: task.template_id,
@@ -425,6 +429,14 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
             remarks: finalJudgment.remarks,
           })
           await recordApi.submitRecord(recordId)
+          // 如果是从任务创建的记录，同时完成原始任务
+          if (originalTaskId) {
+            try {
+              await taskApi.completeTask(originalTaskId)
+            } catch (e) {
+              console.error('Failed to complete original task:', e)
+            }
+          }
           message.success('检查记录已提交')
           if (onComplete) {
             onComplete()

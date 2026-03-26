@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Card, Button, Space, Modal, Form, Input, DatePicker, TimePicker, Select, message, Table, Tag } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, CalendarOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, CalendarOutlined, EyeOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { auditPlanApi, auditTeamApi, auditProjectApi } from '@/services/auditProjectApi'
 import { templateApi } from '@/services/api'
 import dayjs from 'dayjs'
@@ -24,6 +25,7 @@ interface PlanItem {
   template_id: string
   activity_type: string
   status: string
+  inspection_task_id: string | null
 }
 
 interface ProjectDetail {
@@ -48,6 +50,7 @@ const statusColorMap: Record<string, string> = {
 }
 
 export default function PlanEditor({ projectId }: Props) {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
   const [modalVisible, setModalVisible] = useState(false)
@@ -247,17 +250,34 @@ export default function PlanEditor({ projectId }: Props) {
       dataIndex: 'status',
       key: 'status',
       width: 80,
-      render: (status: string) => (
-        <Tag color={statusColorMap[status]}>{status}</Tag>
-      ),
+      render: (status: string) => {
+        const statusTextMap: Record<string, string> = {
+          pending: '待开始',
+          in_progress: '进行中',
+          completed: '已完成',
+        }
+        return (
+          <Tag color={statusColorMap[status]}>{statusTextMap[status] || status}</Tag>
+        )
+      },
     },
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
+          {record.inspection_task_id && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/inspection/${record.inspection_task_id}`)}
+            >
+              {record.status === 'completed' ? '查看检查' : '执行检查'}
+            </Button>
+          )}
           <Button
             type="link"
             size="small"

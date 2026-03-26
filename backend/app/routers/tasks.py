@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional, List
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -144,6 +145,8 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.models.audit_project import AuditPlanItem, AuditProject
+
     task = await db.get(InspectionTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -159,11 +162,41 @@ async def update_task(
                 task.started_at = datetime.utcnow()
             elif task_data.status == "completed":
                 task.completed_at = datetime.utcnow()
+                # 检查是否有关联的审核计划项
+                try:
+                    task_uuid = UUID(task_id)
+                    plan_item_result = await db.execute(
+                        select(AuditPlanItem).where(AuditPlanItem.inspection_task_id == task_uuid)
+                    )
+                    plan_item = plan_item_result.scalar_one_or_none()
+                except ValueError:
+                    plan_item = None
+                if plan_item:
+                    plan_item.status = "completed"
+                    project = await db.get(AuditProject, plan_item.project_id)
+                    if project and project.status == "planning":
+                        project.status = "in_progress"
     else:
         # 管理员可以更新所有字段
         update_data = task_data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(task, key, value)
+        # 如果管理员更新状态为 completed，也要同步审核计划项
+        if task_data.status == "completed":
+            task.completed_at = datetime.utcnow()
+            try:
+                task_uuid = UUID(task_id)
+                plan_item_result = await db.execute(
+                    select(AuditPlanItem).where(AuditPlanItem.inspection_task_id == task_uuid)
+                )
+                plan_item = plan_item_result.scalar_one_or_none()
+            except ValueError:
+                plan_item = None
+            if plan_item:
+                plan_item.status = "completed"
+                project = await db.get(AuditProject, plan_item.project_id)
+                if project and project.status == "planning":
+                    project.status = "in_progress"
 
     await db.commit()
     await db.refresh(task)
@@ -177,6 +210,8 @@ async def start_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.models.audit_project import AuditPlanItem, AuditProject
+
     task = await db.get(InspectionTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -190,6 +225,23 @@ async def start_task(
 
     task.status = "in_progress"
     task.started_at = datetime.utcnow()
+
+    # 检查是否有关联的审核计划项，更新为进行中状态
+    try:
+        task_uuid = UUID(task_id)
+        plan_item_result = await db.execute(
+            select(AuditPlanItem).where(AuditPlanItem.inspection_task_id == task_uuid)
+        )
+        plan_item = plan_item_result.scalar_one_or_none()
+    except ValueError:
+        plan_item = None
+    if plan_item:
+        plan_item.status = "in_progress"
+        # 更新审核项目状态
+        project = await db.get(AuditProject, plan_item.project_id)
+        if project and project.status == "planning":
+            project.status = "in_progress"
+
     await db.commit()
 
     await AuditService.log_action(
@@ -205,6 +257,9 @@ async def complete_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    from app.models.audit_project import AuditPlanItem, AuditProject
+    from sqlalchemy import text
+
     task = await db.get(InspectionTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -215,6 +270,31 @@ async def complete_task(
 
     task.status = "completed"
     task.completed_at = datetime.utcnow()
+
+    # 使用原生SQL更新关联的审核计划项状态
+    try:
+        task_uuid = UUID(task_id)
+        # 直接使用SQL更新，确保更新成功
+        result = await db.execute(
+            text("UPDATE audit_plan_items SET status = 'completed', updated_at = now() WHERE inspection_task_id = :task_id AND status != 'completed'"),
+            {"task_id": str(task_uuid)}
+        )
+        if result.rowcount > 0:
+            # 如果有计划项被更新，同时检查是否需要更新项目状态
+            project_result = await db.execute(
+                text("""
+                    UPDATE audit_projects
+                    SET status = 'in_progress', updated_at = now()
+                    WHERE id IN (
+                        SELECT DISTINCT project_id FROM audit_plan_items
+                        WHERE inspection_task_id = :task_id
+                    ) AND status = 'planning'
+                """),
+                {"task_id": str(task_uuid)}
+            )
+    except ValueError:
+        pass
+
     await db.commit()
 
     await AuditService.log_action(
