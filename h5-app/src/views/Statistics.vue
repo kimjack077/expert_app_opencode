@@ -180,6 +180,8 @@ const stats = ref({
 const resultStats = ref({
   pass: 0,
   fail: 0,
+  pending_rectification: 0,
+  not_applicable: 0,
   pending: 0
 })
 
@@ -191,19 +193,19 @@ const completionRate = computed(() => {
 })
 
 const passRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending
+  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
   if (total === 0) return 0
   return Math.round((resultStats.value.pass / total) * 100)
 })
 
 const failRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending
+  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
   if (total === 0) return 0
   return Math.round((resultStats.value.fail / total) * 100)
 })
 
 const pendingRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending
+  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
   if (total === 0) return 0
   return Math.round((resultStats.value.pending / total) * 100)
 })
@@ -229,6 +231,8 @@ const fetchData = async () => {
     resultStats.value = {
       pass: records.filter(r => r.overall_result === 'pass').length,
       fail: records.filter(r => r.overall_result === 'fail').length,
+      pending_rectification: records.filter(r => r.overall_result === 'pending_rectification').length,
+      not_applicable: records.filter(r => r.overall_result === 'not_applicable').length,
       pending: records.filter(r => r.overall_result === 'pending' || !r.overall_result).length
     }
     

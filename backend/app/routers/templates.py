@@ -3,7 +3,7 @@ from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, or_
+from sqlalchemy import select, update, delete, or_, func, Integer
 from sqlalchemy.orm import selectinload
 
 # RELOADED_MARKER_V3
@@ -94,19 +94,26 @@ async def get_templates(
     result = await db.execute(query)
     templates = result.scalars().all()
 
-    # 获取每个模板的统计信息
+    if not templates:
+        return make_response(data=[])
+
+    template_ids = [t.id for t in templates]
+    
+    items_count_query = select(
+        TemplateItem.template_id,
+        func.count(TemplateItem.id).label('total_items'),
+        func.sum(func.cast(TemplateItem.is_category == True, Integer)).label('categories'),
+        func.sum(func.cast(TemplateItem.is_category != True, Integer)).label('check_items')
+    ).where(
+        TemplateItem.template_id.in_(template_ids)
+    ).group_by(TemplateItem.template_id)
+    
+    items_result = await db.execute(items_count_query)
+    stats_map = {row.template_id: {'total_items': row.total_items, 'categories': row.categories or 0, 'check_items': row.check_items or 0} for row in items_result.all()}
+
     template_list = []
     for t in templates:
-        # 统计该模板的检查项目
-        count_query = select(TemplateItem).where(TemplateItem.template_id == t.id)
-        count_result = await db.execute(count_query)
-        items = count_result.scalars().all()
-
-        total_items = len(items)
-        # 明确统计 is_category 为 True 和 False 的数量（处理 NULL 值）
-        categories = sum(1 for item in items if item.is_category is True)
-        check_items = sum(1 for item in items if item.is_category is not True)
-
+        stats = stats_map.get(t.id, {'total_items': 0, 'categories': 0, 'check_items': 0})
         template_list.append({
             'id': str(t.id),
             'name': t.name,
@@ -119,11 +126,7 @@ async def get_templates(
             'created_by': str(t.created_by) if t.created_by else None,
             'can_edit': can_modify_template(current_user, t),
             'created_at': t.created_at.isoformat() if t.created_at else None,
-            'stats': {
-                'total_items': total_items,
-                'categories': categories,
-                'check_items': check_items,
-            }
+            'stats': stats
         })
 
     return make_response(data=template_list)

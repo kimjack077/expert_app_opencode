@@ -252,7 +252,8 @@ const getResultClass = (item) => {
   
   if (result.radio_value === 'fail') return 'fail'
   if (result.radio_value === 'pass') return 'pass'
-  if (result.radio_value === 'na') return 'na'
+  if (result.radio_value === 'pending_rectification') return 'pending_rectification'
+  if (result.radio_value === 'not_applicable') return 'not_applicable'
   return 'completed'
 }
 

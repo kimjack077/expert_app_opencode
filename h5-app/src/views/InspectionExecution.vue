@@ -109,9 +109,12 @@
                   direction="horizontal"
                   @change="(val) => onQuickInput(item, 'radio_value', val)"
                 >
-                  <van-radio name="pass" shape="square">合格</van-radio>
-                  <van-radio name="fail" shape="square">不合格</van-radio>
-                  <van-radio name="na" shape="square">不适用</van-radio>
+                  <van-radio
+                    v-for="opt in (item.result_options || defaultResultOptions)"
+                    :key="opt.value"
+                    :name="opt.value"
+                    shape="square"
+                  >{{ opt.label }}</van-radio>
                 </van-radio-group>
                 <div v-if="quickInputs[item.id].radio_value === 'fail'" class="fail-description">
                   <van-field
@@ -232,7 +235,7 @@
             </div>
             <div class="stat-item na">
               <div class="stat-value">{{ naCount }}</div>
-              <div class="stat-label">不适用项</div>
+              <div class="stat-label">未涉及项</div>
             </div>
             <div class="stat-item total">
               <div class="stat-value">{{ totalCheckItems }}</div>
@@ -405,6 +408,13 @@ const defaultMultiOptions = [
   { label: '不符合', value: 'non_compliant' }
 ]
 
+const defaultResultOptions = [
+  { label: '合格', value: 'pass' },
+  { label: '不合格', value: 'fail' },
+  { label: '待整改', value: 'pending_rectification' },
+  { label: '未涉及', value: 'not_applicable' }
+]
+
 const riskLevelText = computed(() => {
   const levelMap = {
     'high': '高风险',
@@ -544,7 +554,7 @@ const naCount = computed(() => {
     if (item.is_category !== true && isItemCompleted(item)) {
       const result = itemResults.value[item.id]
       const radioValue = result?.radio_value
-      if (radioValue === 'na' || radioValue === 'not_applicable') count++
+      if (radioValue === 'not_applicable') count++
     }
   }
   return count
@@ -850,7 +860,8 @@ const getItemResultText = (item) => {
       const value = result.radio_value
       if (value === 'pass') return '合格'
       if (value === 'fail') return '不合格'
-      if (value === 'na') return '不适用'
+      if (value === 'pending_rectification') return '待整改'
+      if (value === 'not_applicable') return '未涉及'
       const options = item.result_options || []
       const opt = options.find(o => o.value === value)
       return opt?.label || value
@@ -1022,7 +1033,7 @@ const showSubmitConfirm = async () => {
     `检查项目统计：`,
     `✅ 合格：${passNum} 项`,
     failNum > 0 ? `❌ 不合格：${failNum} 项` : null,
-    naNum > 0 ? `⚪ 不适用：${naNum} 项` : null,
+    naNum > 0 ? `⚪ 未涉及：${naNum} 项` : null,
     `━━━━━━━━━━━━`,
     `共计：${totalNum} 项`,
     '',

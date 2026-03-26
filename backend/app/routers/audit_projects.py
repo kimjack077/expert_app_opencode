@@ -25,7 +25,8 @@ from app.models.audit_project import (
     AuditReport,
     CommunicationMeeting,
 )
-from app.models.task import InspectionTask
+from app.models.task import InspectionTask, TaskItemRecord
+from app.models.template import TemplateItem
 from app.models.user import User
 from app.models.enterprise import Enterprise
 from app.schemas import ApiResponse
@@ -360,6 +361,22 @@ async def create_plan_item(
     )
     db.add(inspection_task)
     await db.flush()
+    
+    if plan_item.template_id:
+        items_result = await db.execute(
+            select(TemplateItem)
+            .where(TemplateItem.template_id == plan_item.template_id)
+            .order_by(TemplateItem.sort_order)
+        )
+        items = items_result.scalars().all()
+        
+        for item in items:
+            record = TaskItemRecord(
+                task_id=inspection_task.id,
+                template_item_id=item.id,
+            )
+            db.add(record)
+        await db.flush()
     
     db_plan_item = AuditPlanItem(
         project_id=project_id,

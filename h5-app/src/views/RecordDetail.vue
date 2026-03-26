@@ -76,6 +76,7 @@
             :index="index"
             :get-check-type-text="getCheckTypeText"
             :get-radio-text="getRadioText"
+            :get-radio-tag-type="getRadioTagType"
             :format-range="formatRange"
             :preview-image="previewImage"
             :get-item-score="getItemScore"
@@ -154,9 +155,20 @@ const getRadioText = (value) => {
   const texts = {
     'pass': '合格',
     'fail': '不合格',
-    'na': '不适用',
+    'pending_rectification': '待整改',
+    'not_applicable': '未涉及',
   }
   return texts[value] || value
+}
+
+const getRadioTagType = (value) => {
+  const types = {
+    'pass': 'success',
+    'fail': 'danger',
+    'pending_rectification': 'warning',
+    'not_applicable': 'default',
+  }
+  return types[value] || 'default'
 }
 
 const getOverallResultText = (result) => {
