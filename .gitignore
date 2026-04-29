@@ -68,7 +68,7 @@ logs/
 .env.local
 .env.*.local
 .env.development
-.env.production
+# .env.production - Allow production config to be committed for deployment
 
 # Database backups
 *.sql.gz
