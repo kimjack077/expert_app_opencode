@@ -302,7 +302,7 @@ class MultimodalService:
                     ]
                 }
             ],
-            max_tokens=1000,
+            max_tokens=2048,
         )
         return response.choices[0].message.content or ""
 
@@ -329,7 +329,7 @@ class MultimodalService:
                     ]
                 }
             ],
-            max_tokens=1000,
+            max_tokens=2048,
             stream=True,
         )
 

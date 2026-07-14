@@ -126,7 +126,11 @@ async def chat(
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            error_event = {"type": "error", "content": str(e)}
+            print(f"[Agent] Chat request failed: {type(e).__name__}: {e}")
+            error_event = {
+                "type": "error",
+                "content": "AI 助手暂时无法完成这次请求，请稍后重试。",
+            }
             yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
 
         finally:
@@ -154,17 +158,60 @@ async def chat(
     )
 
 
+@router.get("/models")
+async def get_models(
+    current_user: User = Depends(get_current_user),
+):
+    return make_response(
+        data={
+            "models": agent_service.get_available_models(),
+            "default_model": agent_service.model,
+            "vision_model": agent_service.vision_model,
+        }
+    )
+
+
 @router.get("/briefing/{enterprise_id}")
 async def get_briefing(
     enterprise_id: str,
+    model: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """检查前准备简报：企业概况 + 历史遗留问题 + 相关法规 + 重点关注清单"""
-    briefing = await agent_service.generate_briefing(enterprise_id, db)
+    briefing = await agent_service.generate_briefing(enterprise_id, db, model_id=model)
     if "error" in briefing:
-        raise HTTPException(status_code=404, detail=briefing["error"])
+        raise HTTPException(
+            status_code=briefing.get("status_code", 404),
+            detail=briefing["error"],
+        )
     return make_response(data=briefing)
+
+
+@router.get("/briefing/{enterprise_id}/stream")
+async def stream_briefing(
+    enterprise_id: str,
+    model: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    async def event_generator():
+        async for event in agent_service.generate_briefing_stream(
+            enterprise_id,
+            db,
+            model_id=model,
+        ):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/conversations")

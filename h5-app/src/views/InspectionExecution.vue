@@ -386,6 +386,7 @@ const record = ref(null)
 const expandedItems = ref([])
 const itemResults = ref({})
 const quickInputs = ref({})
+const pendingItemSaves = new Set()
 
 const aiJudgmentLoading = ref(false)
 const aiJudgmentThinking = ref(false)
@@ -621,8 +622,11 @@ const onAgentResultApplied = ({ itemId, result, problemDescription }) => {
 
 const onAgentVerdictApplied = ({ verdict, comment }) => {
   finalJudgment.result = verdict
-  if (comment) {
-    finalJudgment.remarks = comment
+  finalJudgment.remarks = comment || ''
+
+  if (record.value) {
+    record.value.overall_result = verdict
+    record.value.remarks = comment || ''
   }
 }
 
@@ -817,6 +821,10 @@ const isItemCompleted = (item) => {
     case 'pass_fail':
       // 必须有明确的 radio_value
       resultFilled = !!result.radio_value
+      // 不合格项还必须填写问题描述，避免页面显示已完成但数据库只保存了半条结果
+      if (result.radio_value === 'fail') {
+        resultFilled = !!result.problem_description?.trim()
+      }
       break
     case 'score':
       // 必须有明确的分数值，且不能是空字符串
@@ -1008,7 +1016,6 @@ const onQuickInput = async (item, field, value) => {
   if (field === 'radio_value' && value === 'fail' && checkType === 'pass_fail') {
     if (!quickInputs.value[item.id].problem_description) {
       showToast('请填写不合格问题描述')
-      return
     }
   }
 
@@ -1022,7 +1029,13 @@ const onQuickInput = async (item, field, value) => {
       data.problem_description = quickInputs.value[item.id].problem_description || ''
     }
 
-    await createOrUpdateRecordItem(currentRecordId.value, data)
+    const savePromise = createOrUpdateRecordItem(currentRecordId.value, data)
+    pendingItemSaves.add(savePromise)
+    try {
+      await savePromise
+    } finally {
+      pendingItemSaves.delete(savePromise)
+    }
   } catch (error) {
     console.error('保存失败:', error)
     showToast('保存失败')
@@ -1122,6 +1135,15 @@ const generateFinalJudgment = async () => {
   aiJudgmentResultType.value = ''
   
   try {
+    // 单选、输入框失焦保存可能仍在进行，必须等数据库同步后再让后端统计。
+    const pendingSaves = [...pendingItemSaves]
+    if (pendingSaves.length > 0) {
+      const saveResults = await Promise.allSettled(pendingSaves)
+      if (saveResults.some(result => result.status === 'rejected')) {
+        throw new Error('检查项尚未保存成功')
+      }
+    }
+
     const recordId = currentRecordId.value
     const token = localStorage.getItem('token')
     
@@ -1222,7 +1244,7 @@ watch(
 
 .page-header {
   position: relative;
-  padding: 0 0 30px;
+  padding: 0 0 12px;
   overflow: hidden;
 }
 
@@ -1255,13 +1277,13 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 50px 20px 20px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 8px;
 }
 
 .back-btn,
 .header-actions {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border-radius: 12px;
@@ -1278,11 +1300,11 @@ watch(
 }
 
 .header-info {
-  padding: 0 20px 20px;
+  padding: 0 16px 8px;
 }
 
 .enterprise-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #fff;
   margin-bottom: 4px;
@@ -1328,7 +1350,7 @@ watch(
 }
 
 .template-name {
-  font-size: 14px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
 }
 

@@ -339,7 +339,7 @@ const goToDetail = (record) => {
 
 .page-header {
   position: relative;
-  padding: 0 0 30px;
+  padding: 0 0 16px;
   overflow: hidden;
 }
 
@@ -372,28 +372,34 @@ const goToDetail = (record) => {
 .header-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  padding: 48px 20px 20px;
+  align-items: center;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 10px;
 }
 
 .header-info {
   flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .page-title {
-  font-size: 26px;
+  font-size: 23px;
   font-weight: 700;
   color: var(--bg-white);
-  margin-bottom: 4px;
+  margin: 0;
   font-family: var(--font-primary);
   letter-spacing: -0.5px;
+  line-height: 1.25;
 }
 
 .page-subtitle {
-  font-size: 13px;
+  margin: 0;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
   font-weight: 400;
-  letter-spacing: 0.3px;
+  white-space: nowrap;
 }
 
 .header-actions {
@@ -423,27 +429,31 @@ const goToDetail = (record) => {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 18px 16px;
-  margin: 0 20px;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin: 0 16px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .stat-item {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bg-white);
   font-family: var(--font-primary);
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
+  line-height: 1;
 }
 
 .stat-label {
@@ -455,12 +465,12 @@ const goToDetail = (record) => {
 
 .stat-divider {
   width: 1px;
-  height: 36px;
+  height: 22px;
   background: rgba(255, 255, 255, 0.15);
 }
 
 .search-section {
-  margin: -10px 16px 16px;
+  margin: -8px 16px 12px;
   position: relative;
   z-index: 10;
 }
@@ -481,7 +491,7 @@ const goToDetail = (record) => {
 .filter-tabs {
   display: flex;
   gap: 8px;
-  padding: 0 16px 16px;
+  padding: 0 16px 12px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -492,7 +502,8 @@ const goToDetail = (record) => {
 
 .filter-tab {
   flex-shrink: 0;
-  padding: 8px 18px;
+  min-height: 44px;
+  padding: 0 18px;
   border-radius: 20px;
   font-size: 13px;
   background: var(--bg-white);
@@ -502,6 +513,9 @@ const goToDetail = (record) => {
   box-shadow: var(--shadow-xs);
   font-weight: 500;
   border: 1px solid var(--border-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .filter-tab.active {

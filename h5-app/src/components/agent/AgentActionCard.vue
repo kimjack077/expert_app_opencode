@@ -78,7 +78,7 @@
 
     <div v-else class="card-status">
       <template v-if="action.status === 'confirmed'">
-        <van-icon name="success" color="#52C41A" /> 已填写
+        <van-icon name="success" color="#52C41A" /> 已写入系统
       </template>
       <template v-else-if="action.status === 'cancelled'">
         <van-icon name="cross" color="#FF4D4F" /> 已忽略

@@ -343,7 +343,7 @@ const streamChat = async (message) => {
             } else if (data.type === 'error') {
               messages.value[messageIndex] = {
                 ...messages.value[messageIndex],
-                content: `抱歉，发生了错误：${data.content}`
+                content: data.content || 'AI 助手暂时无法完成这次请求，请稍后重试。'
               }
             }
           } catch (e) {

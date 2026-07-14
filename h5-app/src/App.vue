@@ -1,11 +1,13 @@
 <template>
   <div class="app-container">
     <router-view />
-    <AgentFab @click="showChat = true" />
-    <AgentChatPanel
-      v-model:show="showChat"
-      :context="chatContext"
-    />
+    <template v-if="!hasEmbeddedAgent">
+      <AgentFab @click="showChat = true" />
+      <AgentChatPanel
+        v-model:show="showChat"
+        :context="chatContext"
+      />
+    </template>
   </div>
 </template>
 
@@ -17,6 +19,10 @@ import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
 
 const route = useRoute()
 const showChat = ref(false)
+
+const hasEmbeddedAgent = computed(() =>
+  route.path.startsWith('/inspection/') || /^\/task\/[^/]+\/execute$/.test(route.path)
+)
 
 const chatContext = computed(() => ({
   recordId: route.params.id || '',

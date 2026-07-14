@@ -301,7 +301,7 @@ onMounted(() => {
 
 .page-header {
   background: var(--primary-gradient-dark);
-  padding: 50px 20px 30px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 12px;
   position: relative;
   overflow: hidden;
 }
@@ -326,8 +326,8 @@ onMounted(() => {
 }
 
 .back-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -341,8 +341,8 @@ onMounted(() => {
 }
 
 .header-actions {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;

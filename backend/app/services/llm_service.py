@@ -50,6 +50,10 @@ FINAL_JUDGMENT_PROMPT = """
 - 符合项：{pass_count} 项
 - 不符合项：{fail_count} 项
 - 不适用项：{na_count} 项
+- 其他类型项：{other_count} 项
+
+【判定规则】
+只要存在不符合项（不符合项数量大于 0），最终判定必须为“不合格”，不得判为“合格”或“基本合格”。
 
 请按以下格式输出（纯文本，不要使用Markdown格式）：
 
@@ -64,7 +68,7 @@ FINAL_JUDGMENT_PROMPT = """
 class LLMService:
     def __init__(self):
         print(f"[LLM] Initializing with base_url={settings.LLM_BASE_URL}, model={settings.LLM_MODEL}")
-        print(f"[LLM] API Key: {settings.LLM_API_KEY[:20]}...")
+        print(f"[LLM] API key configured: {bool(settings.LLM_API_KEY)}")
         self.client = AsyncOpenAI(
             base_url=settings.LLM_BASE_URL,
             api_key=settings.LLM_API_KEY,
@@ -382,6 +386,9 @@ class LLMService:
                     yield {"type": "thinking", "content": content}
 
             final_content = self.extract_final_judgment(full_content)
+            final_content = self._apply_final_judgment_rules(
+                final_content, fail_count=fail_count
+            )
             yield {"type": "done", "content": final_content.get("remarks", ""), "result": final_content.get("result", ""), "full_content": full_content}
 
         except Exception as e:
@@ -521,6 +528,13 @@ class LLMService:
         remarks = remarks.strip()
 
         return {"result": result, "remarks": remarks}
+
+    def _apply_final_judgment_rules(self, judgment: dict, fail_count: int) -> dict:
+        """应用不可交由模型自由发挥的最终判定规则。"""
+        resolved = dict(judgment)
+        if fail_count > 0:
+            resolved["result"] = "fail"
+        return resolved
 
 
 llm_service = LLMService()

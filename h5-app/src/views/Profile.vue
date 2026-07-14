@@ -284,7 +284,7 @@ onMounted(() => {
 
 .page-header {
   position: relative;
-  padding: 50px 20px 30px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 16px;
   overflow: hidden;
 }
 
@@ -317,21 +317,21 @@ onMounted(() => {
 .avatar-section {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
 .avatar-ring {
-  width: 80px;
-  height: 80px;
-  padding: 4px;
+  width: 44px;
+  height: 44px;
+  padding: 2px;
   background: rgba(255, 255, 255, 0.3);
   border-radius: 50%;
 }
 
 .avatar {
-  width: 72px;
-  height: 72px;
+  width: 40px;
+  height: 40px;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 50%;
   display: flex;
@@ -341,26 +341,32 @@ onMounted(() => {
   color: var(--bg-white);
 }
 
+.avatar svg {
+  width: 24px;
+  height: 24px;
+}
+
 .user-info {
   flex: 1;
 }
 
 .username {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bg-white);
-  margin-bottom: 8px;
+  margin: 0 0 4px;
   font-family: var(--font-primary);
   letter-spacing: -0.5px;
 }
 
 .user-badges {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .user-badge {
-  padding: 4px 10px;
+  min-height: 20px;
+  padding: 2px 8px;
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -383,26 +389,30 @@ onMounted(() => {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 18px 16px;
+  min-height: 44px;
+  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .stat-item {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bg-white);
   font-family: var(--font-primary);
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
+  line-height: 1;
 }
 
 .stat-label {
@@ -414,13 +424,13 @@ onMounted(() => {
 
 .stat-divider {
   width: 1px;
-  height: 36px;
+  height: 22px;
   background: rgba(255, 255, 255, 0.15);
 }
 
 .content-section {
-  padding: 20px;
-  margin-top: -10px;
+  padding: 12px 20px 20px;
+  margin-top: 0;
 }
 
 .menu-card {

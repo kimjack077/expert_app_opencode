@@ -346,7 +346,7 @@ onMounted(() => {
 
 .page-header {
   position: relative;
-  padding: 48px 20px 32px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 16px;
   overflow: hidden;
 }
 
@@ -379,29 +379,35 @@ onMounted(() => {
 .header-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .user-greeting {
   color: var(--bg-white);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .greeting-text {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
-  display: block;
-  margin-bottom: 4px;
+  display: inline;
+  margin: 0;
   font-weight: 400;
   letter-spacing: 0.3px;
 }
 
 .user-name {
-  font-size: 26px;
+  margin: 0;
+  font-size: 23px;
   font-weight: 700;
   color: var(--bg-white);
   font-family: var(--font-primary);
   letter-spacing: -0.5px;
+  line-height: 1.25;
 }
 
 .header-actions {
@@ -431,26 +437,30 @@ onMounted(() => {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 18px 16px;
+  min-height: 44px;
+  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .stat-item {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bg-white);
   font-family: var(--font-primary);
-  letter-spacing: -1px;
+  letter-spacing: -0.5px;
+  line-height: 1;
 }
 
 .stat-label {
@@ -462,13 +472,13 @@ onMounted(() => {
 
 .stat-divider {
   width: 1px;
-  height: 36px;
+  height: 22px;
   background: rgba(255, 255, 255, 0.15);
 }
 
 .content-section {
-  padding: 20px;
-  margin-top: -10px;
+  padding: 12px 20px 20px;
+  margin-top: 0;
 }
 
 .quick-action-card {

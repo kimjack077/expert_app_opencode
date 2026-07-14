@@ -862,11 +862,8 @@ const handlePhotoUpload = async (file) => {
     if (itemData.value?.task_id) {
       uploadFormData.append('task_id', itemData.value.task_id)
     }
-    uploadFormData.append('record_id', route.params.id)
 
-    const res = await request.post('/media/upload', uploadFormData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    const res = await request.post('/media/upload', uploadFormData)
 
     const filePath = res.data?.file_path || res.file_path
     const mediaId = res.data?.id || res.id

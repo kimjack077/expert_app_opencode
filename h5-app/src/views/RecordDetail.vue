@@ -279,7 +279,7 @@ onMounted(() => {
 
 .page-header {
   position: relative;
-  padding: 0 0 20px;
+  padding: 0 0 12px;
   overflow: hidden;
 }
 
@@ -312,13 +312,13 @@ onMounted(() => {
 .header-nav {
   display: flex;
   align-items: center;
-  padding: 50px 20px 20px;
-  gap: 16px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 8px;
+  gap: 12px;
 }
 
 .back-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
   border-radius: 12px;

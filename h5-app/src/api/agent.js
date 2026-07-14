@@ -90,8 +90,72 @@ export async function chatWithAgent({ message, context, conversation, onContent,
  * 获取企业检查前准备简报（阶段四：主动式搭档）
  * @param {string} enterpriseId - 企业ID
  */
-export function getInspectionBriefing(enterpriseId) {
-  return request.get(`/agent/briefing/${enterpriseId}`)
+export function getInspectionBriefing(enterpriseId, model) {
+  return request.get(`/agent/briefing/${enterpriseId}`, {
+    params: model ? { model } : {},
+  })
+}
+
+/**
+ * 流式生成企业检查准备简报。
+ */
+export async function streamInspectionBriefing(
+  enterpriseId,
+  model,
+  { onMetadata, onContent, onDone },
+) {
+  const token = localStorage.getItem('token')
+  const params = new URLSearchParams()
+  if (model) params.set('model', model)
+  const query = params.toString()
+  const response = await fetch(
+    `${API_BASE_URL}/api/agent/briefing/${enterpriseId}/stream${query ? `?${query}` : ''}`,
+    {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+        'Accept': 'text/event-stream',
+      },
+    },
+  )
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || '简报生成失败')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const event = JSON.parse(line.slice(6))
+      if (event.type === 'metadata') {
+        onMetadata?.(event.data)
+      } else if (event.type === 'content') {
+        onContent?.(event.content)
+      } else if (event.type === 'done') {
+        onDone?.()
+      } else if (event.type === 'error') {
+        throw new Error(event.content || '简报生成失败')
+      }
+    }
+  }
+}
+
+/**
+ * 获取后端允许使用的 AI 模型列表。
+ */
+export function getAgentModels() {
+  return request.get('/agent/models')
 }
 
 /**
@@ -112,6 +176,7 @@ export function getConversation(conversationId) {
 export default {
   chatWithAgent,
   getInspectionBriefing,
+  streamInspectionBriefing,
   getConversations,
   getConversation,
 }

@@ -5,11 +5,7 @@ export const uploadMedia = (taskId, file) => {
   formData.append('task_id', taskId)
   formData.append('file', file)
   
-  return request.post('/media/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
+  return request.post('/media/upload', formData)
 }
 
 export const getMediaByTask = (taskId) => {

@@ -319,7 +319,7 @@ onMounted(() => {
 
 .page-header {
   position: relative;
-  padding: 0 0 30px;
+  padding: 0 0 16px;
   overflow: hidden;
 }
 
@@ -351,13 +351,13 @@ onMounted(() => {
 .header-nav {
   display: flex;
   align-items: center;
-  padding: 50px 20px 20px;
-  gap: 16px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 8px;
+  gap: 12px;
 }
 
 .back-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border-radius: 12px;
@@ -376,13 +376,14 @@ onMounted(() => {
 .enterprise-banner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 20px 16px;
+  gap: 10px;
+  padding: 0 16px 8px;
 }
 
 .banner-icon {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
   background: var(--primary-gradient);
   border-radius: 12px;
   display: flex;
@@ -415,7 +416,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px;
+  min-height: 44px;
+  padding: 0 12px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -428,13 +430,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 20px 0 76px;
+  margin: 0 16px 0 62px;
   color: rgba(255, 255, 255, 0.7);
   font-size: 13px;
 }
 
 .search-section {
-  margin: -20px 16px 16px;
+  margin: -8px 16px 12px;
   position: relative;
   z-index: 10;
 }

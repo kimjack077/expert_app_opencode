@@ -187,13 +187,30 @@
           <line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
       </div>
+      <button
+        type="button"
+        class="model-selector"
+        :aria-expanded="showModelSheet"
+        aria-haspopup="listbox"
+        @click="showModelSheet = true"
+      >
+        <span class="model-selector-label">生成模型</span>
+        <span class="model-selector-value">
+          {{ selectedModelName }}
+          <van-icon name="arrow-down" size="14" />
+        </span>
+      </button>
       <div class="briefing-body">
-        <div v-if="briefingLoading" class="briefing-loading">
+        <div v-if="briefingLoading && !briefingData" class="briefing-loading">
           <van-loading size="24" color="#0EA5E9" />
-          <p>正在生成简报...</p>
+          <p>正在整理企业资料...</p>
         </div>
         <div v-else-if="briefingData" class="briefing-content">
-          <div class="briefing-text">{{ briefingData.briefing_text }}</div>
+          <div class="briefing-markdown" v-html="renderedBriefing"></div>
+          <div v-if="briefingLoading" class="briefing-streaming">
+            <van-loading size="14" color="#0369A1" />
+            <span>正在生成</span>
+          </div>
           <div v-if="briefingData.outstanding_issues?.length" class="briefing-issues">
             <div class="issues-title">历史遗留问题（{{ briefingData.outstanding_issues.length }}）</div>
             <div v-for="(issue, idx) in briefingData.outstanding_issues" :key="idx" class="issue-item">
@@ -202,9 +219,30 @@
             </div>
           </div>
         </div>
-        <div v-else class="briefing-error">简报生成失败，请重试</div>
+        <div v-else-if="briefingError" class="briefing-error">
+          <van-icon name="warning-o" size="28" />
+          <p>{{ briefingError }}</p>
+          <van-button
+            type="primary"
+            plain
+            size="small"
+            :disabled="briefingLoading"
+            @click="loadBriefing"
+          >
+            重新生成
+          </van-button>
+        </div>
       </div>
     </van-popup>
+
+    <van-action-sheet
+      v-model:show="showModelSheet"
+      title="选择生成模型"
+      :actions="modelActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="selectModel"
+    />
   </div>
 </template>
 
@@ -212,9 +250,11 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 
 import { getEnterprises } from '../api/records'
-import { getInspectionBriefing } from '../api/agent'
+import { getAgentModels, streamInspectionBriefing } from '../api/agent'
 
 // Simple debounce utility
 const debounce = (fn, delay) => {
@@ -238,21 +278,101 @@ const pageSize = 20
 const showBriefing = ref(false)
 const briefingLoading = ref(false)
 const briefingData = ref(null)
+const briefingError = ref('')
+const briefingEnterprise = ref(null)
+const showModelSheet = ref(false)
+const modelOptions = ref([
+  {
+    id: 'deepseek-v4-flash',
+    name: 'DeepSeek V4 Flash',
+    recommended_for: '文字问答和检查准备简报',
+  },
+  {
+    id: 'sensenova-6.7-flash-lite',
+    name: 'SenseNova 6.7 Flash Lite',
+    recommended_for: '图片识别和多模态分析',
+  },
+])
+const selectedModel = ref(localStorage.getItem('ai_text_model') || 'deepseek-v4-flash')
 
-const openBriefing = async (enterprise) => {
-  showBriefing.value = true
-  briefingLoading.value = true
-  briefingData.value = null
+const selectedModelName = computed(() =>
+  modelOptions.value.find(model => model.id === selectedModel.value)?.name || selectedModel.value
+)
+
+const renderedBriefing = computed(() => {
+  const markdown = briefingData.value?.briefing_text || ''
+  return DOMPurify.sanitize(marked.parse(markdown, { breaks: true, gfm: true }))
+})
+
+const modelActions = computed(() =>
+  modelOptions.value.map(model => ({
+    id: model.id,
+    name: model.name,
+    subname: model.recommended_for,
+    color: model.id === selectedModel.value ? '#0369A1' : undefined,
+  }))
+)
+
+const loadModels = async () => {
   try {
-    const res = await getInspectionBriefing(enterprise.id)
-    if (res.code === 200) {
-      briefingData.value = res.data
+    const res = await getAgentModels()
+    if (res.code === 200 && res.data?.models?.length) {
+      modelOptions.value = res.data.models
+      const isAvailable = modelOptions.value.some(model => model.id === selectedModel.value)
+      if (!isAvailable) {
+        selectedModel.value = res.data.default_model
+      }
     }
   } catch (error) {
-    console.error('生成简报失败:', error)
+    console.error('加载 AI 模型列表失败:', error)
+  }
+}
+
+const loadBriefing = async () => {
+  if (!briefingEnterprise.value) return
+
+  briefingLoading.value = true
+  briefingData.value = null
+  briefingError.value = ''
+  try {
+    await streamInspectionBriefing(
+      briefingEnterprise.value.id,
+      selectedModel.value,
+      {
+        onMetadata: (metadata) => {
+          briefingData.value = {
+            ...metadata,
+            briefing_text: '',
+          }
+        },
+        onContent: (content) => {
+          briefingData.value = {
+            ...briefingData.value,
+            briefing_text: (briefingData.value?.briefing_text || '') + content,
+          }
+        },
+      },
+    )
+  } catch (error) {
+    briefingData.value = null
+    briefingError.value = error.message || '简报生成失败，请切换模型或重试'
   } finally {
     briefingLoading.value = false
   }
+}
+
+const openBriefing = async (enterprise) => {
+  showBriefing.value = true
+  briefingEnterprise.value = enterprise
+  await loadModels()
+  await loadBriefing()
+}
+
+const selectModel = async (action) => {
+  selectedModel.value = action.id
+  localStorage.setItem('ai_text_model', action.id)
+  showModelSheet.value = false
+  await loadBriefing()
 }
 
 const manualForm = ref({
@@ -379,7 +499,7 @@ const goBack = () => {
 
 .page-header {
   position: relative;
-  padding: 0 0 30px;
+  padding: 0 0 16px;
   overflow: hidden;
 }
 
@@ -412,13 +532,13 @@ const goBack = () => {
 .header-nav {
   display: flex;
   align-items: center;
-  padding: 50px 20px 20px;
-  gap: 16px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 8px;
+  gap: 12px;
 }
 
 .back-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(10px);
   border-radius: var(--radius-md);
@@ -447,13 +567,13 @@ const goBack = () => {
 .hero-section {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 20px 20px;
+  gap: 10px;
+  padding: 0 16px 8px;
 }
 
 .hero-icon {
-  width: 64px;
-  height: 64px;
+  width: 44px;
+  height: 44px;
   background: rgba(255, 255, 255, 0.15);
   border-radius: var(--radius-lg);
   display: flex;
@@ -464,12 +584,17 @@ const goBack = () => {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.hero-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
 .hero-text {
   flex: 1;
 }
 
 .hero-title {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--bg-white);
   margin-bottom: 4px;
@@ -478,13 +603,13 @@ const goBack = () => {
 }
 
 .hero-subtitle {
-  font-size: 14px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
   font-weight: 400;
 }
 
 .search-section {
-  margin: -20px 16px 16px;
+  margin: -8px 16px 12px;
   position: relative;
   z-index: 10;
 }
@@ -804,10 +929,49 @@ const goBack = () => {
   border-radius: 24px 24px 0 0;
 }
 
+.model-selector {
+  width: calc(100% - 40px);
+  min-height: 44px;
+  margin: 8px 20px 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-selector:focus-visible {
+  outline: 2px solid #0369a1;
+  outline-offset: 2px;
+}
+
+.model-selector-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.model-selector-value {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: #0369a1;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+}
+
 .briefing-body {
   padding: 16px 20px 24px;
   overflow-y: auto;
-  height: calc(100% - 60px);
+  height: calc(100% - 112px);
 }
 
 .briefing-loading {
@@ -825,6 +989,76 @@ const goBack = () => {
   line-height: 1.7;
   color: var(--text-primary);
   white-space: pre-wrap;
+}
+
+.briefing-markdown {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.briefing-markdown :deep(h1) {
+  margin: 0 0 16px;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.briefing-markdown :deep(h2) {
+  margin: 22px 0 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.briefing-markdown :deep(h3) {
+  margin: 18px 0 8px;
+  color: #1e293b;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.briefing-markdown :deep(p) {
+  margin: 8px 0;
+}
+
+.briefing-markdown :deep(ul),
+.briefing-markdown :deep(ol) {
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+
+.briefing-markdown :deep(li) {
+  margin: 7px 0;
+  padding-left: 2px;
+}
+
+.briefing-markdown :deep(strong) {
+  color: #0f172a;
+  font-weight: 650;
+}
+
+.briefing-markdown :deep(blockquote) {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #0369a1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.briefing-streaming {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: #0369a1;
+  font-size: 13px;
 }
 
 .briefing-issues {
@@ -858,10 +1092,19 @@ const goBack = () => {
 }
 
 .briefing-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   text-align: center;
   padding: 40px 0;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+.briefing-error p {
+  margin: 0;
+  line-height: 1.6;
 }
 
 @media (prefers-reduced-motion: reduce) {

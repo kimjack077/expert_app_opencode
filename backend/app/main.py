@@ -78,11 +78,12 @@ app.include_router(statistics_router, prefix="/api/statistics", tags=["审核统
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[API] Unhandled error: {type(exc).__name__}: {exc}")
     return JSONResponse(
         status_code=500,
         content={
             "code": 500,
-            "message": str(exc),
+            "message": "服务器暂时无法处理该请求，请稍后重试",
             "data": None,
             "timestamp": datetime.utcnow().isoformat(),
         },

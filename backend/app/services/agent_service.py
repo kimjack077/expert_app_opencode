@@ -1,5 +1,7 @@
 import json
 from typing import AsyncGenerator, Optional
+from uuid import UUID
+
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -170,16 +172,19 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "recommend_template",
-            "description": "为企业推荐合适的检查模板，基于企业行业、风险等级等",
+            "description": "为企业推荐合适的检查模板。优先使用当前页面的企业；也可按企业ID或企业名称查询",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "enterprise_id": {
                         "type": "string",
                         "description": "企业ID"
+                    },
+                    "enterprise_name": {
+                        "type": "string",
+                        "description": "企业名称"
                     }
-                },
-                "required": ["enterprise_id"]
+                }
             }
         }
     },
@@ -303,6 +308,38 @@ class AgentService:
             timeout=settings.LLM_TIMEOUT,
         )
         self.model = settings.LLM_MODEL
+        self.vision_client = AsyncOpenAI(
+            base_url=settings.VISION_LLM_BASE_URL,
+            api_key=settings.VISION_LLM_API_KEY,
+            timeout=settings.LLM_TIMEOUT,
+        )
+        self.vision_model = settings.VISION_LLM_MODEL
+
+    def get_available_models(self) -> list[dict]:
+        models = [
+            {
+                "id": self.model,
+                "name": "DeepSeek V4 Flash",
+                "capabilities": ["text"],
+                "recommended_for": "文字问答和检查准备简报",
+            },
+            {
+                "id": self.vision_model,
+                "name": "SenseNova 6.7 Flash Lite",
+                "capabilities": ["text", "vision"],
+                "recommended_for": "图片识别和多模态分析",
+            },
+        ]
+
+        return list({model["id"]: model for model in models}.values())
+
+    def _resolve_model(self, model_id: Optional[str]) -> tuple[AsyncOpenAI, str] | None:
+        selected_model = model_id or self.model
+        if selected_model == self.model:
+            return self.client, self.model
+        if selected_model == self.vision_model:
+            return self.vision_client, self.vision_model
+        return None
 
     async def chat_stream(
         self,
@@ -445,9 +482,12 @@ class AgentService:
             yield {"type": "done", "content": ""}
 
         except Exception as e:
-            print(f"[Agent] Stream error: {e}")
+            print(f"[Agent] Stream error: {type(e).__name__}: {e}")
             error_text = str(e)
-            yield {"type": "error", "content": error_text}
+            yield {
+                "type": "error",
+                "content": "AI 助手暂时无法完成这次请求，请换一种说法或稍后重试。",
+            }
 
         finally:
             duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -504,7 +544,7 @@ class AgentService:
             "enterprise_id": context.get("enterprise_id", ""),
         }
 
-        record_id = context.get("record_id")
+        record_id = self._normalize_uuid(context.get("record_id"))
         if record_id:
             stmt = select(InspectionRecord).where(InspectionRecord.id == record_id)
             db_result = await db.execute(stmt)
@@ -514,7 +554,16 @@ class AgentService:
                 result["enterprise_name"] = record.enterprise_name or "未知企业"
                 result["enterprise_id"] = str(record.enterprise_id) if record.enterprise_id else ""
 
-        current_item_id = context.get("current_item_id")
+        enterprise_id = self._normalize_uuid(
+            result.get("enterprise_id") or context.get("enterprise_id")
+        )
+        if enterprise_id:
+            enterprise = await db.get(Enterprise, enterprise_id)
+            if enterprise:
+                result["enterprise_name"] = enterprise.name
+                result["enterprise_id"] = str(enterprise.id)
+
+        current_item_id = self._normalize_uuid(context.get("current_item_id"))
         if current_item_id:
             item = await db.get(InspectionRecordItem, current_item_id)
             if item:
@@ -523,6 +572,47 @@ class AgentService:
                 result["legal_basis"] = item.item_legal_basis or "未指定"
 
         return result
+
+    @staticmethod
+    def _normalize_uuid(value: object) -> Optional[str]:
+        if not value:
+            return None
+        try:
+            return str(UUID(str(value)))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    async def _resolve_enterprise(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> Optional[Enterprise]:
+        raw_context_id = context.get("enterprise_id")
+        raw_argument_id = args.get("enterprise_id")
+        enterprise_id = self._normalize_uuid(raw_context_id) or self._normalize_uuid(
+            raw_argument_id
+        )
+        if enterprise_id:
+            enterprise = await db.get(Enterprise, enterprise_id)
+            if enterprise:
+                return enterprise
+
+        enterprise_names = [
+            args.get("enterprise_name"),
+            raw_argument_id if not self._normalize_uuid(raw_argument_id) else None,
+        ]
+        for enterprise_name in enterprise_names:
+            if not enterprise_name:
+                continue
+            result = await db.execute(
+                select(Enterprise).where(Enterprise.name == str(enterprise_name))
+            )
+            enterprise = result.scalar_one_or_none()
+            if enterprise:
+                return enterprise
+
+        return None
 
     async def _execute_tool(
         self,
@@ -546,9 +636,24 @@ class AgentService:
         }
 
         handler = tool_handlers.get(tool_name)
-        if handler:
+        if not handler:
+            return {"error": "暂不支持这项操作"}
+
+        try:
             return await handler(args, context, db)
-        return {"error": f"Unknown tool: {tool_name}"}
+        except Exception as exc:
+            print(f"[Agent] Tool {tool_name} failed: {type(exc).__name__}: {exc}")
+            try:
+                await db.rollback()
+            except Exception as rollback_exc:
+                print(
+                    f"[Agent] Tool rollback failed: "
+                    f"{type(rollback_exc).__name__}: {rollback_exc}"
+                )
+            return {
+                "error": "工具执行失败，请确认对象后重试或换一种说法",
+                "retryable": True,
+            }
 
     async def _tool_list_check_items(
         self,
@@ -556,7 +661,9 @@ class AgentService:
         context: dict,
         db: AsyncSession,
     ) -> dict:
-        record_id = args.get("record_id") or context.get("record_id")
+        record_id = self._normalize_uuid(
+            context.get("record_id") or args.get("record_id")
+        )
 
         if not record_id:
             return {"error": "未指定检查记录ID"}
@@ -601,7 +708,9 @@ class AgentService:
         context: dict,
         db: AsyncSession,
     ) -> dict:
-        item_id = args.get("item_id") or context.get("current_item_id")
+        item_id = self._normalize_uuid(
+            context.get("current_item_id") or args.get("item_id")
+        )
 
         if not item_id:
             return {"error": "未指定检查项ID"}
@@ -628,7 +737,9 @@ class AgentService:
         context: dict,
         db: AsyncSession,
     ) -> dict:
-        record_id = args.get("record_id")
+        record_id = self._normalize_uuid(
+            context.get("record_id") or args.get("record_id")
+        )
         if not record_id:
             return {"error": "未指定检查记录ID"}
 
@@ -735,45 +846,46 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """Get enterprise inspection history."""
-        enterprise_name = args.get("enterprise_name", "")
-
-        if not enterprise_name:
-            return {"error": "请提供企业名称"}
-
-        # Find enterprise
-        result = await db.execute(
-            select(Enterprise).where(Enterprise.name == enterprise_name)
-        )
-        enterprise = result.scalar_one_or_none()
+        enterprise = await self._resolve_enterprise(args, context, db)
 
         if not enterprise:
-            return {"error": f"未找到企业: {enterprise_name}"}
-
-        # Get inspection records
-        from app.models.task import InspectionTask
+            return {"error": "未找到对应企业，请提供准确的企业名称"}
 
         stmt = (
-            select(InspectionTask)
-            .where(InspectionTask.enterprise_id == enterprise.id)
-            .order_by(InspectionTask.created_at.desc())
+            select(InspectionRecord)
+            .options(selectinload(InspectionRecord.items))
+            .where(InspectionRecord.enterprise_id == enterprise.id)
+            .where(InspectionRecord.status == "submitted")
+            .order_by(InspectionRecord.inspection_date.desc())
             .limit(5)
         )
         result = await db.execute(stmt)
-        tasks = result.scalars().all()
+        records = result.scalars().all()
 
         history = []
-        for task in tasks:
+        for record in records:
+            issues = [
+                {
+                    "title": item.item_title,
+                    "problem": item.problem_description,
+                    "rectification": item.rectification_suggestion,
+                }
+                for item in record.items
+                if item.radio_value == "fail" or item.result == "fail"
+            ]
             history.append({
-                "task_id": str(task.id),
-                "task_no": task.task_no,
-                "title": task.title,
-                "status": task.status,
-                "created_at": task.created_at.isoformat() if task.created_at else None,
-                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                "record_id": str(record.id),
+                "inspection_date": (
+                    record.inspection_date.isoformat()
+                    if record.inspection_date else None
+                ),
+                "status": record.status,
+                "overall_result": record.overall_result,
+                "issues": issues,
             })
 
         return {
-            "enterprise_name": enterprise_name,
+            "enterprise_name": enterprise.name,
             "enterprise_id": str(enterprise.id),
             "risk_level": enterprise.risk_level,
             "history": history,
@@ -787,28 +899,27 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """Recommend templates for an enterprise."""
-        enterprise_id = args.get("enterprise_id") or context.get("enterprise_id")
-
-        if not enterprise_id:
-            return {"error": "请提供企业ID"}
+        enterprise = await self._resolve_enterprise(args, context, db)
+        if not enterprise:
+            return {"error": "未找到对应企业，请提供准确的企业名称"}
 
         recommendations = await template_recommendation_service.recommend_templates(
-            enterprise_id, db, top_k=3
+            str(enterprise.id), db, top_k=3
         )
 
         if not recommendations:
             return {
-                "enterprise_id": enterprise_id,
+                "enterprise_id": str(enterprise.id),
                 "recommendations": [],
                 "message": "未找到合适的模板"
             }
 
         return {
-            "enterprise_id": enterprise_id,
+            "enterprise_id": str(enterprise.id),
             "recommendations": recommendations
         }
 
-    async def generate_briefing(
+    async def _prepare_briefing(
         self,
         enterprise_id: str,
         db: AsyncSession,
@@ -886,24 +997,124 @@ class AgentService:
 
 用简洁的要点式语言，适合审核员出发前快速阅读，不要写成正式公文。直接输出简报正文（可用Markdown加粗/列表），不要输出JSON。"""
 
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1500,
-                temperature=0.5,
-            )
-            briefing_text = response.choices[0].message.content or ""
-        except Exception as e:
-            briefing_text = f"简报生成失败：{str(e)}"
-
         return {
             "enterprise_id": str(enterprise.id),
             "enterprise_name": enterprise.name,
             "risk_level": enterprise.risk_level,
             "outstanding_issues": outstanding_issues,
-            "briefing_text": briefing_text,
+            "prompt": prompt,
         }
+
+    async def generate_briefing(
+        self,
+        enterprise_id: str,
+        db: AsyncSession,
+        model_id: Optional[str] = None,
+    ) -> dict:
+        briefing = await self._prepare_briefing(enterprise_id, db)
+        if "error" in briefing:
+            return briefing
+
+        resolved_model = self._resolve_model(model_id)
+        if not resolved_model:
+            return {"error": "不支持所选 AI 模型", "status_code": 400}
+
+        client, selected_model = resolved_model
+        max_tokens = 4096 if selected_model == self.vision_model else 1500
+
+        try:
+            response = await client.chat.completions.create(
+                model=selected_model,
+                messages=[{"role": "user", "content": briefing["prompt"]}],
+                max_tokens=max_tokens,
+                temperature=0.5,
+            )
+            briefing_text = response.choices[0].message.content or ""
+            if not briefing_text.strip():
+                return {
+                    "error": "所选模型未返回简报内容，请切换模型后重试",
+                    "status_code": 502,
+                }
+        except Exception as e:
+            print(f"[Agent] Briefing generation failed: {type(e).__name__}")
+            return {
+                "error": "AI 简报服务暂时不可用，请切换模型或稍后重试",
+                "status_code": 502,
+            }
+
+        return {
+            key: value
+            for key, value in briefing.items()
+            if key != "prompt"
+        } | {
+            "briefing_text": briefing_text,
+            "model": selected_model,
+        }
+
+    async def generate_briefing_stream(
+        self,
+        enterprise_id: str,
+        db: AsyncSession,
+        model_id: Optional[str] = None,
+    ) -> AsyncGenerator[dict, None]:
+        briefing = await self._prepare_briefing(enterprise_id, db)
+        if "error" in briefing:
+            yield {
+                "type": "error",
+                "content": briefing["error"],
+                "status_code": briefing.get("status_code", 404),
+            }
+            return
+
+        resolved_model = self._resolve_model(model_id)
+        if not resolved_model:
+            yield {"type": "error", "content": "不支持所选 AI 模型", "status_code": 400}
+            return
+
+        client, selected_model = resolved_model
+        max_tokens = 4096 if selected_model == self.vision_model else 1500
+        metadata = {
+            key: value
+            for key, value in briefing.items()
+            if key != "prompt"
+        }
+        metadata["model"] = selected_model
+        yield {"type": "metadata", "data": metadata}
+
+        has_content = False
+        try:
+            stream = await client.chat.completions.create(
+                model=selected_model,
+                messages=[{"role": "user", "content": briefing["prompt"]}],
+                max_tokens=max_tokens,
+                temperature=0.5,
+                stream=True,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                content = chunk.choices[0].delta.content
+                if content:
+                    has_content = True
+                    yield {"type": "content", "content": content}
+        except Exception as exc:
+            print(f"[Agent] Briefing stream failed: {type(exc).__name__}: {exc}")
+            yield {
+                "type": "error",
+                "content": "AI 简报服务暂时不可用，请切换模型或稍后重试",
+                "status_code": 502,
+            }
+            return
+
+        if not has_content:
+            yield {
+                "type": "error",
+                "content": "所选模型未返回简报内容，请切换模型后重试",
+                "status_code": 502,
+            }
+            return
+
+        yield {"type": "done"}
 
     async def _tool_analyze_photo(
         self,
@@ -912,7 +1123,9 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """Analyze a photo for compliance issues."""
-        media_file_id = args.get("media_file_id") or context.get("media_file_id")
+        media_file_id = self._normalize_uuid(
+            context.get("media_file_id") or args.get("media_file_id")
+        )
         check_item_title = args.get("check_item_title")
 
         if not media_file_id:
@@ -943,7 +1156,9 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """Help fill check result based on observation."""
-        item_id = args.get("item_id") or context.get("current_item_id")
+        item_id = self._normalize_uuid(
+            context.get("current_item_id") or args.get("item_id")
+        )
         observation = args.get("observation", "")
 
         if not item_id:
@@ -1005,7 +1220,8 @@ class AgentService:
                 }
 
         except Exception as e:
-            return {"error": f"分析失败: {str(e)}"}
+            print(f"[Agent] Result analysis failed: {type(e).__name__}: {e}")
+            return {"error": "暂时无法分析检查结果，请稍后重试"}
 
     async def _tool_apply_check_result(
         self,
@@ -1017,7 +1233,9 @@ class AgentService:
         the frontend renders this as a confirmation card, and only calls the real
         write endpoint (POST /api/records/{record_id}/items) after the inspector
         clicks '采纳'."""
-        item_id = args.get("item_id") or context.get("current_item_id")
+        item_id = self._normalize_uuid(
+            context.get("current_item_id") or args.get("item_id")
+        )
         result = args.get("result")
         problem_description = args.get("problem_description", "")
         rectification_suggestion = args.get("rectification_suggestion", "")
@@ -1058,7 +1276,9 @@ class AgentService:
         """Build a final-verdict write proposal. Does NOT write to the database -
         the frontend renders this as a confirmation card, and only calls the real
         write endpoint (PUT /api/records/{record_id}) after the inspector clicks '采纳'."""
-        record_id = args.get("record_id") or context.get("record_id")
+        record_id = self._normalize_uuid(
+            context.get("record_id") or args.get("record_id")
+        )
         verdict = args.get("verdict")
         comment = args.get("comment", "")
 

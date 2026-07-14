@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models.user import User
-from app.models.task import InspectionTask
 from app.models.media import MediaFile
+from app.models.task import InspectionTask, TaskItemRecord
+from app.models.user import User
 from app.schemas import ApiResponse, MediaFileResponse
 from app.utils.security import get_current_user
 from app.utils.file_handler import save_upload_file
@@ -39,6 +39,9 @@ async def upload_file(
         is_admin = current_user.role in ("super_admin", "admin")
         if not is_assignee and not is_admin:
             raise HTTPException(status_code=403, detail="Not authorized")
+
+    if record_id and not await db.get(TaskItemRecord, record_id):
+        raise HTTPException(status_code=400, detail="Invalid task item record ID")
 
     stored_name, file_path, file_size = await save_upload_file(file, "inspections")
 

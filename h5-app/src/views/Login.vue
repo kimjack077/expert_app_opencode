@@ -196,7 +196,7 @@ const onSubmit = async () => {
 .login-page {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: 1fr auto auto;
+  grid-template-rows: auto 1fr auto;
   background: var(--bg-white);
   position: relative;
   overflow: hidden;
@@ -208,7 +208,7 @@ const onSubmit = async () => {
   top: 0;
   left: 0;
   right: 0;
-  height: 55%;
+  height: 156px;
   background: var(--primary-gradient-dark);
   pointer-events: none;
 }
@@ -219,7 +219,7 @@ const onSubmit = async () => {
   top: 0;
   left: 0;
   right: 0;
-  height: 55%;
+  height: 156px;
   background: 
     radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.08) 0%, transparent 40%),
     radial-gradient(circle at 90% 70%, rgba(56, 189, 248, 0.15) 0%, transparent 40%);
@@ -227,11 +227,12 @@ const onSubmit = async () => {
 }
 
 .login-header {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
   align-items: center;
-  justify-content: center;
-  padding: 70px 20px 50px;
+  column-gap: 12px;
+  padding: calc(env(safe-area-inset-top) + 18px) 20px 28px;
   color: var(--bg-white);
   position: relative;
   z-index: 1;
@@ -250,7 +251,9 @@ const onSubmit = async () => {
 
 .logo-container {
   position: relative;
-  margin-bottom: 28px;
+  grid-column: 1;
+  grid-row: 1 / 3;
+  margin: 0;
 }
 
 .logo-glow {
@@ -258,8 +261,8 @@ const onSubmit = async () => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 130px;
-  height: 130px;
+  width: 76px;
+  height: 76px;
   background: radial-gradient(circle, rgba(14, 165, 233, 0.25) 0%, transparent 70%);
   border-radius: 50%;
   animation: pulse 3s ease-in-out infinite;
@@ -277,10 +280,10 @@ const onSubmit = async () => {
 }
 
 .logo {
-  width: 80px;
-  height: 80px;
+  width: 52px;
+  height: 52px;
   background: rgba(255, 255, 255, 0.95);
-  border-radius: 20px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -292,36 +295,48 @@ const onSubmit = async () => {
 
 .logo svg {
   color: var(--primary-color);
+  width: 30px;
+  height: 30px;
 }
 
 .title {
-  font-size: 28px;
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  font-size: 22px;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin: 0 0 2px;
   letter-spacing: 1px;
   font-family: var(--font-primary);
 }
 
 .subtitle {
-  font-size: 13px;
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  font-size: 11px;
   opacity: 0.75;
-  margin-bottom: 20px;
+  margin: 0;
   letter-spacing: 0.5px;
   font-weight: 400;
 }
 
 .badges {
+  grid-column: 1 / 3;
+  grid-row: 3;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
+  margin-top: 10px;
 }
 
 .badge {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 14px;
+  min-height: 28px;
+  padding: 0 10px;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -339,7 +354,7 @@ const onSubmit = async () => {
   position: relative;
   z-index: 2;
   padding: 0 20px;
-  margin-top: -25px;
+  margin-top: -18px;
 }
 
 .form-card {
