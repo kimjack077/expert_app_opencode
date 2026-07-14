@@ -27,7 +27,11 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # Database migrations
 alembic upgrade head
 alembic revision --autogenerate -m "description"
+# Tests (no tests/ dir - test files live at backend/test_*.py)
+python -m pytest test_mvp_api.py -v         # Run one test file
+python -m pytest test_mvp_api.py::test_health_endpoint -v  # Run one test
 ```
+Note: `pytest` must be run from the activated `.venv` (it is not installed in the system Python). `test_mvp_api.py` uses FastAPI's ASGI app directly for pytest-safe checks; other `test_*.py` files are manual smoke scripts that expect a running server at `http://localhost:8000`.
 
 ### Web Admin (React)
 ```bash

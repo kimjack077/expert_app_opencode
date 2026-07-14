@@ -1,5 +1,4 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   NavBar,
   List,
@@ -21,7 +20,6 @@ import { useAuthStore } from '../../stores/auth'
 import './style.css'
 
 const Profile: React.FC = () => {
-  const navigate = useNavigate()
   const { user, logout } = useAuthStore()
 
   const handleLogout = () => {

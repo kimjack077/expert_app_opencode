@@ -72,7 +72,7 @@
                 <path d="m9 18 6-6-6-6"/>
               </svg>
             </div>
-            
+
             <div v-if="enterprise.contact_person || enterprise.contact_phone" class="enterprise-contact">
               <div class="contact-tag" v-if="enterprise.contact_person">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -87,6 +87,11 @@
                 </svg>
                 {{ enterprise.contact_phone }}
               </div>
+            </div>
+
+            <div class="ai-briefing-entry" @click.stop="openBriefing(enterprise)">
+              <van-icon name="star-o" size="14" />
+              <span>AI 检查准备简报</span>
             </div>
           </div>
         </div>
@@ -166,6 +171,40 @@
         </div>
       </van-form>
     </van-popup>
+
+    <!-- AI 检查准备简报 -->
+    <van-popup
+      v-model:show="showBriefing"
+      position="bottom"
+      round
+      :style="{ height: '70%' }"
+      class="briefing-popup"
+    >
+      <div class="popup-header">
+        <h3>AI 检查准备简报</h3>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" @click="showBriefing = false" class="close-icon">
+          <line x1="18" y1="6" x2="6" y2="18"/>
+          <line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </div>
+      <div class="briefing-body">
+        <div v-if="briefingLoading" class="briefing-loading">
+          <van-loading size="24" color="#0EA5E9" />
+          <p>正在生成简报...</p>
+        </div>
+        <div v-else-if="briefingData" class="briefing-content">
+          <div class="briefing-text">{{ briefingData.briefing_text }}</div>
+          <div v-if="briefingData.outstanding_issues?.length" class="briefing-issues">
+            <div class="issues-title">历史遗留问题（{{ briefingData.outstanding_issues.length }}）</div>
+            <div v-for="(issue, idx) in briefingData.outstanding_issues" :key="idx" class="issue-item">
+              <span class="issue-date">{{ issue.date }}</span>
+              <span class="issue-title">{{ issue.title }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="briefing-error">简报生成失败，请重试</div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -175,6 +214,7 @@ import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 
 import { getEnterprises } from '../api/records'
+import { getInspectionBriefing } from '../api/agent'
 
 // Simple debounce utility
 const debounce = (fn, delay) => {
@@ -194,6 +234,26 @@ const refreshing = ref(false)
 const showManualInput = ref(false)
 const page = ref(1)
 const pageSize = 20
+
+const showBriefing = ref(false)
+const briefingLoading = ref(false)
+const briefingData = ref(null)
+
+const openBriefing = async (enterprise) => {
+  showBriefing.value = true
+  briefingLoading.value = true
+  briefingData.value = null
+  try {
+    const res = await getInspectionBriefing(enterprise.id)
+    if (res.code === 200) {
+      briefingData.value = res.data
+    }
+  } catch (error) {
+    console.error('生成简报失败:', error)
+  } finally {
+    briefingLoading.value = false
+  }
+}
 
 const manualForm = ref({
   enterprise_name: '',
@@ -545,6 +605,83 @@ const goBack = () => {
   border-top: 1px solid var(--border-light);
 }
 
+.ai-briefing-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 5px 12px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12) 0%, rgba(99, 102, 241, 0.12) 100%);
+  color: #0EA5E9;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ai-briefing-entry:active {
+  opacity: 0.7;
+}
+
+.briefing-popup {
+  border-radius: 24px 24px 0 0;
+}
+
+.briefing-body {
+  padding: 16px 20px 30px;
+  overflow-y: auto;
+  height: calc(100% - 60px);
+}
+
+.briefing-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.briefing-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.briefing-issues {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.issues-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.issue-item {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  padding: 6px 0;
+  color: var(--text-primary);
+}
+
+.issue-date {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.briefing-error {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 40px 0;
+  font-size: 14px;
+}
+
 .contact-tag {
   display: inline-flex;
   align-items: center;
@@ -661,6 +798,70 @@ const goBack = () => {
   font-weight: 500;
   letter-spacing: 0.5px;
   height: 48px;
+}
+
+.briefing-popup {
+  border-radius: 24px 24px 0 0;
+}
+
+.briefing-body {
+  padding: 16px 20px 24px;
+  overflow-y: auto;
+  height: calc(100% - 60px);
+}
+
+.briefing-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.briefing-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.briefing-issues {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.issues-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.issue-item {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed var(--border-light);
+}
+
+.issue-date {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.issue-title {
+  color: var(--text-primary);
+}
+
+.briefing-error {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 @media (prefers-reduced-motion: reduce) {

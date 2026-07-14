@@ -33,8 +33,15 @@
             </van-button>
           </div>
         </div>
+
+        <AgentActionCard
+          v-if="message.actionProposal"
+          :action="message.actionProposal"
+          @confirm="$emit('confirm-action', message.actionProposal)"
+          @cancel="$emit('cancel-action', message.actionProposal)"
+        />
       </div>
-      
+
       <div class="message-time">{{ formatTime(message.timestamp) }}</div>
     </div>
   </div>
@@ -43,6 +50,7 @@
 <script setup>
 import { computed } from 'vue'
 import { showToast } from 'vant'
+import AgentActionCard from './AgentActionCard.vue'
 
 const props = defineProps({
   message: {
@@ -50,6 +58,8 @@ const props = defineProps({
     required: true
   }
 })
+
+defineEmits(['confirm-action', 'cancel-action'])
 
 const hasCard = computed(() => {
   return props.message.verdictCard || props.message.copyableText

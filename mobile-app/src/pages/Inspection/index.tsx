@@ -2,32 +2,27 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   NavBar,
-  Steps,
   Button,
   Toast,
   Dialog,
   TextArea,
   ImageUploader,
-  ActionSheet,
   Card,
   Tag,
   SpinLoading,
   FloatingPanel,
 } from 'antd-mobile'
 import {
-  LeftOutline,
   CheckOutline,
   CloseOutline,
   MinusOutline,
   CameraOutline,
-  AudioOutline,
   SetOutline,
-  CheckCircleOutline,
 } from 'antd-mobile-icons'
 import { taskApi, recordApi, aiApi } from '../../services/api'
+import AgentFab from '../../components/AgentChat/AgentFab'
+import AgentChatPanel from '../../components/AgentChat/AgentChatPanel'
 import './style.css'
-
-const { Step } = Steps
 
 interface CheckItem {
   id: string
@@ -59,6 +54,7 @@ const Inspection: React.FC = () => {
   const [showAiResult, setShowAiResult] = useState(false)
   const [aiResult, setAiResult] = useState('')
   const [commentValue, setCommentValue] = useState('')
+  const [showAgentPanel, setShowAgentPanel] = useState(false)
 
   useEffect(() => {
     fetchTaskDetail()
@@ -191,23 +187,26 @@ const Inspection: React.FC = () => {
   }
 
   const handlePhotoUpload = async (file: File) => {
-    if (!task) return
+    if (!task) {
+      throw new Error('Task detail is not loaded')
+    }
     try {
       const res: any = await recordApi.uploadPhoto(task.check_items[currentIndex].id, file)
-      if (res.code === 200) {
+      if (res.code === 200 && res.data?.url) {
         Toast.show({
           icon: 'success',
           content: '上传成功',
         })
         return { url: res.data.url }
       }
+      throw new Error('Upload failed')
     } catch (error) {
       Toast.show({
         icon: 'fail',
         content: '上传失败',
       })
+      throw error
     }
-    return null
   }
 
   if (loading) {
@@ -393,11 +392,8 @@ const Inspection: React.FC = () => {
       </div>
 
       {/* AI结果浮层 */}
-      <FloatingPanel
-        anchors={[100, 400, 600]}
-        visible={showAiResult}
-        onClose={() => setShowAiResult(false)}
-      >
+      {showAiResult && (
+        <FloatingPanel anchors={[100, 400, 600]}>
         <div className="ai-result-panel">
           <h4>AI 审核建议</h4>
           {aiLoading ? (
@@ -431,7 +427,22 @@ const Inspection: React.FC = () => {
             </>
           )}
         </div>
-      </FloatingPanel>
+        </FloatingPanel>
+      )}
+
+      {/* AI 助手：本页走 task-flow（/api/tasks/*，TaskItemRecord），与
+          agent 写回接口对应的 record-flow（/api/records/*）是不同的表，
+          因此以 advisoryOnly 模式渲染，操作卡片仅可复制、不可一键写入 */}
+      <AgentFab onClick={() => setShowAgentPanel(true)} />
+      <AgentChatPanel
+        visible={showAgentPanel}
+        onClose={() => setShowAgentPanel(false)}
+        advisoryOnly
+        context={{
+          currentItemId: currentItem.id,
+          currentItemTitle: currentItem.title,
+        }}
+      />
     </div>
   )
 }

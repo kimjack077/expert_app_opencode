@@ -33,6 +33,7 @@ from .audit_project import (
     AuditReport,
     CommunicationMeeting,
 )
+from .agent_conversation import AgentConversation, AgentMessage
 
 __all__ = [
     "Base",
@@ -73,4 +74,7 @@ __all__ = [
     "Nonconformity",
     "AuditReport",
     "CommunicationMeeting",
+    # Agent conversation persistence
+    "AgentConversation",
+    "AgentMessage",
 ]

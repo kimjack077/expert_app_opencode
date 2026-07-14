@@ -86,6 +86,32 @@ export async function chatWithAgent({ message, context, conversation, onContent,
   return controller
 }
 
+/**
+ * 获取企业检查前准备简报（阶段四：主动式搭档）
+ * @param {string} enterpriseId - 企业ID
+ */
+export function getInspectionBriefing(enterpriseId) {
+  return request.get(`/agent/briefing/${enterpriseId}`)
+}
+
+/**
+ * 获取对话历史列表
+ */
+export function getConversations() {
+  return request.get('/agent/conversations')
+}
+
+/**
+ * 获取单个对话详情
+ * @param {string} conversationId
+ */
+export function getConversation(conversationId) {
+  return request.get(`/agent/conversations/${conversationId}`)
+}
+
 export default {
-  chatWithAgent
+  chatWithAgent,
+  getInspectionBriefing,
+  getConversations,
+  getConversation,
 }

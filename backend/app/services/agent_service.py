@@ -25,22 +25,29 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 - 当前检查项：{current_item_title}
 - 检查方法：{check_method}
 - 法规依据：{legal_basis}
+- 待分析照片：{media_hint}
 
 你可以调用以下工具：
 1. list_check_items - 列出所有检查项及其ID、标题和判定结果。当用户询问"第一个检查项"或"某项检查"时，**必须先调用此工具**获取检查项ID
 2. get_check_item_details - 获取指定检查项的详细信息
 3. get_inspection_summary - 获取当前检查的汇总情况
-4. generate_final_verdict - 基于所有检查项结果，生成最终判定建议
+4. generate_final_verdict - 基于所有检查项结果，生成最终判定建议（仅预览，不写入）
 5. search_knowledge_base - 搜索知识库法规，获取相关法规依据
 6. get_enterprise_history - 获取企业历史检查记录
 7. recommend_template - 为企业推荐合适的检查模板
 8. analyze_photo - 分析检查照片，识别合规问题
-9. fill_check_result - 帮助填写检查结果（仅建议）
+9. fill_check_result - 分析用户描述的检查发现，给出判定建议（仅建议文本，不生成操作卡片）
+10. apply_check_result - 当用户已明确给出判定意见并希望记录时，生成"检查结果确认卡片"，审核员点击确认后才会真正写入
+11. apply_final_verdict - 当用户要求生成并记录最终判定时，生成"最终判定确认卡片"，审核员点击确认后才会真正写入
 
 重要规则：
 - 当用户询问某个检查项（如"第一个检查项"、"第二项"等）时，**必须先调用 list_check_items 获取检查项列表和ID**，然后再调用 get_check_item_details 获取详情
-- 当用户询问检查汇总或生成最终判定时，你应该**主动调用** get_inspection_summary 或 generate_final_verdict 工具来获取数据，不要询问用户！
+- 当用户询问检查汇总时，你应该**主动调用** get_inspection_summary 工具来获取数据，不要询问用户！
+- 当用户明确表达了判定意见（如"这项不合格，问题是缺少校验记录"）时，**必须调用 apply_check_result** 生成确认卡片，而不是只用文字描述——审核员需要能一键采纳
+- 当用户要求"生成最终判定"且希望记录结论时，**调用 apply_final_verdict** 生成确认卡片；如果只是想预览判定思路，用 generate_final_verdict
+- 任何写入类工具（apply_check_result / apply_final_verdict）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
 - 当用户需要法规依据时，调用 search_knowledge_base 搜索知识库
+- 如果"待分析照片"不为"无"，说明用户刚拍了照片等待你分析，**必须主动调用 analyze_photo**（无需用户再说"帮我看看"），分析后如发现问题应直接调用 apply_check_result 生成确认卡片
 - 主动提供帮助，不要被动等待用户请求
 
 回答要求：
@@ -217,8 +224,75 @@ TOOLS = [
                 "required": ["item_id", "observation"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_check_result",
+            "description": (
+                "生成检查项判定的写入建议，以确认卡片形式展示给审核员。"
+                "本工具不会直接修改数据库，只有审核员在卡片上点击确认后才会真正写入。"
+                "当用户已经明确表达了判定意见（如'这项不合格，问题是XX'、'这项判合格'）并希望直接记录时调用此工具，"
+                "不要只是口头描述建议——应主动调用本工具生成可确认的操作卡片。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_id": {
+                        "type": "string",
+                        "description": "检查项ID（record item id）"
+                    },
+                    "result": {
+                        "type": "string",
+                        "enum": ["pass", "fail", "na"],
+                        "description": "判定结果：pass(合格)/fail(不合格)/na(不适用)"
+                    },
+                    "problem_description": {
+                        "type": "string",
+                        "description": "问题描述（判定为不合格时应填写）"
+                    },
+                    "rectification_suggestion": {
+                        "type": "string",
+                        "description": "整改建议（可选）"
+                    }
+                },
+                "required": ["item_id", "result"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_final_verdict",
+            "description": (
+                "生成整份检查记录的最终判定写入建议，以确认卡片形式展示给审核员。"
+                "本工具不会直接修改数据库，只有审核员点击确认后才会真正写入。"
+                "当用户要求'生成最终判定'并希望直接记录结论时调用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "record_id": {
+                        "type": "string",
+                        "description": "检查记录ID"
+                    },
+                    "verdict": {
+                        "type": "string",
+                        "enum": ["pass", "partial_pass", "fail"],
+                        "description": "最终判定：pass(合格)/partial_pass(基本合格)/fail(不合格)"
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "总体评价说明"
+                    }
+                },
+                "required": ["record_id", "verdict"]
+            }
+        }
     }
 ]
+
+MAX_TOOL_ROUNDS = 5
 
 
 class AgentService:
@@ -236,7 +310,10 @@ class AgentService:
         context: dict,
         conversation: list,
         db: AsyncSession,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[dict, None]:
+        import time
+
         context_info = await self._build_context(context, db)
 
         system_prompt = AGENT_SYSTEM_PROMPT.format(
@@ -246,6 +323,10 @@ class AgentService:
             current_item_title=context_info.get("current_item_title", "无"),
             check_method=context_info.get("check_method", "未指定"),
             legal_basis=context_info.get("legal_basis", "未指定"),
+            media_hint=(
+                f"照片ID {context.get('media_file_id')}（用户刚拍摄/上传，尚未分析）"
+                if context.get("media_file_id") else "无"
+            ),
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -258,97 +339,159 @@ class AgentService:
 
         messages.append({"role": "user", "content": message})
 
+        start_time = time.monotonic()
+        total_tokens = 0
+        full_response_text = ""
+        error_text: Optional[str] = None
+
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                max_tokens=settings.LLM_MAX_TOKENS,
-                temperature=settings.LLM_TEMPERATURE,
-                stream=True,
-            )
+            for round_idx in range(MAX_TOOL_ROUNDS):
+                is_last_round = round_idx == MAX_TOOL_ROUNDS - 1
 
-            tool_calls_buffer = {}
-            current_tool_call = None
+                response = await self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=None if is_last_round else TOOLS,
+                    tool_choice="auto" if not is_last_round else None,
+                    max_tokens=settings.LLM_MAX_TOKENS,
+                    temperature=settings.LLM_TEMPERATURE,
+                    stream=True,
+                )
 
-            async for chunk in response:
-                if not chunk.choices:
-                    continue
+                tool_calls_buffer = {}
+                had_tool_calls = False
+                assistant_text = ""
 
-                delta = chunk.choices[0].delta
+                async for chunk in response:
+                    if not chunk.choices:
+                        if getattr(chunk, "usage", None):
+                            total_tokens += chunk.usage.total_tokens or 0
+                        continue
 
-                if delta.content:
-                    yield {"type": "content", "content": delta.content}
+                    delta = chunk.choices[0].delta
 
-                if delta.tool_calls:
-                    for tool_call_delta in delta.tool_calls:
-                        idx = tool_call_delta.index
+                    if delta.content:
+                        assistant_text += delta.content
+                        full_response_text += delta.content
+                        yield {"type": "content", "content": delta.content}
 
-                        if idx not in tool_calls_buffer:
-                            tool_calls_buffer[idx] = {
-                                "id": "",
-                                "function": {"name": "", "arguments": ""}
-                            }
+                    if delta.tool_calls:
+                        had_tool_calls = True
+                        for tool_call_delta in delta.tool_calls:
+                            idx = tool_call_delta.index
 
-                        if tool_call_delta.id:
-                            tool_calls_buffer[idx]["id"] = tool_call_delta.id
-                        if tool_call_delta.function:
-                            if tool_call_delta.function.name:
-                                tool_calls_buffer[idx]["function"]["name"] = tool_call_delta.function.name
-                            if tool_call_delta.function.arguments:
-                                tool_calls_buffer[idx]["function"]["arguments"] += tool_call_delta.function.arguments
-
-                if chunk.choices[0].finish_reason == "tool_calls":
-                    for idx in sorted(tool_calls_buffer.keys()):
-                        tool_call = tool_calls_buffer[idx]
-                        tool_name = tool_call["function"]["name"]
-                        tool_args = json.loads(tool_call["function"]["arguments"] or "{}")
-
-                        yield {"type": "tool_call", "tool": tool_name, "status": "calling"}
-
-                        tool_result = await self._execute_tool(
-                            tool_name, tool_args, context, db
-                        )
-
-                        yield {"type": "tool_result", "tool": tool_name, "status": "done"}
-
-                        messages.append({
-                            "role": "assistant",
-                            "tool_calls": [{
-                                "id": tool_call["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": tool_name,
-                                    "arguments": tool_call["function"]["arguments"]
+                            if idx not in tool_calls_buffer:
+                                tool_calls_buffer[idx] = {
+                                    "id": "",
+                                    "function": {"name": "", "arguments": ""}
                                 }
-                            }]
-                        })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call["id"],
-                            "content": json.dumps(tool_result, ensure_ascii=False)
-                        })
 
-                    tool_calls_buffer = {}
+                            if tool_call_delta.id:
+                                tool_calls_buffer[idx]["id"] = tool_call_delta.id
+                            if tool_call_delta.function:
+                                if tool_call_delta.function.name:
+                                    tool_calls_buffer[idx]["function"]["name"] = tool_call_delta.function.name
+                                if tool_call_delta.function.arguments:
+                                    tool_calls_buffer[idx]["function"]["arguments"] += tool_call_delta.function.arguments
 
-                    continue_response = await self.client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        max_tokens=settings.LLM_MAX_TOKENS,
-                        temperature=settings.LLM_TEMPERATURE,
-                        stream=True,
+                if not had_tool_calls:
+                    # Model answered directly with no tool calls - we're done.
+                    break
+
+                # Replay the assistant turn (with tool calls) into history, then
+                # execute every requested tool and feed results back for the next round.
+                tool_call_entries = []
+                for idx in sorted(tool_calls_buffer.keys()):
+                    tool_call = tool_calls_buffer[idx]
+                    tool_call_entries.append(tool_call)
+
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_text or None,
+                    "tool_calls": [{
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["function"]["name"],
+                            "arguments": tc["function"]["arguments"]
+                        }
+                    } for tc in tool_call_entries]
+                })
+
+                for tool_call in tool_call_entries:
+                    tool_name = tool_call["function"]["name"]
+                    try:
+                        tool_args = json.loads(tool_call["function"]["arguments"] or "{}")
+                    except json.JSONDecodeError:
+                        tool_args = {}
+
+                    yield {"type": "tool_call", "tool": tool_name, "status": "calling"}
+
+                    tool_result = await self._execute_tool(
+                        tool_name, tool_args, context, db
                     )
 
-                    async for chunk in continue_response:
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            yield {"type": "content", "content": chunk.choices[0].delta.content}
+                    if isinstance(tool_result, dict) and tool_result.get("type") == "action_proposal":
+                        yield tool_result
+                    else:
+                        yield {"type": "tool_result", "tool": tool_name, "status": "done"}
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": json.dumps(tool_result, ensure_ascii=False)
+                    })
 
             yield {"type": "done", "content": ""}
 
         except Exception as e:
             print(f"[Agent] Stream error: {e}")
-            yield {"type": "error", "content": str(e)}
+            error_text = str(e)
+            yield {"type": "error", "content": error_text}
+
+        finally:
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            try:
+                await self._log_call(
+                    db=db,
+                    user_id=user_id,
+                    record_id=context_info.get("record_id"),
+                    prompt=message,
+                    response=full_response_text,
+                    tokens_used=total_tokens,
+                    duration_ms=duration_ms,
+                    error_text=error_text,
+                )
+            except Exception as log_err:
+                print(f"[Agent] Failed to write LLMCallLog: {log_err}")
+
+    async def _log_call(
+        self,
+        db: AsyncSession,
+        user_id: Optional[str],
+        record_id: Optional[str],
+        prompt: str,
+        response: str,
+        tokens_used: int,
+        duration_ms: int,
+        error_text: Optional[str],
+    ) -> None:
+        from app.models.audit import LLMCallLog
+
+        log = LLMCallLog(
+            user_id=user_id,
+            record_id=record_id or None,
+            call_type="agent_chat",
+            prompt=prompt,
+            response=response,
+            model=self.model,
+            tokens_used=tokens_used or None,
+            duration_ms=duration_ms,
+            is_success="false" if error_text else "true",
+            error_msg=error_text,
+        )
+        db.add(log)
+        await db.commit()
 
     async def _build_context(self, context: dict, db: AsyncSession) -> dict:
         result = {
@@ -398,6 +541,8 @@ class AgentService:
             "recommend_template": self._tool_recommend_template,
             "analyze_photo": self._tool_analyze_photo,
             "fill_check_result": self._tool_fill_check_result,
+            "apply_check_result": self._tool_apply_check_result,
+            "apply_final_verdict": self._tool_apply_final_verdict,
         }
 
         handler = tool_handlers.get(tool_name)
@@ -663,6 +808,103 @@ class AgentService:
             "recommendations": recommendations
         }
 
+    async def generate_briefing(
+        self,
+        enterprise_id: str,
+        db: AsyncSession,
+    ) -> dict:
+        """Phase 4: 检查前准备简报。
+
+        编排已有能力（企业历史 + 上次遗留问题 + 知识库检索）+ 一次 LLM 综合调用，
+        生成审核员出发前可以直接看的简报。复用现有查询逻辑，不重复造轮子；
+        与 audit_agent.prepare_audit 的差异是：这里面向"简单检查"场景（enterprise + 历史记录），
+        不依赖 AuditProject（认证审核项目）。
+        """
+        enterprise = await db.get(Enterprise, enterprise_id)
+        if not enterprise:
+            return {"error": "企业不存在"}
+
+        records_result = await db.execute(
+            select(InspectionRecord)
+            .where(InspectionRecord.enterprise_id == enterprise_id)
+            .where(InspectionRecord.status == "submitted")
+            .order_by(InspectionRecord.inspection_date.desc())
+            .limit(3)
+        )
+        recent_records = records_result.scalars().all()
+
+        outstanding_issues = []
+        for record in recent_records:
+            items_result = await db.execute(
+                select(InspectionRecordItem)
+                .where(InspectionRecordItem.record_id == record.id)
+                .where(InspectionRecordItem.radio_value == "fail")
+            )
+            for item in items_result.scalars().all():
+                outstanding_issues.append({
+                    "date": record.inspection_date.strftime("%Y-%m-%d") if record.inspection_date else "",
+                    "title": item.item_title,
+                    "problem": item.problem_description,
+                    "rectification": item.rectification_suggestion,
+                })
+
+        kb_query = f"{enterprise.enterprise_type or ''} {enterprise.name} 检查要点".strip()
+        kb_results = await rag_service.search_knowledge(kb_query, db, top_k=5)
+
+        history_summary = "无历史检查记录" if not recent_records else "\n".join(
+            f"- {r.inspection_date.strftime('%Y-%m-%d') if r.inspection_date else '未知日期'}："
+            f"{ {'pass': '合格', 'fail': '不合格', 'partial_pass': '基本合格'}.get(r.overall_result, '未判定') }"
+            for r in recent_records
+        )
+        issues_summary = "无遗留问题" if not outstanding_issues else "\n".join(
+            f"- {i['title']}：{i['problem'] or '无描述'}" for i in outstanding_issues[:8]
+        )
+        regs_summary = "未检索到相关法规" if not kb_results else "\n".join(
+            f"- {r.get('title', '')}: {r.get('content', '')[:100]}" for r in kb_results[:5]
+        )
+
+        prompt = f"""你是资深检查专家，请为即将进行的现场检查生成一份简明的"检查准备简报"。
+
+企业信息：
+- 企业名称：{enterprise.name}
+- 行业类型：{enterprise.enterprise_type or '未知'}
+- 风险等级：{enterprise.risk_level or '未知'}
+
+历史检查记录：
+{history_summary}
+
+历史遗留问题（近3次检查中的不合格项）：
+{issues_summary}
+
+相关法规参考：
+{regs_summary}
+
+请生成一份简报，包含：
+1. 企业概况一句话总结
+2. 重点关注清单（3-5条具体可操作的检查要点，优先针对历史遗留问题）
+3. 需要携带/核对的法规依据
+
+用简洁的要点式语言，适合审核员出发前快速阅读，不要写成正式公文。直接输出简报正文（可用Markdown加粗/列表），不要输出JSON。"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1500,
+                temperature=0.5,
+            )
+            briefing_text = response.choices[0].message.content or ""
+        except Exception as e:
+            briefing_text = f"简报生成失败：{str(e)}"
+
+        return {
+            "enterprise_id": str(enterprise.id),
+            "enterprise_name": enterprise.name,
+            "risk_level": enterprise.risk_level,
+            "outstanding_issues": outstanding_issues,
+            "briefing_text": briefing_text,
+        }
+
     async def _tool_analyze_photo(
         self,
         args: dict,
@@ -670,7 +912,7 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """Analyze a photo for compliance issues."""
-        media_file_id = args.get("media_file_id")
+        media_file_id = args.get("media_file_id") or context.get("media_file_id")
         check_item_title = args.get("check_item_title")
 
         if not media_file_id:
@@ -764,6 +1006,83 @@ class AgentService:
 
         except Exception as e:
             return {"error": f"分析失败: {str(e)}"}
+
+    async def _tool_apply_check_result(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """Build a check-result write proposal. Does NOT write to the database -
+        the frontend renders this as a confirmation card, and only calls the real
+        write endpoint (POST /api/records/{record_id}/items) after the inspector
+        clicks '采纳'."""
+        item_id = args.get("item_id") or context.get("current_item_id")
+        result = args.get("result")
+        problem_description = args.get("problem_description", "")
+        rectification_suggestion = args.get("rectification_suggestion", "")
+
+        if not item_id:
+            return {"error": "请提供检查项ID"}
+        if result not in ("pass", "fail", "na"):
+            return {"error": "判定结果必须是 pass/fail/na"}
+
+        item = await db.get(InspectionRecordItem, item_id)
+        if not item:
+            return {"error": "检查项不存在"}
+
+        record_id = str(item.record_id) if item.record_id else context.get("record_id")
+
+        proposal = {
+            "type": "action_proposal",
+            "action": "apply_check_result",
+            "status": "pending",
+            "title": "建议记录检查结果",
+            "data": {
+                "record_id": record_id,
+                "item_id": str(item_id),
+                "item_title": item.item_title,
+                "result": result,
+                "problem_description": problem_description,
+                "rectification_suggestion": rectification_suggestion,
+            },
+        }
+        return proposal
+
+    async def _tool_apply_final_verdict(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """Build a final-verdict write proposal. Does NOT write to the database -
+        the frontend renders this as a confirmation card, and only calls the real
+        write endpoint (PUT /api/records/{record_id}) after the inspector clicks '采纳'."""
+        record_id = args.get("record_id") or context.get("record_id")
+        verdict = args.get("verdict")
+        comment = args.get("comment", "")
+
+        if not record_id:
+            return {"error": "未指定检查记录ID"}
+        if verdict not in ("pass", "partial_pass", "fail"):
+            return {"error": "最终判定必须是 pass/partial_pass/fail"}
+
+        record = await db.get(InspectionRecord, record_id)
+        if not record:
+            return {"error": "检查记录不存在"}
+
+        proposal = {
+            "type": "action_proposal",
+            "action": "apply_final_verdict",
+            "status": "pending",
+            "title": "建议记录最终判定",
+            "data": {
+                "record_id": str(record_id),
+                "verdict": verdict,
+                "comment": comment,
+            },
+        }
+        return proposal
 
 
 agent_service = AgentService()

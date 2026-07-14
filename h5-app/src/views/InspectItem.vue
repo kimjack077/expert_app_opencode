@@ -350,7 +350,19 @@
             <span>拍照或上传图片</span>
           </div>
         </div>
-        
+
+        <div v-if="lastUploadedMediaId" class="ai-photo-check">
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            icon="eye-o"
+            @click="analyzeLastPhoto"
+          >
+            让 AI 看看这张照片
+          </van-button>
+        </div>
+
         <div class="upload-info">
           <van-icon name="info-o" size="12" color="#999" />
           <span>照片将自动压缩至500KB以下并添加时间、位置水印</span>
@@ -420,6 +432,14 @@
         保存结果
       </van-button>
     </div>
+
+    <!-- AI 助手 -->
+    <AgentFab @click="showAgentPanel = true" />
+    <AgentChatPanel
+      v-model:show="showAgentPanel"
+      :context="agentContext"
+      @result-applied="onAgentResultApplied"
+    />
   </div>
 </template>
 
@@ -429,6 +449,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { showToast, showSuccessToast, showNotify } from 'vant'
 import request from '../api/request.js'
 import { processPhoto, blobToBase64 } from '../utils/photoUtils.js'
+import AgentFab from '../components/agent/AgentFab.vue'
+import AgentChatPanel from '../components/agent/AgentChatPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -445,6 +467,32 @@ const historyStats = ref(null)
 const loadingHistory = ref(false)
 const showHistoryDetail = ref(false)
 const trendCanvas = ref(null)
+
+const showAgentPanel = ref(false)
+const lastUploadedMediaId = ref(null)
+
+const agentContext = computed(() => ({
+  recordId: route.params.id,
+  currentItemId: route.params.itemId,
+  currentItemTitle: itemData.value?.title || '',
+  enterpriseId: itemData.value?.enterprise_id,
+  mediaFileId: lastUploadedMediaId.value
+}))
+
+const analyzeLastPhoto = () => {
+  if (!lastUploadedMediaId.value) return
+  showAgentPanel.value = true
+}
+
+const onAgentResultApplied = ({ result, problemDescription }) => {
+  if (result) {
+    formData.value.radio_value = result
+    formData.value.result = result
+  }
+  if (problemDescription) {
+    formData.value.problem_description = problemDescription
+  }
+}
 
 const formData = ref({
   result: '',
@@ -821,11 +869,15 @@ const handlePhotoUpload = async (file) => {
     })
 
     const filePath = res.data?.file_path || res.file_path
+    const mediaId = res.data?.id || res.id
     if (filePath) {
       formData.value.photos.push(filePath)
       file.status = 'done'
       file.url = filePath
       file.isImage = true
+      if (mediaId) {
+        lastUploadedMediaId.value = mediaId
+      }
       showSuccessToast('上传成功')
     } else {
       throw new Error('上传响应无效')
@@ -1417,6 +1469,10 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.ai-photo-check {
+  margin-top: 10px;
 }
 
 .history-card {

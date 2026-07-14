@@ -60,7 +60,7 @@ const Login: React.FC = () => {
     }
 
     setLoading(true)
-    const success = await doLogin(username, password, setAuth, navigate)
+    await doLogin(username, password, setAuth, navigate)
     setLoading(false)
   }
 

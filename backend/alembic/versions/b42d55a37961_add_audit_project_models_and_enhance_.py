@@ -200,9 +200,12 @@ def upgrade():
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('nc_no')
     )
-    op.drop_table('check_tasks')
-    op.drop_table('check_templates')
-    op.drop_table('operation_logs')
+    # These three tables predate this repo's tracked migration history (no
+    # earlier migration here creates them) - guard with IF EXISTS so this
+    # migration also replays cleanly against a fresh database.
+    op.execute('DROP TABLE IF EXISTS check_tasks')
+    op.execute('DROP TABLE IF EXISTS check_templates')
+    op.execute('DROP TABLE IF EXISTS operation_logs')
     op.alter_column('agent_memories', 'user_id',
                existing_type=sa.UUID(),
                comment='User ID',

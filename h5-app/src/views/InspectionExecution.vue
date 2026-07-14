@@ -361,6 +361,8 @@
     <AgentChatPanel
       v-model:show="showAgentPanel"
       :context="agentContext"
+      @result-applied="onAgentResultApplied"
+      @verdict-applied="onAgentVerdictApplied"
     />
   </div>
 </template>
@@ -600,6 +602,29 @@ const agentContext = computed(() => ({
   currentItemId: currentItemId.value,
   enterpriseId: record.value?.enterprise_id
 }))
+
+// Agent 写回后，同步本地状态，让检查表单立即显示 Agent 填写的结果
+const onAgentResultApplied = ({ itemId, result, problemDescription }) => {
+  if (!itemId) return
+
+  if (!itemResults.value[itemId]) {
+    itemResults.value[itemId] = {}
+  }
+  itemResults.value[itemId].radio_value = result
+  itemResults.value[itemId].problem_description = problemDescription || ''
+
+  if (quickInputs.value[itemId]) {
+    quickInputs.value[itemId].radio_value = result
+    quickInputs.value[itemId].problem_description = problemDescription || ''
+  }
+}
+
+const onAgentVerdictApplied = ({ verdict, comment }) => {
+  finalJudgment.result = verdict
+  if (comment) {
+    finalJudgment.remarks = comment
+  }
+}
 
 const fetchRecord = async () => {
   try {

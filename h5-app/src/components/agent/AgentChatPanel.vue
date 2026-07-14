@@ -31,6 +31,8 @@
           v-for="(msg, index) in messages"
           :key="index"
           :message="msg"
+          @confirm-action="handleConfirmAction(index, $event)"
+          @cancel-action="handleCancelAction(index, $event)"
         />
 
         <div v-if="isThinking" class="thinking-indicator">
@@ -59,14 +61,28 @@
 
       <div class="input-area">
         <div class="disclaimer">⚠️ AI 建议仅供参考，请以专业判断为准</div>
+        <div v-if="isListening" class="listening-hint">
+          <van-icon name="volume-o" size="14" color="#1677FF" />
+          <span>正在听...点击麦克风结束</span>
+        </div>
         <div class="input-row">
           <van-field
             v-model="inputText"
-            placeholder="输入你的问题..."
+            placeholder="输入你的问题，或点击麦克风说话..."
             :disabled="isThinking"
             @keyup.enter="sendMessage"
             class="input-field"
           />
+          <van-button
+            v-if="speechSupported"
+            :type="isListening ? 'danger' : 'default'"
+            round
+            :disabled="isThinking"
+            @click="toggleVoiceInput"
+            class="voice-btn"
+          >
+            <van-icon :name="isListening ? 'pause-circle-o' : 'mic-o'" size="18" />
+          </van-button>
           <van-button
             v-if="!isThinking"
             type="primary"
@@ -94,8 +110,9 @@
 
 <script setup>
 import { ref, watch, nextTick, computed } from 'vue'
-import { showToast } from 'vant'
+import { showToast, showSuccessToast, showFailToast } from 'vant'
 import AgentMessage from './AgentMessage.vue'
+import { createOrUpdateRecordItem, updateRecord } from '../../api/records'
 
 const props = defineProps({
   show: {
@@ -108,12 +125,13 @@ const props = defineProps({
       recordId: '',
       currentItemTitle: '',
       currentItemId: '',
-      enterpriseId: ''
+      enterpriseId: '',
+      mediaFileId: ''
     })
   }
 })
 
-const emit = defineEmits(['update:show'])
+const emit = defineEmits(['update:show', 'result-applied', 'verdict-applied'])
 
 const visible = computed({
   get: () => props.show,
@@ -126,12 +144,68 @@ const isThinking = ref(false)
 const messagesRef = ref(null)
 const currentStreamContent = ref('')
 const abortController = ref(null)
+const conversationId = ref(null)
 
-const quickActions = computed(() => [
-  { text: '这项怎么查？' },
-  { text: '帮我判断合不合格' },
-  { text: '生成最终判定' }
-])
+// 语音输入（现场审核员戴手套/环境嘈杂时的降门槛入口）
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition
+const speechSupported = !!SpeechRecognitionApi
+const isListening = ref(false)
+let recognizer = null
+
+const toggleVoiceInput = () => {
+  if (!speechSupported) return
+
+  if (isListening.value) {
+    recognizer?.stop()
+    return
+  }
+
+  recognizer = new SpeechRecognitionApi()
+  recognizer.lang = 'zh-CN'
+  recognizer.continuous = false
+  recognizer.interimResults = true
+
+  recognizer.onresult = (event) => {
+    let transcript = ''
+    for (let i = 0; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript
+    }
+    // 识别结果先填入输入框让用户确认/编辑，不直接发送
+    inputText.value = transcript
+  }
+
+  recognizer.onerror = () => {
+    isListening.value = false
+    showToast('语音识别失败，请重试或手动输入')
+  }
+
+  recognizer.onend = () => {
+    isListening.value = false
+  }
+
+  isListening.value = true
+  recognizer.start()
+}
+
+// 快捷指令根据当前上下文动态调整，减少审核员打字
+const quickActions = computed(() => {
+  const actions = []
+
+  if (props.context.mediaFileId) {
+    actions.push({ text: '帮我看看这张照片有没有问题' })
+  }
+  if (props.context.currentItemTitle) {
+    actions.push({ text: '这项怎么查？' })
+    actions.push({ text: '帮我判断合不合格' })
+  } else {
+    actions.push({ text: '今天的检查还有哪些没做完？' })
+  }
+  if (props.context.recordId) {
+    actions.push({ text: '生成最终判定' })
+  }
+
+  return actions
+})
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -196,12 +270,14 @@ const streamChat = async (message) => {
         context: {
           record_id: props.context.recordId,
           current_item_id: props.context.currentItemId,
-          enterprise_id: props.context.enterpriseId
+          enterprise_id: props.context.enterpriseId,
+          media_file_id: props.context.mediaFileId || undefined
         },
         conversation: messages.value.slice(0, -1).map(m => ({
           role: m.role,
           content: m.content
-        }))
+        })),
+        conversation_id: conversationId.value || undefined
       }),
       signal: abortController.value.signal
     })
@@ -227,7 +303,9 @@ const streamChat = async (message) => {
           try {
             const data = JSON.parse(line.slice(6))
 
-            if (data.type === 'content') {
+            if (data.type === 'conversation') {
+              conversationId.value = data.conversation_id
+            } else if (data.type === 'content') {
               // Use reactive update by assigning to the array element
               messages.value[messageIndex] = {
                 ...messages.value[messageIndex],
@@ -250,6 +328,13 @@ const streamChat = async (message) => {
                 t.name === data.tool ? { ...t, status: 'done' } : t
               )
               messages.value[messageIndex] = { ...currentMsg, toolCalls }
+            } else if (data.type === 'action_proposal') {
+              const currentMsg = messages.value[messageIndex]
+              messages.value[messageIndex] = {
+                ...currentMsg,
+                actionProposal: buildActionProposal(data)
+              }
+              scrollToBottom()
             } else if (data.type === 'done') {
               const currentMsg = messages.value[messageIndex]
               if (currentMsg.toolCalls && currentMsg.toolCalls.length > 0) {
@@ -293,9 +378,103 @@ const stopGeneration = () => {
   }
 }
 
+const buildActionProposal = (data) => {
+  if (data.action === 'apply_check_result') {
+    return {
+      type: 'judgment',
+      title: '建议记录检查结果',
+      status: 'pending',
+      data: {
+        recordId: data.data.record_id,
+        itemId: data.data.item_id,
+        checkItem: data.data.item_title,
+        result: data.data.result,
+        problemDescription: data.data.problem_description,
+        rectificationSuggestion: data.data.rectification_suggestion
+      }
+    }
+  }
+  if (data.action === 'apply_final_verdict') {
+    return {
+      type: 'final_verdict',
+      title: '建议记录最终判定',
+      status: 'pending',
+      data: {
+        recordId: data.data.record_id,
+        verdict: data.data.verdict,
+        comment: data.data.comment
+      }
+    }
+  }
+  return {
+    type: 'operation',
+    title: data.title || '建议操作',
+    status: 'pending',
+    data: data.data || {}
+  }
+}
+
+const handleConfirmAction = async (messageIndex, action) => {
+  const currentMsg = messages.value[messageIndex]
+
+  try {
+    if (action.type === 'judgment') {
+      await createOrUpdateRecordItem(action.data.recordId, {
+        id: action.data.itemId,
+        radio_value: action.data.result,
+        problem_description: action.data.problemDescription || '',
+        rectification_suggestion: action.data.rectificationSuggestion || '',
+        ai_generated: true
+      })
+      emit('result-applied', {
+        itemId: action.data.itemId,
+        result: action.data.result,
+        problemDescription: action.data.problemDescription,
+        rectificationSuggestion: action.data.rectificationSuggestion
+      })
+      showSuccessToast('已填写检查结果')
+    } else if (action.type === 'final_verdict') {
+      await updateRecord(action.data.recordId, {
+        overall_result: action.data.verdict,
+        remarks: action.data.comment || ''
+      })
+      emit('verdict-applied', {
+        verdict: action.data.verdict,
+        comment: action.data.comment
+      })
+      showSuccessToast('已填写最终判定')
+    }
+
+    messages.value[messageIndex] = {
+      ...currentMsg,
+      actionProposal: { ...action, status: 'confirmed' }
+    }
+  } catch (error) {
+    console.error('采纳建议失败:', error)
+    showFailToast('填写失败，请手动填写')
+    messages.value[messageIndex] = {
+      ...currentMsg,
+      actionProposal: { ...action, status: 'failed' }
+    }
+  }
+}
+
+const handleCancelAction = (messageIndex, action) => {
+  const currentMsg = messages.value[messageIndex]
+  messages.value[messageIndex] = {
+    ...currentMsg,
+    actionProposal: { ...action, status: 'cancelled' }
+  }
+}
+
 watch(() => props.show, (newVal) => {
   if (newVal) {
     scrollToBottom()
+    // 如果带着待分析照片打开面板，且还没聊过，自动帮用户问一句
+    if (props.context.mediaFileId && messages.value.length === 0) {
+      inputText.value = '帮我看看这张照片有没有问题'
+      sendMessage()
+    }
   }
 })
 </script>
@@ -463,18 +642,44 @@ watch(() => props.show, (newVal) => {
 }
 
 .send-btn,
-.stop-btn {
+.stop-btn,
+.voice-btn {
   width: 36px;
   height: 36px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .send-btn {
   background: linear-gradient(135deg, #1677FF 0%, #0958d9 100%);
   border: none;
+}
+
+.voice-btn.listening {
+  background: #FFF2F0;
+  border-color: #FF4D4F;
+  animation: voice-pulse 1.2s infinite ease-in-out;
+}
+
+@keyframes voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); }
+}
+
+.listening-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px;
+  margin-bottom: 8px;
+  background: #FFF2F0;
+  border-radius: 8px;
+  color: #FF4D4F;
+  font-size: 12px;
 }
 
 .send-btn:disabled {

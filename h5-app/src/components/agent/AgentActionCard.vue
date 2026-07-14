@@ -46,6 +46,19 @@
         </div>
       </template>
 
+      <template v-else-if="action.type === 'final_verdict'">
+        <div class="info-row">
+          <span class="label">最终判定：</span>
+          <van-tag :type="getResultTagType" size="medium">
+            {{ getResultText }}
+          </van-tag>
+        </div>
+        <div v-if="action.data.comment" class="info-block">
+          <span class="label">总体评价：</span>
+          <div class="description-box">{{ action.data.comment }}</div>
+        </div>
+      </template>
+
       <template v-else>
         <pre class="operation-data">{{ JSON.stringify(action.data, null, 2) }}</pre>
       </template>
@@ -53,22 +66,25 @@
 
     <div v-if="action.status === 'pending'" class="card-actions">
       <van-button type="primary" size="small" @click="$emit('confirm')">
-        <van-icon name="success" /> 确认
+        <van-icon name="success" /> 采纳并填写
       </van-button>
       <van-button v-if="action.type === 'create_task'" size="small" @click="$emit('edit')">
         <van-icon name="edit" /> 修改
       </van-button>
       <van-button size="small" @click="$emit('cancel')">
-        <van-icon name="cross" /> 取消
+        <van-icon name="cross" /> 忽略
       </van-button>
     </div>
 
     <div v-else class="card-status">
       <template v-if="action.status === 'confirmed'">
-        <van-icon name="success" color="#52C41A" /> 已确认
+        <van-icon name="success" color="#52C41A" /> 已填写
       </template>
       <template v-else-if="action.status === 'cancelled'">
-        <van-icon name="cross" color="#FF4D4F" /> 已取消
+        <van-icon name="cross" color="#FF4D4F" /> 已忽略
+      </template>
+      <template v-else-if="action.status === 'failed'">
+        <van-icon name="warning" color="#FF4D4F" /> 填写失败，请重试或手动填写
       </template>
     </div>
   </div>
@@ -95,6 +111,7 @@ const getActionIcon = computed(() => {
   const icons = {
     create_task: 'orders-o',
     judgment: 'warning-o',
+    final_verdict: 'certificate',
     operation: 'info-o'
   }
   return icons[props.action.type] || 'info-o'
@@ -104,26 +121,29 @@ const getActionColor = computed(() => {
   const colors = {
     create_task: '#1677FF',
     judgment: '#FAAD14',
+    final_verdict: '#1677FF',
     operation: '#FAAD14'
   }
   return colors[props.action.type] || '#FAAD14'
 })
 
 const getResultTagType = computed(() => {
-  const result = props.action.data?.result
+  const result = props.action.data?.result || props.action.data?.verdict
   const types = {
     pass: 'success',
     fail: 'danger',
+    na: 'default',
     partial_pass: 'warning'
   }
   return types[result] || 'default'
 })
 
 const getResultText = computed(() => {
-  const result = props.action.data?.result
+  const result = props.action.data?.result || props.action.data?.verdict
   const texts = {
     pass: '合格',
     fail: '不合格',
+    na: '不适用',
     partial_pass: '基本合格'
   }
   return texts[result] || result

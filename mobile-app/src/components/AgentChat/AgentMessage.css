@@ -1,0 +1,87 @@
+.agent-message {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.agent-message.user {
+  flex-direction: row-reverse;
+}
+
+.agent-message .avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #e6f4ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agent-message .message-content {
+  max-width: 85%;
+}
+
+.agent-message.user .message-content {
+  max-width: 75%;
+}
+
+.agent-message .message-bubble {
+  padding: 12px 14px;
+  border-radius: 12px;
+  word-break: break-word;
+}
+
+.agent-message .message-bubble.user {
+  background: #1677ff;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.agent-message .message-bubble.assistant {
+  background: #f5f5f5;
+  color: #333;
+  border-bottom-left-radius: 4px;
+}
+
+.agent-message .message-text {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.agent-message .message-text :where(strong) {
+  font-weight: 600;
+}
+
+.agent-message .message-text :where(.list-num) {
+  font-weight: 600;
+  color: #1677ff;
+}
+
+.agent-message .message-time {
+  font-size: 11px;
+  color: #999;
+  margin-top: 4px;
+  text-align: right;
+}
+
+.agent-message.user .message-time {
+  text-align: left;
+}
+
+.agent-message .tool-calls {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #ddd;
+}
+
+.agent-message .tool-call-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}

@@ -6,7 +6,6 @@ import {
   TextArea,
   ImageUploader,
   Toast,
-  List,
   Dialog,
 } from 'antd-mobile'
 import {
@@ -14,6 +13,8 @@ import {
   LocationOutline,
   ClockCircleOutline,
 } from 'antd-mobile-icons'
+import AgentFab from '../../components/AgentChat/AgentFab'
+import AgentChatPanel from '../../components/AgentChat/AgentChatPanel'
 import './style.css'
 
 // 快速检查模板（简化版）
@@ -31,6 +32,7 @@ const QuickCheck: React.FC = () => {
   const [location, setLocation] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showAgentPanel, setShowAgentPanel] = useState(false)
 
   const toggleItem = (id: string) => {
     if (selectedItems.includes(id)) {
@@ -190,6 +192,16 @@ const QuickCheck: React.FC = () => {
           提交快速检查
         </Button>
       </div>
+
+      {/* AI 助手：快速检查为本地模拟流程，暂无真实 record/task 关联，
+          因此始终以 advisory-only 模式展示建议，不提供一键写入 */}
+      <AgentFab onClick={() => setShowAgentPanel(true)} />
+      <AgentChatPanel
+        visible={showAgentPanel}
+        onClose={() => setShowAgentPanel(false)}
+        context={{}}
+        advisoryOnly
+      />
     </div>
   )
 }
