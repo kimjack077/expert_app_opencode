@@ -155,6 +155,10 @@ export const knowledgeApi = {
   getDocument: (id: string) => api.get(`/knowledge/documents/${id}`),
   createDocument: (data: any) => api.post('/knowledge/documents', data),
   updateDocument: (id: string, data: any) => api.put(`/knowledge/documents/${id}`, data),
+  uploadDocument: (data: FormData) => api.post('/knowledge/documents/upload', data, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  }),
   deleteDocument: (id: string) => api.delete(`/knowledge/documents/${id}`),
 
   getGuidelines: (params?: any) => api.get('/knowledge/guidelines', { params }),

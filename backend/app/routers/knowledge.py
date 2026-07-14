@@ -1,17 +1,20 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
+from app.models.knowledge import InspectionGuideline, KnowledgeCategory, KnowledgeDocument
 from app.models.user import User
-from app.models.knowledge import KnowledgeCategory, KnowledgeDocument, InspectionGuideline
 from app.schemas import ApiResponse
-from app.utils.security import get_current_user, get_current_admin_user
 from app.services import AuditService
+from app.services.rag_service import rag_service
+from app.utils.document_parser import document_parser
+from app.utils.security import get_current_admin_user, get_current_user
 
 router = APIRouter()
 
@@ -145,6 +148,22 @@ class DocumentCreate(BaseModel):
     expiry_date: Optional[datetime] = None
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+    status: str = "effective"
+
+
+class DocumentUpdate(BaseModel):
+    title: Optional[str] = None
+    category_id: Optional[str] = None
+    doc_type: Optional[str] = None
+    content: Optional[str] = None
+    doc_no: Optional[str] = None
+    summary: Optional[str] = None
+    keywords: Optional[str] = None
+    issue_authority: Optional[str] = None
+    issue_date: Optional[datetime] = None
+    effective_date: Optional[datetime] = None
+    expiry_date: Optional[datetime] = None
+    status: Optional[str] = None
 
 
 @router.post("/documents", response_model=ApiResponse)
@@ -167,6 +186,7 @@ async def create_document(
         expiry_date=data.expiry_date,
         file_url=data.file_url,
         file_name=data.file_name,
+        status=data.status,
         created_by=current_user.id,
     )
     db.add(document)
@@ -182,7 +202,70 @@ async def create_document(
         str(document.id),
     )
 
-    return make_response(data={"id": str(document.id), "title": document.title})
+    indexing = await rag_service.create_embeddings_for_document(str(document.id), db)
+
+    return make_response(data={
+        "id": str(document.id),
+        "title": document.title,
+        "indexing": indexing,
+    })
+
+
+@router.post("/documents/upload", response_model=ApiResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    category_id: str = Form(...),
+    doc_type: str = Form(...),
+    title: Optional[str] = Form(None),
+    doc_no: Optional[str] = Form(None),
+    keywords: Optional[str] = Form(None),
+    status: str = Form("effective"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """上传知识库文件，抽取正文并立即生成 RAG 向量索引。"""
+    content, metadata = await document_parser.parse_document(file)
+    parser_errors = ("[PDF解析", "[Word解析", "[Excel解析")
+    if not content.strip() or content.lstrip().startswith(parser_errors):
+        raise HTTPException(status_code=400, detail=content or "未能从文件中提取文字")
+
+    document = KnowledgeDocument(
+        title=title or metadata.get("filename") or "未命名知识文档",
+        category_id=category_id,
+        doc_type=doc_type,
+        content=content,
+        doc_no=doc_no,
+        keywords=keywords,
+        status=status,
+        file_name=metadata.get("filename"),
+        created_by=current_user.id,
+    )
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
+
+    indexing = await rag_service.create_embeddings_for_document(str(document.id), db)
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "upload_document",
+        "knowledge_document",
+        str(document.id),
+        detail={
+            "filename": metadata.get("filename"),
+            "file_size": metadata.get("size"),
+            "embeddings_created": indexing.get("embeddings_created", 0),
+        },
+    )
+
+    return make_response(data={
+        "id": str(document.id),
+        "title": document.title,
+        "file_name": document.file_name,
+        "content_length": len(content),
+        "indexing": indexing,
+    })
 
 
 @router.get("/documents/{doc_id}", response_model=ApiResponse)
@@ -201,6 +284,7 @@ async def get_document(
     return make_response(data={
         "id": str(document.id),
         "title": document.title,
+        "category_id": str(document.category_id) if document.category_id else None,
         "doc_type": document.doc_type,
         "doc_no": document.doc_no,
         "content": document.content,
@@ -220,11 +304,7 @@ async def get_document(
 @router.put("/documents/{doc_id}", response_model=ApiResponse)
 async def update_document(
     doc_id: str,
-    title: Optional[str] = None,
-    content: Optional[str] = None,
-    summary: Optional[str] = None,
-    keywords: Optional[str] = None,
-    status: Optional[str] = None,
+    data: DocumentUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
@@ -232,21 +312,22 @@ async def update_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if title:
-        document.title = title
-    if content:
-        document.content = content
-    if summary:
-        document.summary = summary
-    if keywords:
-        document.keywords = keywords
-    if status:
-        document.status = status
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(document, field, value)
 
     await db.commit()
     await db.refresh(document)
 
-    return make_response(data={"id": str(document.id), "title": document.title})
+    indexing = None
+    if "content" in update_data:
+        indexing = await rag_service.create_embeddings_for_document(str(document.id), db)
+
+    return make_response(data={
+        "id": str(document.id),
+        "title": document.title,
+        "indexing": indexing,
+    })
 
 
 @router.delete("/documents/{doc_id}", response_model=ApiResponse)

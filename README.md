@@ -11,7 +11,7 @@
 - **知识库向量检索**：基于嵌入模型的语义搜索，智能关联检查项与法规
 - **模板管理**：管理员可自定义检查模板，按不同政策标准分解检查条目
 - **企业信息管理**：管理被检查企业的基础信息、资质、产品、设备等
-- **知识库管理**：管理政策法规、审查细则等文档
+- **知识库管理**：Web 端上传、编辑政策法规和审查细则；文件上传后自动解析正文、建立或重建向量索引
 - **操作审计**：记录所有现场工作人员的操作行为，支持管理员查看分析
 
 ## 技术栈
@@ -150,8 +150,9 @@ npm run dev
 - `POST /api/knowledge/categories` - 创建分类
 - `GET /api/knowledge/documents` - 获取文档列表
 - `POST /api/knowledge/documents` - 创建文档
+- `POST /api/knowledge/documents/upload` - 上传 PDF、Word、Excel 或 TXT 知识文件并自动建立向量索引
 - `GET /api/knowledge/documents/{id}` - 获取文档详情
-- `PUT /api/knowledge/documents/{id}` - 更新文档
+- `PUT /api/knowledge/documents/{id}` - 更新文档；正文更新后自动重建向量索引
 - `DELETE /api/knowledge/documents/{id}` - 删除文档
 - `GET /api/knowledge/guidelines` - 获取审查细则
 - `POST /api/knowledge/guidelines` - 创建审查细则
@@ -187,7 +188,7 @@ npm run dev
 - **企业管理**：企业信息、资质、产品、设备、整改记录管理
 - **检查模板**：标准分类、检查项、模板管理
 - **检查任务**：任务创建、分配、执行、完成
-- **知识库**：政策法规、审查细则管理
+- **知识库**：政策法规、审查细则管理；支持文件上传、正文编辑与自动索引重建
 - **数据分析**：操作审计、LLM调用分析
 
 ### H5应用功能
@@ -296,6 +297,14 @@ docker-compose up -d
 5. 创建 Pull Request
 
 ## 更新日志
+
+### v1.5.0 (2026-07-15)
+
+- 完善 Web 知识库维护闭环
+  - 支持上传 PDF、Word、Excel、TXT 并自动提取正文
+  - 新增、上传和修改知识正文后自动建立或重建向量索引
+  - 支持在 Web 端编辑已入库的政策法规文档
+  - 补充 H5 Agent 知识库查询验证与演示流程
 
 ### v1.4.0 (2026-03-17)
 - 新增多模态照片智能分析功能

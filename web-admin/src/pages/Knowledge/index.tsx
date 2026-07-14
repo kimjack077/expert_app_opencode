@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Modal, Form, Input, Select, message, Space, Tag, Tree, Tabs, Upload } from 'antd'
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, FolderOutlined, FileTextOutlined, UploadOutlined } from '@ant-design/icons'
+import { Card, Table, Button, Modal, Form, Input, Select, message, Space, Tag, Tabs, Upload } from 'antd'
+import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons'
+import type { UploadFile } from 'antd/es/upload/interface'
 import { knowledgeApi } from '@/services/api'
 import dayjs from 'dayjs'
 
@@ -27,11 +28,16 @@ export default function Knowledge() {
   const [guidelines, setGuidelines] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [docModalVisible, setDocModalVisible] = useState(false)
+  const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [guidelineModalVisible, setGuidelineModalVisible] = useState(false)
   const [detailVisible, setDetailVisible] = useState(false)
   const [currentDoc, setCurrentDoc] = useState<any>(null)
   const [docForm] = Form.useForm()
+  const [uploadForm] = Form.useForm()
   const [guidelineForm] = Form.useForm()
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([])
+  const [uploading, setUploading] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
 
@@ -74,15 +80,76 @@ export default function Knowledge() {
     }
   }
 
-  const handleCreateDocument = async (values: any) => {
+  const showIndexingResult = (res: any, actionText: string) => {
+    const indexing = res?.data?.indexing
+    const count = indexing?.embeddings_created || 0
+    if (count > 0) {
+      message.success(`${actionText}，已生成 ${count} 个知识片段索引`)
+    } else {
+      message.warning(`${actionText}，但向量索引未生成，请检查嵌入模型配置`)
+    }
+  }
+
+  const openCreateDocument = () => {
+    setEditingDocId(null)
+    docForm.resetFields()
+    docForm.setFieldValue('status', 'effective')
+    setDocModalVisible(true)
+  }
+
+  const handleSubmitDocument = async (values: any) => {
     try {
-      await knowledgeApi.createDocument(values)
-      message.success('文档创建成功')
+      const res: any = editingDocId
+        ? await knowledgeApi.updateDocument(editingDocId, values)
+        : await knowledgeApi.createDocument(values)
+      showIndexingResult(res, editingDocId ? '文档更新成功' : '文档创建成功')
       setDocModalVisible(false)
+      setEditingDocId(null)
       docForm.resetFields()
       fetchDocuments()
     } catch (error) {
-      message.error('创建失败')
+      message.error(editingDocId ? '更新失败' : '创建失败')
+    }
+  }
+
+  const handleEditDocument = async (id: string) => {
+    try {
+      const res: any = await knowledgeApi.getDocument(id)
+      setEditingDocId(id)
+      docForm.setFieldsValue(res.data)
+      setDocModalVisible(true)
+    } catch (error) {
+      message.error('获取文档内容失败')
+    }
+  }
+
+  const handleUploadDocument = async (values: any) => {
+    const file = uploadFileList[0]?.originFileObj
+    if (!file) {
+      message.error('请选择要上传的知识库文件')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+    Object.entries(values).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        formData.append(key, String(value))
+      }
+    })
+
+    setUploading(true)
+    try {
+      const res: any = await knowledgeApi.uploadDocument(formData)
+      showIndexingResult(res, '知识库上传并解析成功')
+      setUploadModalVisible(false)
+      setUploadFileList([])
+      uploadForm.resetFields()
+      fetchDocuments()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '上传解析失败')
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -174,11 +241,14 @@ export default function Knowledge() {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 220,
       render: (_: any, record: Document) => (
         <Space>
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewDocument(record.id)}>
             查看
+          </Button>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditDocument(record.id)}>
+            编辑
           </Button>
           <Button type="link" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteDocument(record.id)}>
             删除
@@ -218,9 +288,14 @@ export default function Knowledge() {
           <Card
             title="政策法规管理"
             extra={
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setDocModalVisible(true)}>
-                新增文档
-              </Button>
+              <Space>
+                <Button icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
+                  上传知识库
+                </Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDocument}>
+                  新增文档
+                </Button>
+              </Space>
             }
           >
             <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
@@ -279,13 +354,17 @@ export default function Knowledge() {
       </Tabs>
 
       <Modal
-        title="新增文档"
+        title={editingDocId ? '编辑知识文档' : '新增知识文档'}
         open={docModalVisible}
-        onCancel={() => setDocModalVisible(false)}
+        onCancel={() => {
+          setDocModalVisible(false)
+          setEditingDocId(null)
+          docForm.resetFields()
+        }}
         footer={null}
         width={800}
       >
-        <Form form={docForm} layout="vertical" onFinish={handleCreateDocument}>
+        <Form form={docForm} layout="vertical" onFinish={handleSubmitDocument}>
           <Form.Item name="title" label="标题" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -333,7 +412,7 @@ export default function Knowledge() {
           <Form.Item name="summary" label="摘要">
             <TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="content" label="内容">
+          <Form.Item name="content" label="内容" rules={[{ required: true, message: '请输入知识正文' }]}>
             <TextArea rows={10} />
           </Form.Item>
           <Form.Item style={{ marginTop: 16, textAlign: 'right' }}>
@@ -341,6 +420,83 @@ export default function Knowledge() {
               <Button onClick={() => setDocModalVisible(false)}>取消</Button>
               <Button type="primary" htmlType="submit">
                 确定
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="上传知识库文件"
+        open={uploadModalVisible}
+        onCancel={() => {
+          setUploadModalVisible(false)
+          setUploadFileList([])
+          uploadForm.resetFields()
+        }}
+        footer={null}
+        width={640}
+      >
+        <Form
+          form={uploadForm}
+          layout="vertical"
+          initialValues={{ doc_type: 'standard', status: 'effective' }}
+          onFinish={handleUploadDocument}
+        >
+          <Form.Item label="知识文件" required extra="支持 PDF、Word、Excel、TXT，上传后自动提取正文并建立向量索引">
+            <Upload.Dragger
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
+              maxCount={1}
+              beforeUpload={() => false}
+              fileList={uploadFileList}
+              onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
+              onRemove={() => {
+                setUploadFileList([])
+                return true
+              }}
+            >
+              <p className="ant-upload-drag-icon"><UploadOutlined /></p>
+              <p className="ant-upload-text">点击或拖拽文件到此区域</p>
+              <p className="ant-upload-hint">建议上传可复制文字的正式法规或标准文件</p>
+            </Upload.Dragger>
+          </Form.Item>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Form.Item name="category_id" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
+              <Select>
+                {categories.map((c) => (
+                  <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="doc_type" label="文档类型" rules={[{ required: true }]}>
+              <Select>
+                <Select.Option value="regulation">法规</Select.Option>
+                <Select.Option value="policy">政策</Select.Option>
+                <Select.Option value="standard">标准</Select.Option>
+                <Select.Option value="guideline">细则</Select.Option>
+              </Select>
+            </Form.Item>
+            <Form.Item name="title" label="显示标题">
+              <Input placeholder="不填则使用文件名" />
+            </Form.Item>
+            <Form.Item name="doc_no" label="文号/标准号">
+              <Input placeholder="如 GB/T 19001-2016" />
+            </Form.Item>
+            <Form.Item name="keywords" label="检索关键词">
+              <Input placeholder="组织环境,质量管理体系,ISO 9001" />
+            </Form.Item>
+            <Form.Item name="status" label="状态">
+              <Select>
+                <Select.Option value="effective">有效</Select.Option>
+                <Select.Option value="draft">草稿</Select.Option>
+              </Select>
+            </Form.Item>
+          </div>
+          <Form.Item style={{ marginTop: 8, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setUploadModalVisible(false)}>取消</Button>
+              <Button type="primary" htmlType="submit" loading={uploading}>
+                上传并建立索引
               </Button>
             </Space>
           </Form.Item>
