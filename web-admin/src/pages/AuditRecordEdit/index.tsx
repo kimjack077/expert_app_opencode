@@ -42,6 +42,7 @@ interface RecordItem {
   evaluation_3level?: string
   audit_evidence?: string
   audit_findings?: string
+  clause_no_snapshot?: string
 }
 
 export default function AuditRecordEdit() {
@@ -186,12 +187,19 @@ export default function AuditRecordEdit() {
       return
     }
 
+    const clauseNo = planItem?.clauses?.[0]
+      || record?.items?.find((item: RecordItem) => item?.clause_no_snapshot)?.clause_no_snapshot
+    if (!clauseNo) {
+      message.warning('当前审核计划项未配置条款，无法进行 AI 证据评估')
+      return
+    }
+
     setAiLoading(true)
     setAiResult(null)
     try {
       const response = await auditAIApi.evaluateEvidence(projectId!, {
         evidence,
-        clause_no: planItem?.area_id || '7.1',
+        clause_no: clauseNo,
         certification_system: record?.certification_systems?.[0] || 'ISO 9001',
       })
       setAiResult(response.data)

@@ -85,15 +85,24 @@ async def _run_artifact_generation(job_id: UUID) -> None:
             artifact_ids: list[str] = []
             total = max(1, len(artifact_types))
             for index, artifact_type in enumerate(artifact_types, start=1):
-                generated = await project_artifact_service.generate(
-                    db,
-                    job.project_id,
-                    [artifact_type],
-                    job.created_by,
-                    UUID(metadata["area_record_id"])
-                    if metadata.get("area_record_id")
-                    else None,
-                )
+                if artifact_type == "package":
+                    generated = [
+                        await project_artifact_service.generate_package(
+                            db,
+                            job.project_id,
+                            job.created_by,
+                        )
+                    ]
+                else:
+                    generated = await project_artifact_service.generate(
+                        db,
+                        job.project_id,
+                        [artifact_type],
+                        job.created_by,
+                        UUID(metadata["area_record_id"])
+                        if metadata.get("area_record_id")
+                        else None,
+                    )
                 artifact_ids.extend(str(item.id) for item in generated)
                 job = await db.get(ProjectArtifact, job_id)
                 job.progress = round(index / total * 100)
@@ -508,10 +517,22 @@ async def download_package(project_id: UUID, db: AsyncSession = Depends(get_db),
                 "quality_check": quality,
             },
         )
-    item = await project_artifact_service.generate_package(
-        db, project_id, current_user.id
-    )
-    await db.commit()
+    item = (
+        await db.execute(
+            select(ProjectArtifact)
+            .where(
+                ProjectArtifact.project_id == project_id,
+                ProjectArtifact.artifact_type == "package",
+                ProjectArtifact.status == "ready",
+            )
+            .order_by(ProjectArtifact.version.desc())
+        )
+    ).scalars().first()
+    if not item or not Path(item.path).is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="完整资料包尚未生成，请先创建资料包生成任务",
+        )
     return FileResponse(
         item.path, media_type="application/zip", filename=item.filename
     )

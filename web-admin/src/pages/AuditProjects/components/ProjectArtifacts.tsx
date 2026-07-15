@@ -63,6 +63,7 @@ const artifactTypeText: Record<string, string> = {
   quality_check: '质量检查结果',
   project_summary: '项目摘要',
   manifest: '资料清单',
+  package: '完整审核资料包',
   generation_job: '成果生成任务',
 }
 
@@ -222,11 +223,34 @@ export default function ProjectArtifacts({ projectId }: Props) {
   }
 
   const handleDownloadPackage = async () => {
+    const latestPackage = artifacts
+      .filter((item) => item.artifact_type === 'package' && ['completed', 'ready'].includes(item.status || ''))
+      .sort((left, right) => Number(right.version || 0) - Number(left.version || 0))[0]
+
+    if (!latestPackage) {
+      setGenerating(true)
+      try {
+        const qualityResponse = await projectArtifactApi.qualityCheck(projectId)
+        const qualityPayload = unwrap(qualityResponse) || {}
+        const latestQuality = qualityPayload.quality_check || qualityPayload.quality || qualityPayload
+        setQuality(latestQuality)
+        if (!latestQuality.passed) {
+          message.warning('质量门禁未通过，请先处理阻断项')
+          return
+        }
+        await projectArtifactApi.generate(projectId, { artifact_types: ['package'] })
+        message.success('完整资料包生成任务已创建，可在列表中查看进度并在完成后下载')
+        await fetchData()
+      } catch (error: any) {
+        setGenerating(false)
+        message.error(getErrorMessage(error, '创建完整资料包生成任务失败'))
+      }
+      return
+    }
+
     setDownloadingPackage(true)
     try {
-      const response = await projectArtifactApi.downloadPackage(projectId)
-      saveDownloadedBlob(response, `审核项目_${projectId}_完整资料包.zip`)
-      message.success('完整资料包下载已开始')
+      await handleDownload(latestPackage)
     } catch (error: any) {
       message.error(getErrorMessage(error, '导出完整资料包失败'))
     } finally {
@@ -493,18 +517,18 @@ export default function ProjectArtifacts({ projectId }: Props) {
               type={blockerCount > 0 ? 'warning' : 'info'}
               showIcon
               message="完整资料包"
-              description={blockerCount > 0 ? '请先处理全部阻断项并重新运行质量检查，门禁通过后才能导出。' : 'ZIP 包将包含项目资料、区域记录、审核报告、不符合项汇总、质量检查结果和 manifest。'}
+                description={blockerCount > 0 ? '请先处理全部阻断项并重新运行质量检查，门禁通过后才能导出。' : '资料包会作为可重试的后台任务生成，完成后可下载已固化版本；内容包括项目资料、区域记录、审核报告、不符合项汇总、质量检查结果和 manifest。'}
             />
           </Col>
           <Col>
             <Button
               size="large"
               icon={<CloudDownloadOutlined />}
-              loading={downloadingPackage}
-              disabled={!passed || generating}
-              onClick={handleDownloadPackage}
-            >
-              导出完整资料包
+                loading={downloadingPackage || generating}
+                disabled={!passed || generating}
+                onClick={handleDownloadPackage}
+              >
+                生成或下载完整资料包
             </Button>
           </Col>
         </Row>

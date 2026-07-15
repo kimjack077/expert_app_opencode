@@ -45,6 +45,13 @@ export default function RecordDetail({ recordId, projectId, onClose, onRefresh }
       return
     }
 
+    const clauseNo = record?.items?.find((item: any) => item?.clause_no_snapshot)?.clause_no_snapshot
+      || record?.plan_item?.clauses?.[0]
+    if (!clauseNo) {
+      message.warning('当前区域记录未关联审核条款，无法进行 AI 证据评估')
+      return
+    }
+
     setAiModalVisible(true)
     setAiLoading(true)
     setAiResult(null)
@@ -52,7 +59,7 @@ export default function RecordDetail({ recordId, projectId, onClose, onRefresh }
     try {
       const response = await auditAIApi.evaluateEvidence(projectId, {
         evidence: conclusion,
-        clause_no: record?.area_id || '7.1',
+        clause_no: clauseNo,
         certification_system: record?.certification_systems?.[0] || 'ISO 9001',
       })
       

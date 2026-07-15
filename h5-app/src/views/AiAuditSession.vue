@@ -50,6 +50,9 @@
         placeholder="一次描述完整现场情况，Agent 会自动拆分并匹配多个条款"
       />
       <van-uploader v-model="photoFiles" multiple :max-count="5" :disabled="isCompleted" :after-read="uploadPhoto" />
+      <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted" @click="showAgent = true">
+        打开 AI 审核助手
+      </van-button>
       <van-button block type="primary" class="primary-action" :loading="analyzing" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
         生成多条款 AI 记录
       </van-button>
@@ -112,6 +115,11 @@
         <van-button block type="primary" :loading="submitting" :disabled="isCompleted" @click="submitSession">提交审核记录</van-button>
       </div>
     </section>
+    <AgentChatPanel
+      v-model:show="showAgent"
+      :context="agentContext"
+      @project-action-applied="loadSession"
+    />
   </main>
 </template>
 
@@ -119,6 +127,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
+import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
 
 import {
   checkAuditQuality,
@@ -144,6 +153,8 @@ const confirming = ref(false)
 const checking = ref(false)
 const submitting = ref(false)
 const listening = ref(false)
+const usedVoiceInput = ref(false)
+const showAgent = ref(false)
 const evidenceText = ref('')
 const conclusion = ref('')
 const photoFiles = ref([])
@@ -161,6 +172,12 @@ const blockers = computed(() => qualityCheck.value.blockers || qualityCheck.valu
 const progress = computed(() => session.value.progress ?? (drafts.value.length ? Math.min(95, 20 + drafts.value.filter((item) => item.status === 'confirmed').length * 15) : 10))
 const statusText = computed(() => session.value.status === 'completed' ? '审核记录已提交' : 'Agent 正在协助整理现场证据')
 const sortedDrafts = computed(() => [...pendingDrafts.value].sort((left, right) => Number(isAbnormal(right)) - Number(isAbnormal(left))))
+const agentContext = computed(() => ({
+  projectId: projectId.value,
+  auditSessionId: sessionId.value,
+  planItemId: planItemId.value,
+  currentItemTitle: planItem.value?.area_name || session.value.title || '现场审核'
+}))
 
 const evaluationCode = (draft) => String(draft.record_payload?.evaluation_3level || draft.evaluation || '2')
 const isAbnormal = (draft) => evaluationCode(draft) === '3' || ['insufficient', 'partial'].includes(draft.quality?.level)
@@ -229,6 +246,7 @@ const toggleVoice = () => {
   speechRecognition.onresult = (event) => {
     const text = Array.from(event.results).slice(event.resultIndex).map((result) => result[0].transcript).join('')
     evidenceText.value = `${evidenceText.value}${evidenceText.value ? '\n' : ''}${text}`
+    usedVoiceInput.value = true
   }
   speechRecognition.onend = () => { listening.value = false }
   speechRecognition.onerror = () => { listening.value = false; showToast('语音识别中断，请重试') }
@@ -242,13 +260,14 @@ const analyzeEvidence = async () => {
   try {
     await submitSessionEvidence(projectId.value, sessionId.value, {
       content: evidenceText.value.trim(),
-      evidence_type: mediaFileIds.value.length ? 'mixed' : (listening.value ? 'voice' : 'text'),
+      evidence_type: mediaFileIds.value.length ? 'mixed' : (usedVoiceInput.value ? 'voice' : 'text'),
       media_file_ids: mediaFileIds.value,
       source_metadata: { plan_item_id: planItemId.value, area_name: planItem.value?.area_name }
     })
     evidenceText.value = ''
     photoFiles.value = []
     mediaFileIds.value = []
+    usedVoiceInput.value = false
     showToast('AI 已生成待确认记录')
     await loadSession()
   } catch (error) {
@@ -317,5 +336,6 @@ onMounted(loadSession)
 .section-title,.card-title,.draft-heading,.draft-meta,.review-actions{display:flex;align-items:center}.section-title{justify-content:space-between;margin-bottom:12px}.section-title h2{margin:0;font-size:18px}.icon-button{width:44px;height:44px;border:0;border-radius:12px;color:var(--primary-color);background:var(--info-bg)}
 .primary-action{min-height:48px;margin-top:14px}.alert-card{border-color:#fecaca;background:#fff7f7;color:#991b1b}.card-title{gap:8px;font-weight:700}.alert-card ul{margin:10px 0 0 20px}
 .draft-card,.saved-evidence-card{margin:10px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px}.draft-card.abnormal{border-color:#fca5a5;background:linear-gradient(90deg,var(--error-bg),#fff 45%)}.draft-heading{gap:8px;justify-content:space-between;min-width:220px}.draft-evidence,.reasoning{margin:10px 0;font-size:14px;line-height:1.6}.draft-meta{flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary)}.citation{padding:8px;border-radius:8px;background:var(--bg-light);font-size:12px}.review-actions{flex-direction:column;gap:10px;margin-top:14px}.final-card{margin-bottom:0}
+.agent-entry{min-height:44px;margin-top:10px}
 @media(min-width:700px){.audit-session-page{max-width:680px;margin:0 auto}}
 </style>

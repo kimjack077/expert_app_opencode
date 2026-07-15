@@ -114,6 +114,8 @@ import { showToast, showSuccessToast, showFailToast } from 'vant'
 import AgentMessage from './AgentMessage.vue'
 import { createOrUpdateRecordItem, updateRecord } from '../../api/records'
 
+const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
 const props = defineProps({
   show: {
     type: Boolean,
@@ -126,12 +128,16 @@ const props = defineProps({
       currentItemTitle: '',
       currentItemId: '',
       enterpriseId: '',
-      mediaFileId: ''
+      mediaFileId: '',
+      projectId: '',
+      auditSessionId: '',
+      sessionId: '',
+      planItemId: ''
     })
   }
 })
 
-const emit = defineEmits(['update:show', 'result-applied', 'verdict-applied'])
+const emit = defineEmits(['update:show', 'result-applied', 'verdict-applied', 'project-action-applied'])
 
 const visible = computed({
   get: () => props.show,
@@ -257,7 +263,6 @@ const streamChat = async (message) => {
 
   try {
     const token = localStorage.getItem('token')
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
     const response = await fetch(`${API_BASE_URL}/api/agent/chat`, {
       method: 'POST',
       headers: {
@@ -271,7 +276,10 @@ const streamChat = async (message) => {
           record_id: props.context.recordId,
           current_item_id: props.context.currentItemId,
           enterprise_id: props.context.enterpriseId,
-          media_file_id: props.context.mediaFileId || undefined
+          media_file_id: props.context.mediaFileId || undefined,
+          project_id: props.context.projectId || undefined,
+          audit_session_id: props.context.auditSessionId || props.context.sessionId || undefined,
+          plan_item_id: props.context.planItemId || undefined
         },
         conversation: messages.value.slice(0, -1).map(m => ({
           role: m.role,
@@ -443,6 +451,31 @@ const handleConfirmAction = async (messageIndex, action) => {
         comment: action.data.comment
       })
       showSuccessToast('已填写最终判定')
+    } else {
+      const data = action.data || {}
+      const projectId = String(data.project_id || props.context.projectId || '')
+      const endpoint = String(data.confirm_endpoint || data.endpoint || '')
+      const method = String(data.confirm_method || data.method || 'POST').toUpperCase()
+      const expectedPrefix = `/api/audit-projects/${projectId}/`
+
+      if (!projectId || projectId !== String(props.context.projectId || '') || !endpoint.startsWith(expectedPrefix) || !['POST', 'PUT', 'PATCH'].includes(method)) {
+        throw new Error('该确认卡缺少受当前项目约束的写入协议')
+      }
+
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+        },
+        body: JSON.stringify(data.confirm_payload || {})
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || (payload && payload.code && payload.code >= 400)) {
+        throw new Error(payload?.detail?.message || payload?.detail || payload?.message || '确认写入失败')
+      }
+      emit('project-action-applied', { action: data, result: payload?.data || payload })
+      showSuccessToast('已确认并写入当前审核项目')
     }
 
     messages.value[messageIndex] = {

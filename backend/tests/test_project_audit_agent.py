@@ -6,7 +6,8 @@ from uuid import uuid4
 
 from docx import Document
 
-from app.routers.project_agent import _session_quality
+from app.routers import project_agent
+from app.routers.project_agent import _run_artifact_generation, _session_quality
 from app.services.agent_service import agent_service
 from app.services.project_artifact_service import ProjectArtifactService
 from app.services.project_knowledge_service import project_knowledge_service
@@ -176,3 +177,54 @@ def test_package_uses_only_the_latest_artifact_version_per_type():
         ("area_record", 2),
         ("audit_report", 1),
     }
+
+
+def test_package_generation_runs_as_a_retryable_background_job():
+    job_id = uuid4()
+    project_id = uuid4()
+    package_id = uuid4()
+    job = SimpleNamespace(
+        id=job_id,
+        artifact_type="generation_job",
+        project_id=project_id,
+        created_by=uuid4(),
+        artifact_metadata={"artifact_types": ["package"]},
+        status="pending",
+        progress=0,
+        error_message=None,
+    )
+    db = AsyncMock()
+    db.get.return_value = job
+
+    class SessionContext:
+        async def __aenter__(self):
+            return db
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    with (
+        patch.object(project_agent, "AsyncSessionLocal", return_value=SessionContext()),
+        patch.object(
+            project_agent.project_artifact_service,
+            "quality_check",
+            AsyncMock(return_value={"passed": True}),
+        ),
+        patch.object(
+            project_agent.project_artifact_service,
+            "generate_package",
+            AsyncMock(return_value=SimpleNamespace(id=package_id)),
+        ) as generate_package,
+        patch.object(
+            project_agent.project_artifact_service,
+            "generate",
+            AsyncMock(),
+        ) as generate,
+    ):
+        asyncio.run(_run_artifact_generation(job_id))
+
+    generate_package.assert_awaited_once_with(db, project_id, job.created_by)
+    generate.assert_not_awaited()
+    assert job.status == "completed"
+    assert job.progress == 100
+    assert job.artifact_metadata["artifact_ids"] == [str(package_id)]

@@ -240,3 +240,9 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
 ## 许可证
 
 MIT License
+
+## Latest Delivery Notes
+
+- The formal H5 audit session now exposes the shared streaming Agent, project-scoped context, photo and voice evidence capture, and real confirmation-card writes.
+- Complete ZIP packages are created as persisted background jobs with progress and retry; the download endpoint returns the latest ready version after the quality gate passes.
+- Production verification target: `49.232.213.79` (`Web :3000`, `H5 :5173`, `API :8000`).

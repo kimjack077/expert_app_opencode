@@ -60,18 +60,33 @@
       </template>
 
       <template v-else>
-        <pre class="operation-data">{{ JSON.stringify(action.data, null, 2) }}</pre>
+        <div v-if="action.data.project_id" class="info-row">
+          <span class="label">项目：</span>
+          <span class="value">{{ action.data.project_id }}</span>
+        </div>
+        <div v-if="action.data.plan_item_id" class="info-row">
+          <span class="label">计划项：</span>
+          <span class="value">{{ action.data.plan_item_id }}</span>
+        </div>
+        <div v-if="action.data.evidence" class="info-block">
+          <span class="label">现场证据：</span>
+          <div class="description-box">{{ action.data.evidence }}</div>
+        </div>
+        <div v-if="action.data.draft_count !== undefined" class="info-row">
+          <span class="label">待确认草稿：</span>
+          <span class="value">{{ action.data.safe_only ? '仅证据充分的非异常项' : `${action.data.draft_count} 条` }}</span>
+        </div>
       </template>
     </div>
 
-    <div v-if="action.status === 'pending'" class="card-actions">
+    <div v-if="action.status === 'pending' || action.status === 'failed'" class="card-actions">
       <van-button type="primary" size="small" @click="$emit('confirm')">
         <van-icon name="success" /> 采纳并填写
       </van-button>
-      <van-button v-if="action.type === 'create_task'" size="small" @click="$emit('edit')">
+      <van-button v-if="action.type === 'create_task' && action.status === 'pending'" size="small" @click="$emit('edit')">
         <van-icon name="edit" /> 修改
       </van-button>
-      <van-button size="small" @click="$emit('cancel')">
+      <van-button v-if="action.status === 'pending'" size="small" @click="$emit('cancel')">
         <van-icon name="cross" /> 忽略
       </van-button>
     </div>
