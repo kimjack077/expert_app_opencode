@@ -75,6 +75,19 @@ def make_response(data=None, code=200, message="success"):
     }
 
 
+def area_record_response(record: AuditAreaRecord) -> dict:
+    """Expose the formal area name without making clients infer it from IDs."""
+    value = jsonable_encoder(record)
+    value["area_name"] = (
+        record.area.area_name
+        if record.area
+        else record.plan_item.area_name
+        if record.plan_item
+        else None
+    )
+    return value
+
+
 # ==================== AuditProject Routes ====================
 
 @router.post("")
@@ -549,9 +562,12 @@ async def list_area_records(
     if status:
         query = query.where(AuditAreaRecord.status == status)
 
-    query = query.order_by(AuditAreaRecord.created_at.desc())
+    query = query.options(
+        selectinload(AuditAreaRecord.area),
+        selectinload(AuditAreaRecord.plan_item),
+    ).order_by(AuditAreaRecord.created_at.desc())
     result = await db.execute(query)
-    return make_response(result.scalars().all())
+    return make_response([area_record_response(item) for item in result.scalars().all()])
 
 
 @router.get("/records/{record_id}")
@@ -562,12 +578,17 @@ async def get_area_record(
 ):
     """获取审核区域记录详情"""
     result = await db.execute(
-        select(AuditAreaRecord).where(AuditAreaRecord.id == record_id)
+        select(AuditAreaRecord)
+        .where(AuditAreaRecord.id == record_id)
+        .options(
+            selectinload(AuditAreaRecord.area),
+            selectinload(AuditAreaRecord.plan_item),
+        )
     )
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="审核区域记录不存在")
-    return make_response(record)
+    return make_response(area_record_response(record))
 
 
 @router.put("/records/{record_id}")

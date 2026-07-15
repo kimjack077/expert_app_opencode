@@ -161,3 +161,18 @@ def test_area_record_word_contains_confirmed_clause_and_evidence():
     assert "7.5" in text
     assert "查见文件清单版本为 V3" in text
     assert "GB/T 19001-2016 7.5" in text
+
+
+def test_package_uses_only_the_latest_artifact_version_per_type():
+    artifacts = [
+        SimpleNamespace(artifact_type="area_record", version=1),
+        SimpleNamespace(artifact_type="area_record", version=2),
+        SimpleNamespace(artifact_type="audit_report", version=1),
+    ]
+
+    latest = ProjectArtifactService._latest_artifacts(artifacts)
+
+    assert {(item.artifact_type, item.version) for item in latest} == {
+        ("area_record", 2),
+        ("audit_report", 1),
+    }

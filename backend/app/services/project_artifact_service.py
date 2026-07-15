@@ -44,7 +44,11 @@ class ProjectArtifactService:
             await db.execute(
                 select(AuditAreaRecord)
                 .where(AuditAreaRecord.project_id == project_id)
-                .options(selectinload(AuditAreaRecord.items))
+                .options(
+                    selectinload(AuditAreaRecord.items),
+                    selectinload(AuditAreaRecord.area),
+                    selectinload(AuditAreaRecord.plan_item),
+                )
             )
         ).scalars().all()
         ncs = (await db.execute(select(Nonconformity).where(Nonconformity.project_id == project_id))).scalars().all()
@@ -65,7 +69,7 @@ class ProjectArtifactService:
                 {
                     "id": str(record.id),
                     "plan_item_id": str(record.plan_item_id) if record.plan_item_id else None,
-                    "area": record.area_name,
+                    "area": self._area_name(record),
                     "status": record.status,
                     "conclusion": record.conclusion or "",
                     "items": [
@@ -199,14 +203,18 @@ class ProjectArtifactService:
                     await db.execute(
                         select(AuditAreaRecord)
                         .where(AuditAreaRecord.project_id == project_id)
-                        .options(selectinload(AuditAreaRecord.items))
+                        .options(
+                            selectinload(AuditAreaRecord.items),
+                            selectinload(AuditAreaRecord.area),
+                            selectinload(AuditAreaRecord.plan_item),
+                        )
                     )
                 ).scalars().all()
                 if area_record_id:
                     records = [item for item in records if item.id == area_record_id]
                 for record in records:
                     content = self._area_record_docx(project, record)
-                    generated.append(await self._store(db, project, "area_record", f"区域审核记录_{record.area_name}_{record.id}.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
+                    generated.append(await self._store(db, project, "area_record", f"区域审核记录_{self._area_name(record)}_{record.id}.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
             elif artifact_type == "audit_report":
                 await self._create_report_version(
                     db, project, snapshot, quality, created_by
@@ -236,7 +244,15 @@ class ProjectArtifactService:
         snapshot = await self.source_snapshot(db, project_id)
         quality = await self.quality_check(db, project_id)
         documents = (await db.execute(select(ProjectDocument).where(ProjectDocument.project_id == project_id))).scalars().all()
-        artifacts = (await db.execute(select(ProjectArtifact).where(ProjectArtifact.project_id == project_id, ProjectArtifact.artifact_type != "package", ProjectArtifact.status == "ready"))).scalars().all()
+        artifacts = (
+            await db.execute(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project_id,
+                    ProjectArtifact.artifact_type != "package",
+                    ProjectArtifact.status == "ready",
+                )
+            )
+        ).scalars().all()
         buffer = io.BytesIO()
         manifest_files: list[dict[str, Any]] = []
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -256,7 +272,7 @@ class ProjectArtifactService:
                     folder = "C管理手册和程序文件" if document.document_type in {"manual", "procedure"} else "D审核资料汇总"
                     add_bytes(f"{folder}/{_safe_name(document.original_filename)}", path.read_bytes())
             folder_map = {"area_record": "E审核记录汇总", "audit_report": "F审核报告", "nc_summary": "G不符合项整改汇总", "manifest": "I档案检查表"}
-            for artifact in artifacts:
+            for artifact in self._latest_artifacts(artifacts):
                 path = Path(artifact.path)
                 if path.is_file():
                     add_bytes(f"{folder_map.get(artifact.artifact_type, 'H其他成果')}/{_safe_name(artifact.filename)}", path.read_bytes())
@@ -362,10 +378,36 @@ class ProjectArtifactService:
         return report
 
     @staticmethod
+    def _latest_artifacts(
+        artifacts: list[ProjectArtifact],
+    ) -> list[ProjectArtifact]:
+        """Keep only the latest version of each deliverable in a ZIP package."""
+        latest: dict[str, ProjectArtifact] = {}
+        for artifact in artifacts:
+            current = latest.get(artifact.artifact_type)
+            if current is None or int(artifact.version or 0) > int(current.version or 0):
+                latest[artifact.artifact_type] = artifact
+        return list(latest.values())
+
+    @staticmethod
+    def _area_name(record: AuditAreaRecord) -> str:
+        """Resolve the formal area relation while retaining legacy record support."""
+        direct_name = getattr(record, "area_name", None)
+        if direct_name:
+            return str(direct_name)
+        area = getattr(record, "area", None)
+        if area and area.area_name:
+            return str(area.area_name)
+        plan_item = getattr(record, "plan_item", None)
+        if plan_item and plan_item.area_name:
+            return str(plan_item.area_name)
+        return "未命名区域"
+
+    @staticmethod
     def _area_record_docx(project: AuditProject, record: AuditAreaRecord) -> bytes:
         document = Document()
         document.add_heading("区域审核记录", 0)
-        for label, value in (("项目", project.title), ("项目编号", project.project_no), ("区域", record.area_name), ("审核日期", record.audit_date), ("状态", record.status)):
+        for label, value in (("项目", project.title), ("项目编号", project.project_no), ("区域", ProjectArtifactService._area_name(record)), ("审核日期", record.audit_date), ("状态", record.status)):
             document.add_paragraph(f"{label}：{value or ''}")
         document.add_heading("审核结论", level=1)
         document.add_paragraph(record.conclusion or "尚未填写")
