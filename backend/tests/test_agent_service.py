@@ -9,6 +9,29 @@ from app.services.template_recommendation_service import (
 )
 
 
+async def _stream_response(*chunks):
+    for chunk in chunks:
+        yield chunk
+
+
+def _chunk(content=None, tool_calls=None):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=content, tool_calls=tool_calls)
+            )
+        ]
+    )
+
+
+def _tool_call(index, call_id, name, arguments):
+    return SimpleNamespace(
+        index=index,
+        id=call_id,
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
 def test_get_enterprise_history_uses_inspection_records():
     enterprise_id = uuid4()
     enterprise = SimpleNamespace(
@@ -100,3 +123,62 @@ def test_execute_tool_hides_internal_errors_and_rolls_back():
     }
     assert "sensitive SQL details" not in str(result)
     db.rollback.assert_awaited_once()
+
+
+def test_chat_stream_hides_tool_narration_and_avoids_duplicate_knowledge_searches():
+    db = AsyncMock()
+    repeated_call = _tool_call(
+        0,
+        "call-1",
+        "search_knowledge_base",
+        '{"query":"3.5 追溯系统"}',
+    )
+    final_chunk = _chunk(content="第3.5条的正式定义。")
+    create = AsyncMock(
+        side_effect=[
+            _stream_response(_chunk("我先检索。", [repeated_call])),
+            _stream_response(
+                _chunk(
+                    "我继续检索。",
+                    [
+                        _tool_call(
+                            0,
+                            "call-2",
+                            "search_knowledge_base",
+                            '{"query":"3.5 追溯系统"}',
+                        )
+                    ],
+                )
+            ),
+            _stream_response(final_chunk),
+        ]
+    )
+
+    async def collect_events():
+        return [
+            event
+            async for event in agent_service.chat_stream(
+                message="第3.5条怎么定义？",
+                context={},
+                conversation=[],
+                db=db,
+            )
+        ]
+
+    with (
+        patch.object(agent_service, "_build_context", AsyncMock(return_value={})),
+        patch.object(
+            agent_service,
+            "_execute_tool",
+            AsyncMock(return_value={"results": ["定义正文"]}),
+        ) as execute_tool,
+        patch.object(agent_service, "_log_call", AsyncMock()),
+        patch.object(agent_service.client.chat.completions, "create", create),
+    ):
+        events = asyncio.run(collect_events())
+
+    assert [event["content"] for event in events if event["type"] == "content"] == [
+        "第3.5条的正式定义。"
+    ]
+    assert execute_tool.await_count == 1
+    assert events[-1]["type"] == "done"

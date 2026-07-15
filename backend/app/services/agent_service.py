@@ -298,6 +298,9 @@ TOOLS = [
 ]
 
 MAX_TOOL_ROUNDS = 5
+MAX_KNOWLEDGE_SEARCHES = 2
+FINAL_RESPONSE_INSTRUCTION = """工具调用已结束。请仅基于已获得的工具结果，直接给出完整、准确的最终答复。
+不要描述继续检索的过程，不要再次请求工具；若资料不足，必须明确说明缺少什么资料。"""
 
 
 class AgentService:
@@ -380,10 +383,17 @@ class AgentService:
         total_tokens = 0
         full_response_text = ""
         error_text: Optional[str] = None
+        knowledge_search_signatures: set[str] = set()
+        knowledge_search_count = 0
 
         try:
             for round_idx in range(MAX_TOOL_ROUNDS):
                 is_last_round = round_idx == MAX_TOOL_ROUNDS - 1
+
+                if is_last_round:
+                    # Some tool-capable models otherwise end the last round
+                    # with an empty message after several tool calls.
+                    messages.append({"role": "system", "content": FINAL_RESPONSE_INSTRUCTION})
 
                 response = await self.client.chat.completions.create(
                     model=self.model,
@@ -409,8 +419,6 @@ class AgentService:
 
                     if delta.content:
                         assistant_text += delta.content
-                        full_response_text += delta.content
-                        yield {"type": "content", "content": delta.content}
 
                     if delta.tool_calls:
                         had_tool_calls = True
@@ -432,7 +440,19 @@ class AgentService:
                                     tool_calls_buffer[idx]["function"]["arguments"] += tool_call_delta.function.arguments
 
                 if not had_tool_calls:
-                    # Model answered directly with no tool calls - we're done.
+                    # Only stream visible text once the turn is known to be a
+                    # final answer.  Tool-call narration such as "let me
+                    # search again" is not useful to the inspection user.
+                    if not assistant_text.strip():
+                        error_text = "模型未生成最终答复"
+                        yield {
+                            "type": "error",
+                            "content": "AI 未能生成最终答复，请稍后重试。",
+                        }
+                        return
+
+                    full_response_text += assistant_text
+                    yield {"type": "content", "content": assistant_text}
                     break
 
                 # Replay the assistant turn (with tool calls) into history, then
@@ -464,9 +484,30 @@ class AgentService:
 
                     yield {"type": "tool_call", "tool": tool_name, "status": "calling"}
 
-                    tool_result = await self._execute_tool(
-                        tool_name, tool_args, context, db
-                    )
+                    if tool_name == "search_knowledge_base":
+                        search_signature = json.dumps(
+                            tool_args, ensure_ascii=False, sort_keys=True
+                        )
+                        if search_signature in knowledge_search_signatures:
+                            tool_result = {
+                                "message": "相同的知识库检索已执行，请基于已有结果直接回答。",
+                                "retryable": False,
+                            }
+                        elif knowledge_search_count >= MAX_KNOWLEDGE_SEARCHES:
+                            tool_result = {
+                                "message": "已达到本次问答的知识库检索次数上限，请基于已有结果直接回答。",
+                                "retryable": False,
+                            }
+                        else:
+                            knowledge_search_signatures.add(search_signature)
+                            knowledge_search_count += 1
+                            tool_result = await self._execute_tool(
+                                tool_name, tool_args, context, db
+                            )
+                    else:
+                        tool_result = await self._execute_tool(
+                            tool_name, tool_args, context, db
+                        )
 
                     if isinstance(tool_result, dict) and tool_result.get("type") == "action_proposal":
                         yield tool_result
@@ -478,6 +519,14 @@ class AgentService:
                         "tool_call_id": tool_call["id"],
                         "content": json.dumps(tool_result, ensure_ascii=False)
                     })
+
+            if not full_response_text.strip():
+                error_text = "工具轮次结束后未生成最终答复"
+                yield {
+                    "type": "error",
+                    "content": "AI 未能生成最终答复，请稍后重试。",
+                }
+                return
 
             yield {"type": "done", "content": ""}
 

@@ -24,6 +24,7 @@ from app.models.rag import KnowledgeEmbedding, CheckItemRegulation
 # Chunking configuration
 CHUNK_SIZE = 500  # Target tokens per chunk
 CHUNK_OVERLAP = 50  # Overlap between chunks
+SECTION_REFERENCE_PATTERN = re.compile(r"(?<![\d.])(\d+(?:\.\d+)+)(?![\d.])")
 
 
 class RAGService:
@@ -70,20 +71,27 @@ class RAGService:
             delete(KnowledgeEmbedding).where(KnowledgeEmbedding.document_id == document_id)
         )
 
-        # Chunk the document
-        chunks = self._chunk_text(document.content)
+        # Chunk the document.  Do not embed table-of-contents fragments: they
+        # repeat headings but do not contain the clause content users need.
+        source_chunks = self._chunk_text(document.content)
+        chunks = [
+            (chunk_index, chunk)
+            for chunk_index, chunk in enumerate(source_chunks)
+            if not self._is_table_of_contents_chunk(chunk)
+        ]
+        toc_chunks_skipped = len(source_chunks) - len(chunks)
 
         # Create embeddings for each chunk
         embeddings_created = 0
         errors = []
 
-        for idx, chunk in enumerate(chunks):
+        for chunk_index, chunk in chunks:
             try:
                 embedding = await self._get_document_embedding(chunk)
 
                 kb_embedding = KnowledgeEmbedding(
                     document_id=document_id,
-                    chunk_index=idx,
+                    chunk_index=chunk_index,
                     content=chunk,
                     embedding=json.dumps(embedding) if embedding else None,
                     embedding_model=self.embedding_model,
@@ -93,13 +101,15 @@ class RAGService:
                 embeddings_created += 1
 
             except Exception as e:
-                errors.append(f"Chunk {idx}: {str(e)}")
+                errors.append(f"Chunk {chunk_index}: {str(e)}")
 
         await db.commit()
 
         return {
             "document_id": document_id,
             "total_chunks": len(chunks),
+            "source_chunks": len(source_chunks),
+            "toc_chunks_skipped": toc_chunks_skipped,
             "embeddings_created": embeddings_created,
             "errors": errors,
         }
@@ -154,13 +164,77 @@ class RAGService:
                         "document_title": emb.document.title if emb.document else "Unknown",
                         "document_type": emb.document.doc_type if emb.document else None,
                         "chunk_index": emb.chunk_index,
+                        "is_table_of_contents": self._is_table_of_contents_chunk(emb.content),
                     })
                 except Exception as e:
                     print(f"[RAG] Error processing embedding: {e}")
 
-        # Sort by similarity and return top_k
-        scored_chunks.sort(key=lambda x: x["similarity"], reverse=True)
+        # Older documents may have been indexed before TOC filtering was
+        # introduced.  Keep query-time protection for those documents, unless
+        # the user explicitly asks to see the document's table of contents.
+        if not self._is_toc_query(query):
+            non_toc_chunks = [
+                chunk for chunk in scored_chunks if not chunk["is_table_of_contents"]
+            ]
+            if non_toc_chunks:
+                scored_chunks = non_toc_chunks
+
+        # A PDF table of contents often has a better semantic match for a
+        # section number than the section body. When users ask for a specific
+        # clause, promote the actual clause text and demote dotted TOC entries.
+        section_references = set(SECTION_REFERENCE_PATTERN.findall(query))
+        for chunk in scored_chunks:
+            rank_score = chunk["similarity"]
+            if section_references:
+                section_match = self._get_section_match_type(
+                    chunk["content"], section_references
+                )
+                chunk["section_match"] = section_match
+                if section_match == "body":
+                    rank_score += 1.0
+                elif section_match == "toc":
+                    rank_score -= 0.25
+            chunk["ranking_score"] = rank_score
+
+        # Keep the original similarity for callers that use it as a threshold.
+        scored_chunks.sort(key=lambda x: x["ranking_score"], reverse=True)
         return scored_chunks[:top_k]
+
+    @staticmethod
+    def _get_section_match_type(content: str, section_references: set[str]) -> Optional[str]:
+        """Classify an exact section reference as body text or a TOC entry."""
+        for match in SECTION_REFERENCE_PATTERN.finditer(content):
+            if match.group(1) not in section_references:
+                continue
+
+            following_text = content[match.end():match.end() + 120]
+            # A chunk can end immediately after a heading; it is not useful
+            # for answering the clause and must not outrank its continuation.
+            if len(following_text.strip()) < 24:
+                continue
+            # TOC lines conventionally contain a title followed by a long run
+            # of dots and a page number.  A definition/body heading does not.
+            if re.match(r"\s*\S{1,60}\s*(?:\.{4,}|…{2,})", following_text):
+                return "toc"
+            return "body"
+        return None
+
+    @staticmethod
+    def _is_table_of_contents_chunk(content: str) -> bool:
+        """Return whether a chunk is primarily a dotted-leader table of contents."""
+        dot_leaders = re.findall(r"(?:\.{4,}|…{2,})", content)
+        if len(dot_leaders) < 2:
+            return False
+
+        toc_entries = re.findall(
+            r"(?:^|\s)\d+(?:\.\d+)*\s+\S{1,60}\s*(?:\.{4,}|…{2,})\s*\d+",
+            content,
+        )
+        return len(toc_entries) >= 2 or len(dot_leaders) >= 4
+
+    @staticmethod
+    def _is_toc_query(query: str) -> bool:
+        return bool(re.search(r"目录|章节目录|目录结构|章节列表", query))
 
     async def link_check_item_to_regulations(
         self,
