@@ -70,6 +70,9 @@ logs/
 .env.development
 # .env.production - Allow production config to be committed for deployment
 
+# Allow backend/.env to be tracked - environment variables must be committed
+!backend/.env
+
 # Database backups
 *.sql.gz
 *.sql

@@ -50,6 +50,8 @@
 <script setup>
 import { computed } from 'vue'
 import { showToast } from 'vant'
+import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import AgentActionCard from './AgentActionCard.vue'
 
 const props = defineProps({
@@ -67,19 +69,7 @@ const hasCard = computed(() => {
 
 const renderedContent = computed(() => {
   if (!props.message.content) return ''
-  
-  let content = props.message.content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>')
-    .replace(/• /g, '&bull; ')
-    .replace(/(\d+)\. /g, '<span class="list-num">$1.</span> ')
-  
-  return content
+  return DOMPurify.sanitize(marked.parse(props.message.content, { breaks: true, gfm: true }))
 })
 
 const getToolLabel = (name) => {
@@ -171,15 +161,83 @@ const copyText = async (text) => {
 .message-text {
   font-size: 14px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.message-text :deep(p) {
+  margin: 6px 0;
+}
+
+.message-text :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.message-text :deep(h1),
+.message-text :deep(h2),
+.message-text :deep(h3) {
+  margin: 14px 0 6px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.message-text :deep(h1) {
+  font-size: 17px;
+}
+
+.message-text :deep(h2) {
+  font-size: 16px;
+}
+
+.message-text :deep(h3) {
+  font-size: 15px;
+}
+
+.message-text :deep(h1:first-child),
+.message-text :deep(h2:first-child),
+.message-text :deep(h3:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(ul),
+.message-text :deep(ol) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.message-text :deep(li) {
+  margin: 4px 0;
 }
 
 .message-text :deep(strong) {
   font-weight: 600;
 }
 
-.message-text :deep(.list-num) {
-  font-weight: 600;
-  color: #1677FF;
+.message-text :deep(hr) {
+  margin: 12px 0;
+  border: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.message-text :deep(blockquote) {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border-left: 3px solid #1677FF;
+  background: rgba(22, 119, 255, 0.06);
+  color: #666;
+}
+
+.message-bubble.user .message-text :deep(hr) {
+  border-top-color: rgba(255, 255, 255, 0.3);
+}
+
+.message-bubble.user .message-text :deep(blockquote) {
+  border-left-color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .message-time {

@@ -503,7 +503,7 @@ async def get_auditor_workload(
 
         data.append({
             "user_id": user_id_str,
-            "name": user.name,
+            "name": user.full_name or user.username,
             "project_count": project_count,
             "area_count": area_count,
             "nc_count": nc_count,
@@ -586,7 +586,7 @@ async def get_auditor_ranking(
 
         ranking_data.append({
             "user_id": str(user.id),
-            "name": user.name,
+            "name": user.full_name or user.username,
             "project_count": project_count,
             "area_count": area_count,
             "nc_count": nc_count,
