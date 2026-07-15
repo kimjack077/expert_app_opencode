@@ -138,6 +138,11 @@
   color: #FF4D4F;
 }
 
+.agent-message-renderer .action-status.failed {
+  background: #FFF2F0;
+  color: #CF1322;
+}
+
 .agent-action-confirm {
   margin-top: 8px;
 }

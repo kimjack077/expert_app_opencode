@@ -162,7 +162,7 @@ const onSubmit = async () => {
       showToast({ type: 'success', message: '登录成功', duration: 1000 })
       console.log('页面跳转开始')
       setTimeout(() => {
-        router.push('/home')
+        router.push('/today-audit')
         console.log('页面跳转完成')
       }, 500)
     } else {

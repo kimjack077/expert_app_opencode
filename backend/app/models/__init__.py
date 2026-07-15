@@ -34,6 +34,14 @@ from .audit_project import (
     CommunicationMeeting,
 )
 from .agent_conversation import AgentConversation, AgentMessage
+from .project_knowledge import ProjectDocument, ProjectKnowledgeChunk
+from .evidence_agent import (
+    AiAuditSession,
+    EvidenceSubmission,
+    EvidenceItem,
+    AiDraftRecord,
+)
+from .project_artifact import ProjectArtifact
 
 __all__ = [
     "Base",
@@ -77,4 +85,14 @@ __all__ = [
     # Agent conversation persistence
     "AgentConversation",
     "AgentMessage",
+    # Project-scoped audit knowledge
+    "ProjectDocument",
+    "ProjectKnowledgeChunk",
+    # Formal evidence and AI draft workflow
+    "AiAuditSession",
+    "EvidenceSubmission",
+    "EvidenceItem",
+    "AiDraftRecord",
+    # Versioned generated files
+    "ProjectArtifact",
 ]

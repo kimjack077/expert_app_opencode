@@ -313,6 +313,9 @@ class NonconformityResponse(NonconformityBase):
     status: str
     created_by: Optional[UUID] = None
     verified_by: Optional[UUID] = None
+    source_draft_id: Optional[UUID] = None
+    confirmed_by: Optional[UUID] = None
+    confirmed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -367,6 +370,10 @@ class AuditReportResponse(AuditReportBase):
     prepared_at: Optional[datetime] = None
     reviewed_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None
+    consistency_check: dict = Field(default_factory=dict)
+    completeness_check: dict = Field(default_factory=dict)
+    source_snapshot: dict = Field(default_factory=dict)
+    version: int = Field(default=1, ge=1)
     created_at: datetime
     updated_at: datetime
 

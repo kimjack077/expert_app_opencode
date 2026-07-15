@@ -27,7 +27,7 @@ from app.models.enterprise import Enterprise
 class AuditAgent:
     """审核 AI Agent - 支持多模型"""
 
-    def __init__(self, db: AsyncSession, model_provider: str = "qwen"):
+    def __init__(self, db: AsyncSession, model_provider: str = "sensenova"):
         """
         初始化 AI Agent
         
@@ -36,30 +36,16 @@ class AuditAgent:
             model_provider: 模型提供商 ("qwen", "nvidia", "openai")
         """
         self.db = db
-        self.model_provider = model_provider
-        
-        # 根据提供商配置客户端
-        if model_provider == "qwen":
-            # 阿里云通义千问
-            self.client = AsyncOpenAI(
-                api_key=settings.VISION_LLM_API_KEY,
-                base_url=settings.VISION_LLM_BASE_URL
-            )
-            self.model = settings.VISION_LLM_MODEL
-        elif model_provider == "nvidia":
-            # NVIDIA Mistral
-            self.client = AsyncOpenAI(
-                api_key=settings.NVIDIA_API_KEY,
-                base_url="https://integrate.api.nvidia.com/v1"
-            )
-            self.model = "mistralai/mistral-large-3-675b-instruct-2512"
-        else:
-            # OpenAI (默认回退)
-            self.client = AsyncOpenAI(
-                api_key=settings.LLM_API_KEY,
-                base_url=settings.LLM_BASE_URL
-            )
-            self.model = settings.LLM_MODEL
+        # Audit preparation, evidence evaluation, report writing and NC
+        # drafting are text tasks.  Keep them on the configured primary text
+        # model; the separate vision model is reserved for photo analysis.
+        self.model_provider = "sensenova"
+        self.client = AsyncOpenAI(
+            api_key=settings.LLM_API_KEY,
+            base_url=settings.LLM_BASE_URL,
+            timeout=settings.LLM_TIMEOUT,
+        )
+        self.model = settings.LLM_MODEL
 
     async def prepare_audit(self, project_id: UUID) -> Dict[str, Any]:
         """
@@ -81,9 +67,25 @@ class AuditAgent:
 
         # 获取历史不符合项
         historical_nc = []
-        if enterprise and enterprise.last_audit_date:
-            # TODO: 查询历史不符合项
-            pass
+        if enterprise:
+            historical_result = await self.db.execute(
+                select(Nonconformity, AuditProject)
+                .join(AuditProject, Nonconformity.project_id == AuditProject.id)
+                .where(AuditProject.enterprise_id == enterprise.id)
+                .where(AuditProject.id != project.id)
+                .order_by(Nonconformity.created_at.desc())
+                .limit(20)
+            )
+            historical_nc = [
+                {
+                    "project_no": historical_project.project_no,
+                    "severity": nc.severity,
+                    "clause_no": nc.clause_no,
+                    "description": nc.description,
+                    "status": nc.status,
+                }
+                for nc, historical_project in historical_result.all()
+            ]
 
         # 构建提示词
         prompt = f"""
@@ -101,6 +103,9 @@ class AuditAgent:
 - 认证体系：{', '.join(project.certification_systems)}
 - 审核准则：{', '.join(project.audit_criteria)}
 - 审核人天：{project.audit_days}
+
+历史不符合项：
+{historical_nc if historical_nc else '无历史不符合项'}
 
 请提供以下内容：
 1. 建议的审核人天数是否合理（基于企业规模和风险）
@@ -369,7 +374,7 @@ class AuditAgent:
 async def prepare_audit_with_ai(
     db: AsyncSession, 
     project_id: UUID,
-    model_provider: str = "qwen"
+    model_provider: str = "sensenova"
 ) -> Dict[str, Any]:
     """使用 AI 准备审核"""
     agent = AuditAgent(db, model_provider=model_provider)
@@ -381,7 +386,7 @@ async def evaluate_evidence_with_ai(
     evidence: str,
     clause_no: str,
     certification_system: str,
-    model_provider: str = "qwen"
+    model_provider: str = "sensenova"
 ) -> Dict[str, Any]:
     """使用 AI 评估证据"""
     agent = AuditAgent(db, model_provider=model_provider)
@@ -391,7 +396,7 @@ async def evaluate_evidence_with_ai(
 async def generate_report_with_ai(
     db: AsyncSession, 
     project_id: UUID,
-    model_provider: str = "qwen"
+    model_provider: str = "sensenova"
 ) -> Dict[str, Any]:
     """使用 AI 生成报告"""
     agent = AuditAgent(db, model_provider=model_provider)
@@ -403,7 +408,7 @@ async def suggest_nc_with_ai(
     evidence: str,
     clause_no: str,
     certification_system: str,
-    model_provider: str = "qwen"
+    model_provider: str = "sensenova"
 ) -> Dict[str, Any]:
     """使用 AI 建议不符合项"""
     agent = AuditAgent(db, model_provider=model_provider)

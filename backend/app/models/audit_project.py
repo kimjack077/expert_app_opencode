@@ -13,7 +13,9 @@ from sqlalchemy import (
     Text,
     JSON,
     Date,
+    Integer,
     Numeric,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
@@ -136,6 +138,31 @@ class AuditProject(Base):
     )
     meetings = relationship(
         "CommunicationMeeting",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    project_documents = relationship(
+        "ProjectDocument",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    ai_audit_sessions = relationship(
+        "AiAuditSession",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    evidence_submissions = relationship(
+        "EvidenceSubmission",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    ai_draft_records = relationship(
+        "AiDraftRecord",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    artifacts = relationship(
+        "ProjectArtifact",
         back_populates="project",
         cascade="all, delete-orphan"
     )
@@ -558,6 +585,20 @@ class Nonconformity(Base):
         ForeignKey("users.id"),
         comment="开具人 ID"
     )
+    source_draft_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ai_draft_records.id", ondelete="SET NULL"),
+        comment="AI draft that produced this nonconformity"
+    )
+    confirmed_by = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        comment="Team leader or administrator who confirmed the draft"
+    )
+    confirmed_at = Column(
+        DateTime(timezone=True),
+        comment="Time the draft nonconformity became confirmed"
+    )
     verified_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
@@ -576,6 +617,8 @@ class Nonconformity(Base):
     record_item = relationship("InspectionRecordItem")
     creator = relationship("User", foreign_keys=[created_by])
     verifier = relationship("User", foreign_keys=[verified_by])
+    confirmer = relationship("User", foreign_keys=[confirmed_by])
+    source_draft = relationship("AiDraftRecord", back_populates="nonconformities")
 
     def __repr__(self):
         return f"<Nonconformity {self.nc_no}: {self.severity}>"
@@ -660,6 +703,20 @@ class AuditReport(Base):
         ForeignKey("users.id"),
         comment="审核人 ID"
     )
+    # Reproducible report snapshot and pre-publication validation results.
+    consistency_check = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    completeness_check = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    source_snapshot = Column(
+        JSON, nullable=False, default=dict, server_default=text("'{}'::json")
+    )
+    version = Column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+
     approved_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),

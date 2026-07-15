@@ -120,7 +120,8 @@ export default function PlanEditor({ projectId }: Props) {
     return template ? template.name : templateId
   }
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
+    await Promise.all([fetchTeamMembers(), fetchTemplates()])
     setEditingItem(null)
     const defaultDate = project?.scheduled_start ? dayjs(project.scheduled_start) : dayjs()
     form.resetFields()

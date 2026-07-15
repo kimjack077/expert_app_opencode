@@ -8,7 +8,11 @@ from fastapi import UploadFile, HTTPException
 from app.config import settings
 
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".bmp", ".pdf", ".doc", ".docx"}
+ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".bmp",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md", ".csv",
+    ".json", ".zip",
+}
 ALLOWED_MIME_TYPES = {
     "image/jpeg",
     "image/jpg",        # Some clients report this non-standard type
@@ -21,6 +25,15 @@ ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",
 }
 
 

@@ -13,6 +13,8 @@ from app.models.template import TemplateItem
 from app.models.enterprise import Enterprise
 from app.models.task import TaskItemRecord
 from app.models.media import MediaFile
+from app.models.audit_project import AuditPlanItem, AuditProject
+from app.models.evidence_agent import AiAuditSession, AiDraftRecord
 from app.services.rag_service import rag_service
 from app.services.template_recommendation_service import template_recommendation_service
 from app.services.multimodal_service import multimodal_service
@@ -29,6 +31,14 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 - 法规依据：{legal_basis}
 - 待分析照片：{media_hint}
 
+当前正式审核项目上下文：
+- 审核项目：{project_title}
+- 项目ID：{project_id}
+- 审核区域：{audit_area_name}
+- 计划项ID：{plan_item_id}
+- 审核会话ID：{audit_session_id}
+- 认证体系：{certification_systems}
+
 你可以调用以下工具：
 1. list_check_items - 列出所有检查项及其ID、标题和判定结果。当用户询问"第一个检查项"或"某项检查"时，**必须先调用此工具**获取检查项ID
 2. get_check_item_details - 获取指定检查项的详细信息
@@ -41,6 +51,10 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 9. fill_check_result - 分析用户描述的检查发现，给出判定建议（仅建议文本，不生成操作卡片）
 10. apply_check_result - 当用户已明确给出判定意见并希望记录时，生成"检查结果确认卡片"，审核员点击确认后才会真正写入
 11. apply_final_verdict - 当用户要求生成并记录最终判定时，生成"最终判定确认卡片"，审核员点击确认后才会真正写入
+12. get_audit_project_context - 获取当前正式审核项目、区域、计划项和会话上下文
+13. search_audit_knowledge - 同时检索全局法规和当前项目资料，项目资料严格按 project_id 隔离
+14. propose_audit_evidence - 为当前正式审核会话生成证据提交确认卡片
+15. propose_audit_draft_confirmation - 为当前会话的 AI 草稿生成批量确认卡片，确认后写入正式区域记录
 
 重要规则：
 - 当用户询问某个检查项（如"第一个检查项"、"第二项"等）时，**必须先调用 list_check_items 获取检查项列表和ID**，然后再调用 get_check_item_details 获取详情
@@ -51,6 +65,8 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 - 当用户需要法规依据时，调用 search_knowledge_base 搜索知识库
 - 如果"待分析照片"不为"无"，说明用户刚拍了照片等待你分析，**必须主动调用 analyze_photo**（无需用户再说"帮我看看"），分析后如发现问题应直接调用 apply_check_result 生成确认卡片
 - 主动提供帮助，不要被动等待用户请求
+- 存在项目ID时，优先使用正式审核项目工具，不得把项目计划项ID当作普通检查记录ID
+- 正式审核的任何写入必须保留 project_id、audit_session_id 和 plan_item_id，并通过确认卡执行
 
 回答要求：
 - 简洁专业，适合手机端阅读
@@ -297,6 +313,80 @@ TOOLS = [
     }
 ]
 
+TOOLS.extend(
+    [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_audit_project_context",
+                "description": "获取当前正式审核项目、区域、计划项、会话及待确认草稿摘要",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_audit_knowledge",
+                "description": "同时检索全局法规知识库和当前项目专属资料；项目资料按 project_id 强隔离",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "法规、条款或项目资料问题"},
+                        "top_k": {"type": "integer", "default": 8, "minimum": 1, "maximum": 20},
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_audit_evidence",
+                "description": "为当前正式审核会话生成证据提交确认卡；确认后创建多条款 AI 草稿",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string", "description": "完整现场证据描述"},
+                        "evidence_type": {
+                            "type": "string",
+                            "enum": ["text", "voice", "photo", "document", "mixed"],
+                            "default": "text",
+                        },
+                        "media_file_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": [],
+                        },
+                    },
+                    "required": ["content"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_audit_draft_confirmation",
+                "description": "生成当前会话 AI 草稿的批量确认卡；确认后写入 AuditAreaRecord 正式记录链",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "draft_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "default": [],
+                        },
+                        "safe_only": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "仅确认非异常且证据充分的草稿",
+                        },
+                    },
+                },
+            },
+        },
+    ]
+)
+
 MAX_TOOL_ROUNDS = 5
 MAX_KNOWLEDGE_SEARCHES = 2
 FINAL_RESPONSE_INSTRUCTION = """工具调用已结束。请仅基于已获得的工具结果，直接给出完整、准确的最终答复。
@@ -363,6 +453,14 @@ class AgentService:
             current_item_title=context_info.get("current_item_title", "无"),
             check_method=context_info.get("check_method", "未指定"),
             legal_basis=context_info.get("legal_basis", "未指定"),
+            project_title=context_info.get("project_title", "无"),
+            project_id=context_info.get("project_id", ""),
+            audit_area_name=context_info.get("audit_area_name", "无"),
+            plan_item_id=context_info.get("plan_item_id", ""),
+            audit_session_id=context_info.get("audit_session_id", ""),
+            certification_systems="、".join(
+                context_info.get("certification_systems") or []
+            ) or "未指定",
             media_hint=(
                 f"照片ID {context.get('media_file_id')}（用户刚拍摄/上传，尚未分析）"
                 if context.get("media_file_id") else "无"
@@ -484,7 +582,7 @@ class AgentService:
 
                     yield {"type": "tool_call", "tool": tool_name, "status": "calling"}
 
-                    if tool_name == "search_knowledge_base":
+                    if tool_name in {"search_knowledge_base", "search_audit_knowledge"}:
                         search_signature = json.dumps(
                             tool_args, ensure_ascii=False, sort_keys=True
                         )
@@ -591,7 +689,55 @@ class AgentService:
             "legal_basis": "未指定",
             "record_id": context.get("record_id", ""),
             "enterprise_id": context.get("enterprise_id", ""),
+            "project_title": "无",
+            "project_id": "",
+            "audit_area_name": "无",
+            "plan_item_id": "",
+            "audit_session_id": "",
+            "certification_systems": [],
         }
+
+        project_id = self._normalize_uuid(context.get("project_id"))
+        session_id = self._normalize_uuid(context.get("audit_session_id"))
+        plan_item_id = self._normalize_uuid(context.get("plan_item_id"))
+
+        if session_id:
+            session = await db.get(AiAuditSession, session_id)
+            if session and (not project_id or str(session.project_id) == project_id):
+                project_id = str(session.project_id)
+                result["audit_session_id"] = str(session.id)
+                session_context = session.context_snapshot or {}
+                plan_item_id = plan_item_id or self._normalize_uuid(
+                    session_context.get("plan_item_id")
+                )
+                result["audit_area_name"] = (
+                    session_context.get("area_name") or result["audit_area_name"]
+                )
+
+        if project_id:
+            project_result = await db.execute(
+                select(AuditProject)
+                .options(selectinload(AuditProject.enterprise))
+                .where(AuditProject.id == project_id)
+            )
+            project = project_result.scalar_one_or_none()
+            if project:
+                result["project_id"] = str(project.id)
+                result["project_title"] = project.title
+                result["certification_systems"] = project.certification_systems or []
+                if project.enterprise:
+                    result["enterprise_name"] = project.enterprise.name
+                    result["enterprise_id"] = str(project.enterprise.id)
+
+        if plan_item_id:
+            plan_item = await db.get(AuditPlanItem, plan_item_id)
+            if plan_item and (not project_id or str(plan_item.project_id) == project_id):
+                result["plan_item_id"] = str(plan_item.id)
+                result["audit_area_name"] = plan_item.area_name
+                result["certification_systems"] = (
+                    plan_item.certification_systems
+                    or result["certification_systems"]
+                )
 
         record_id = self._normalize_uuid(context.get("record_id"))
         if record_id:
@@ -682,6 +828,10 @@ class AgentService:
             "fill_check_result": self._tool_fill_check_result,
             "apply_check_result": self._tool_apply_check_result,
             "apply_final_verdict": self._tool_apply_final_verdict,
+            "get_audit_project_context": self._tool_get_audit_project_context,
+            "search_audit_knowledge": self._tool_search_audit_knowledge,
+            "propose_audit_evidence": self._tool_propose_audit_evidence,
+            "propose_audit_draft_confirmation": self._tool_propose_audit_draft_confirmation,
         }
 
         handler = tool_handlers.get(tool_name)
@@ -1315,6 +1465,192 @@ class AgentService:
             },
         }
         return proposal
+
+    async def _tool_get_audit_project_context(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        project_id = self._normalize_uuid(context.get("project_id"))
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        context_info = await self._build_context(context, db)
+        session_id = self._normalize_uuid(context.get("audit_session_id"))
+        pending_drafts: list[dict] = []
+        if session_id:
+            rows = await db.execute(
+                select(AiDraftRecord).where(
+                    AiDraftRecord.project_id == project_id,
+                    AiDraftRecord.session_id == session_id,
+                    AiDraftRecord.status == "draft",
+                )
+            )
+            pending_drafts = [
+                {
+                    "id": str(draft.id),
+                    "clause_no": draft.primary_clause_no,
+                    "evaluation": draft.evaluation,
+                    "quality": draft.quality or {},
+                    "confidence": float(draft.confidence or 0),
+                }
+                for draft in rows.scalars().all()
+            ]
+        return {
+            "project_id": context_info.get("project_id"),
+            "project_title": context_info.get("project_title"),
+            "enterprise_name": context_info.get("enterprise_name"),
+            "plan_item_id": context_info.get("plan_item_id"),
+            "area_name": context_info.get("audit_area_name"),
+            "audit_session_id": context_info.get("audit_session_id"),
+            "certification_systems": context_info.get("certification_systems"),
+            "pending_drafts": pending_drafts,
+        }
+
+    async def _tool_search_audit_knowledge(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        project_id = self._normalize_uuid(context.get("project_id"))
+        query = str(args.get("query") or "").strip()
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+        if not query:
+            return {"error": "请输入要检索的法规或项目资料问题"}
+        try:
+            top_k = max(1, min(20, int(args.get("top_k") or 8)))
+        except (TypeError, ValueError):
+            top_k = 8
+
+        from app.services.project_knowledge_service import project_knowledge_service
+
+        results = await project_knowledge_service.search_combined(
+            db, UUID(project_id), query, top_k
+        )
+        return {"project_id": project_id, "query": query, "results": results}
+
+    async def _tool_propose_audit_evidence(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        project_id = self._normalize_uuid(context.get("project_id"))
+        session_id = self._normalize_uuid(context.get("audit_session_id"))
+        content = str(args.get("content") or "").strip()
+        if not project_id or not session_id:
+            return {"error": "正式审核证据需要项目ID和审核会话ID"}
+        if not content:
+            return {"error": "现场证据内容不能为空"}
+
+        session = (
+            await db.execute(
+                select(AiAuditSession).where(
+                    AiAuditSession.id == session_id,
+                    AiAuditSession.project_id == project_id,
+                    AiAuditSession.status == "active",
+                )
+            )
+        ).scalar_one_or_none()
+        if not session:
+            return {"error": "当前项目审核会话不存在或已结束"}
+
+        media_ids = [
+            value
+            for value in (
+                self._normalize_uuid(item) for item in (args.get("media_file_ids") or [])
+            )
+            if value
+        ]
+        session_context = session.context_snapshot or {}
+        payload = {
+            "content": content,
+            "evidence_type": args.get("evidence_type") or (
+                "mixed" if media_ids else "text"
+            ),
+            "media_file_ids": media_ids,
+            "candidate_item_ids": [],
+            "source_metadata": {
+                "source": "web_agent_confirmation",
+                "plan_item_id": session_context.get("plan_item_id"),
+                "area_record_id": session_context.get("area_record_id"),
+            },
+        }
+        return {
+            "type": "action_proposal",
+            "action": "submit_audit_evidence",
+            "status": "pending",
+            "title": "提交正式审核证据并生成多条款草稿",
+            "data": {
+                "project_id": project_id,
+                "audit_session_id": session_id,
+                "plan_item_id": session_context.get("plan_item_id"),
+                "area_record_id": session_context.get("area_record_id"),
+                "evidence": content,
+                "confirm_endpoint": f"/api/audit-projects/{project_id}/sessions/{session_id}/evidence",
+                "confirm_method": "POST",
+                "confirm_payload": payload,
+            },
+        }
+
+    async def _tool_propose_audit_draft_confirmation(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        project_id = self._normalize_uuid(context.get("project_id"))
+        session_id = self._normalize_uuid(context.get("audit_session_id"))
+        safe_only = bool(args.get("safe_only"))
+        draft_ids = [
+            value
+            for value in (
+                self._normalize_uuid(item) for item in (args.get("draft_ids") or [])
+            )
+            if value
+        ]
+        if not project_id or not session_id:
+            return {"error": "草稿确认需要项目ID和审核会话ID"}
+        if not safe_only and not draft_ids:
+            return {"error": "请选择要确认的AI草稿，或启用仅确认安全项"}
+
+        if draft_ids:
+            rows = await db.execute(
+                select(AiDraftRecord.id).where(
+                    AiDraftRecord.id.in_(draft_ids),
+                    AiDraftRecord.project_id == project_id,
+                    AiDraftRecord.session_id == session_id,
+                    AiDraftRecord.status == "draft",
+                )
+            )
+            valid_ids = {str(value) for value in rows.scalars().all()}
+            if valid_ids != set(draft_ids):
+                return {"error": "包含不属于当前项目会话的草稿，无法确认"}
+
+        payload = {
+            "draft_ids": draft_ids,
+            "action": "confirm",
+            "safe_only": safe_only,
+            "overrides": [],
+        }
+        return {
+            "type": "action_proposal",
+            "action": "confirm_audit_drafts",
+            "status": "pending",
+            "title": "确认AI草稿并写入正式区域记录",
+            "data": {
+                "project_id": project_id,
+                "audit_session_id": session_id,
+                "draft_count": len(draft_ids),
+                "safe_only": safe_only,
+                "confirm_endpoint": f"/api/audit-projects/{project_id}/sessions/{session_id}/drafts/confirm",
+                "confirm_method": "POST",
+                "confirm_payload": payload,
+            },
+        }
 
     async def _tool_apply_final_verdict(
         self,

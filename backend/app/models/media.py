@@ -13,6 +13,12 @@ class MediaFile(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     task_id = Column(UUID(as_uuid=True), ForeignKey("inspection_tasks.id"))
     record_id = Column(UUID(as_uuid=True), ForeignKey("task_item_records.id"))
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("audit_projects.id", ondelete="CASCADE")
+    )
+    audit_session_id = Column(
+        UUID(as_uuid=True), ForeignKey("ai_audit_sessions.id", ondelete="CASCADE")
+    )
     file_type = Column(String(20), default="image")
     original_name = Column(String(255))
     stored_name = Column(String(255), nullable=False)

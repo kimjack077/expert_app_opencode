@@ -23,9 +23,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
                         db=db,
                         user_id=None,
                         username=None,
-                        action=f"{request.method} {request.url.path}",
+                        action=f"{request.method} {request.url.path[:95]}",
                         resource_type="api",
                         resource_id=None,
+                        detail={
+                            "path": request.url.path,
+                            "status_code": response.status_code,
+                        },
                         ip_address=request.client.host if request.client else None,
                         user_agent=request.headers.get("user-agent"),
                     )

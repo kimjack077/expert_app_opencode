@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
+    LLM_PROVIDER: str = "sensenova"
     LLM_MODEL: str = "deepseek-v4-flash"
     LLM_API_KEY: str = ""
     LLM_MAX_TOKENS: int = 8192

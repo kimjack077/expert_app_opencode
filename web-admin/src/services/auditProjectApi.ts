@@ -2,6 +2,7 @@ import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const PROJECT_AGENT_BASE = '/api/audit-projects'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -143,6 +144,13 @@ export const nonconformityApi = {
   // 更新不符合项
   update: (ncId: string, data: any) => 
     api.put(`/api/v1/audit-projects/nonconformities/${ncId}`, data),
+
+  // 确认 AI 生成的不符合项草稿。新 Agent 接口按项目隔离，避免跨项目写入。
+  confirm: (projectId: string, ncId: string, data?: Record<string, unknown>) =>
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/nonconformities/${ncId}/confirm`,
+      data || {}
+    ),
 }
 
 // ==================== 审核报告 API ====================
@@ -201,6 +209,187 @@ export const myTasksApi = {
   // 获取我的审核任务列表
   list: (params?: any) => 
     api.get('/api/v1/audit-projects/my-tasks', { params }),
+}
+
+// ==================== 项目 Agent 资料与成果 API ====================
+
+export interface ProjectDocument {
+  id: string
+  title?: string
+  document_type?: string
+  original_filename?: string
+  file_name?: string
+  filename?: string
+  name?: string
+  category?: string
+  status?: string
+  parse_status?: string
+  chunk_count?: number
+  size?: number
+  file_size?: number
+  created_at?: string
+  uploaded_at?: string
+  summary?: string
+  parse_error?: string
+  parsed_at?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ProjectKnowledgeHit {
+  id?: string
+  chunk_id?: string
+  document_id?: string
+  source?: string
+  file_name?: string
+  document_title?: string
+  source_scope?: 'project' | 'global_regulation'
+  content?: string
+  text?: string
+  score?: number
+  relevance?: number
+  similarity?: number
+}
+
+export interface ProjectAuditSession {
+  id: string
+  title?: string
+  area_name?: string
+  status?: string
+  progress?: number
+  exception_count?: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ProjectArtifact {
+  id?: string
+  type?: string
+  artifact_type?: string
+  name?: string
+  file_name?: string
+  filename?: string
+  status?: string
+  generated_at?: string
+  updated_at?: string
+  size?: number
+  file_size?: number
+  available?: boolean
+  version?: number
+  progress?: number
+  error_message?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ProjectQualityCheck {
+  score?: number
+  overall_score?: number
+  completeness_score?: number
+  consistency_score?: number
+  passed?: boolean
+  blocking_count?: number
+  warning_count?: number
+  issues?: Array<{
+    id?: string
+    level?: string
+    type?: string
+    title?: string
+    message?: string
+    suggestion?: string
+  }>
+  blockers?: Array<string | Record<string, unknown>>
+  warnings?: Array<string | Record<string, unknown>>
+  reminders?: Array<string | Record<string, unknown>>
+  completeness?: Record<string, unknown>
+  consistency?: Record<string, unknown>
+  checked_at?: string
+}
+
+export const projectDocumentApi = {
+  list: (projectId: string) =>
+    api.get(`${PROJECT_AGENT_BASE}/${projectId}/documents`),
+
+  upload: (projectId: string, file: File, category?: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (category) {
+      formData.append('document_type', category)
+      formData.append('category', category)
+    }
+    return api.post(`${PROJECT_AGENT_BASE}/${projectId}/documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000,
+    })
+  },
+
+  remove: (projectId: string, documentId: string) =>
+    api.delete(`${PROJECT_AGENT_BASE}/${projectId}/documents/${documentId}`),
+
+  reindex: (projectId: string, documentId: string) =>
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/documents/${documentId}/reindex`
+    ),
+
+  search: (projectId: string, query: string, limit = 8) =>
+    api.post(`${PROJECT_AGENT_BASE}/${projectId}/knowledge/search`, {
+      query,
+      top_k: limit,
+    }),
+}
+
+export const projectSessionApi = {
+  list: (projectId: string) =>
+    api.get(`${PROJECT_AGENT_BASE}/${projectId}/sessions`),
+}
+
+export const projectArtifactApi = {
+  list: (projectId: string) =>
+    api.get(`${PROJECT_AGENT_BASE}/${projectId}/artifacts`),
+
+  generate: (projectId: string, data?: Record<string, unknown>) =>
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/artifacts/generate`,
+      data || {}
+    ),
+
+  retry: (projectId: string, artifactId: string) =>
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/artifacts/${artifactId}/retry`
+    ),
+
+  qualityCheck: (projectId: string) =>
+    api.post(`${PROJECT_AGENT_BASE}/${projectId}/quality-check`),
+
+  download: (projectId: string, artifactId: string) =>
+    api.get(
+      `${PROJECT_AGENT_BASE}/${projectId}/artifacts/${artifactId}/download`,
+      { responseType: 'blob', timeout: 120000 }
+    ),
+
+  downloadPackage: (projectId: string) =>
+    api.get(`${PROJECT_AGENT_BASE}/${projectId}/package`, {
+      responseType: 'blob',
+      timeout: 180000,
+    }),
+}
+
+export const saveDownloadedBlob = (
+  response: unknown,
+  fallbackName: string
+) => {
+  const candidate = response as { data?: Blob } | Blob
+  const blob = candidate instanceof Blob ? candidate : candidate?.data
+  if (!(blob instanceof Blob)) {
+    throw new Error('下载响应不是有效文件')
+  }
+
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fallbackName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 

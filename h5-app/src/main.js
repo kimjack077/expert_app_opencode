@@ -29,6 +29,8 @@ import ReportPreview from './views/ReportPreview.vue'
 // 审核项目模块
 import AuditTasks from './views/AuditTasks.vue'
 import AuditTaskDetail from './views/AuditTaskDetail.vue'
+import TodayAudit from './views/TodayAudit.vue'
+import AiAuditSession from './views/AiAuditSession.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -49,8 +51,10 @@ const routes = [
   { path: '/settings', component: Settings },
   { path: '/about', component: About },
   // 审核项目模块
+  { path: '/today-audit', component: TodayAudit, name: 'TodayAudit' },
   { path: '/audit-tasks', component: AuditTasks },
   { path: '/audit-task/:id', component: AuditTaskDetail, name: 'AuditTaskDetail' },
+  { path: '/audit-session/:sessionId', component: AiAuditSession, name: 'AiAuditSession' },
 ]
 
 const router = createRouter({

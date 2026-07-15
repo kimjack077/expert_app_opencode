@@ -1,5 +1,6 @@
 import json
 from typing import Optional, List
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +11,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.agent_conversation import AgentConversation, AgentMessage
 from app.services.agent_service import agent_service
+from app.services.project_access_service import ensure_project_access
 from app.utils.security import get_current_user
 
 
@@ -17,10 +19,14 @@ router = APIRouter()
 
 
 class ChatContext(BaseModel):
+    page: Optional[str] = None
     record_id: Optional[str] = None
     current_item_id: Optional[str] = None
     enterprise_id: Optional[str] = None
     media_file_id: Optional[str] = None
+    project_id: Optional[str] = None
+    audit_session_id: Optional[str] = None
+    plan_item_id: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
@@ -71,6 +77,12 @@ async def chat(
     current_user: User = Depends(get_current_user),
 ):
     context = request.context.model_dump() if request.context else {}
+    if context.get("project_id"):
+        try:
+            project_id = UUID(context["project_id"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="项目 ID 格式不正确") from exc
+        await ensure_project_access(db, project_id, current_user)
 
     conversation = await _load_or_create_conversation(
         request.conversation_id, context, current_user, db

@@ -1,370 +1,240 @@
-# Expert App - 专家现场工作辅助系统
+# EFIS - 专家现场工作辅助系统
 
-一个辅助专家现场工作的多端应用系统，支持检查、审查、监管等工作流程管理。
+EFIS（Expert Field Inspection System）用于认证审核、现场检查和整改闭环。审核员可通过 H5 端以文字、语音或照片提交证据；Agent 生成多个候选条款草稿；人工确认后，记录、异常、不符合项、报告和资料包进入同一条正式审核数据链。
 
-## 项目简介
+## 核心原则
 
-本系统为专家现场工作提供信息化支持，主要功能包括：
-- **现场检查记录**：记录检查结果、审查意见、监管情况、现场照片等信息
-- **智能辅助**：通过LLM获取检查建议和法规依据
-- **照片智能分析**：多模态AI自动识别检查照片中的合规问题
-- **知识库向量检索**：基于嵌入模型的语义搜索，智能关联检查项与法规
-- **模板管理**：管理员可自定义检查模板，按不同政策标准分解检查条目
-- **企业信息管理**：管理被检查企业的基础信息、资质、产品、设备等
-- **知识库管理**：Web 端上传、编辑政策法规和审查细则；文件上传后自动解析正文、建立或重建向量索引
-- **操作审计**：记录所有现场工作人员的操作行为，支持管理员查看分析
+- Agent 是统一交互入口，不新增孤立的业务数据域。
+- AuditProject、AuditArea、AuditAreaRecord 是唯一正式审核数据链。
+- 项目资料必须携带 project_id，绝不允许跨项目检索或引用。
+- 全局法规与当前项目资料可同时被 Agent 使用，但页面必须清晰标记来源。
+- 证据、引用、模型判断、人工确认和最终制品均可追溯。
+- 异常优先、提交阻断、NC 确认和报告质量门禁在后端统一执行。
+
+## 审核工作流
+
+    H5 / Web Agent
+    会话、流式、语音、照片、确认卡
+                    |
+                    v
+    项目审核领域工具
+    项目资料、证据、多条款、异常、NC、报告
+                    |
+                    v
+    AuditProject / AuditArea / AuditAreaRecord
+    唯一正式审核数据链
+                    |
+                    v
+    Word 报告、区域记录、NC 汇总、ZIP 资料包
+
+正式记录关系：
+
+    AuditProject -> AuditArea -> AuditPlanItem -> AuditAreaRecord -> InspectionRecordItem
+
+AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。AI 草稿只在审核员确认后写入正式 InspectionRecordItem。
+
+## 已实现能力
+
+### P0：数据链与部署目标
+
+- H5 旧审核任务链接统一跳转到正式 AI 审核会话，不再误用普通检查记录 ID。
+- 现场证据会真实调用后端；刷新后仍显示已保存证据和已确认审核记录。
+- 条款来自计划项、模板和候选匹配，不再硬编码为 7.1。
+- Web Agent 携带项目、会话、计划项和页面上下文；确认操作执行受控后端写入。
+- 生产配置与部署脚本统一指向 49.232.213.79。
+- 审计日志对长项目路径保留完整路径到 detail，不影响业务事务。
+
+### P1：现场审核 Agent
+
+- 项目审核会话、证据提交、证据条目、AI 草稿和人工确认。
+- 一条证据可生成多个候选条款草稿，保存证据质量、理由、置信度和引用。
+- 文字、语音和照片均可作为会话证据；上传照片与项目、会话强绑定。
+- Agent 同时检索全局法规与当前项目资料，检索结果带 source_scope。
+- 未处理草稿、证据不足和必要附件缺失会阻断提交。
+- 异常确认记录可生成 NC 草稿，组长或管理员确认后进入整改。
+
+### P2：审核交付闭环
+
+- 项目级完整性和一致性检查，报告和资料包生成前执行质量门禁。
+- 版本化报告快照保存记录、证据、照片、理由、置信度和引用。
+- 生成区域审核记录 Word、审核报告 Word、NC 汇总和完整 ZIP 资料包。
+- ZIP 包含 manifest.json，列出路径、大小和 SHA-256。
+- 制品任务持久化进度、失败原因，支持重试。
+- H5 提供今日审核、AI 现场审核、异常优先草稿和提交确认流程。
 
 ## 技术栈
 
-### 后端
-- Python 3.x
-- FastAPI
-- PostgreSQL
-- SQLAlchemy + Alembic
-- JWT认证
+| 层级 | 技术 |
+| --- | --- |
+| 后端 | Python 3.11+、FastAPI、SQLAlchemy Async、Alembic、PostgreSQL |
+| Web 管理端 | React 18、TypeScript、Vite、Ant Design |
+| H5 现场端 | Vue 3、Vite、Vant |
+| 文本模型 | deepseek-v4-flash |
+| 现场能力 | 多模态照片分析、浏览器语音识别、会话媒体上传 |
+| 知识检索 | 全局法规知识库 + project_id 强约束项目知识库 |
+| 交付 | python-docx、版本快照、带校验清单的 ZIP |
 
-### AI模型
-- **主LLM**: DeepSeek-V3.2 (文本生成、检查建议)
-- **多模态模型**: 通义千问 Qwen3.5 Plus (照片智能分析)
-- **嵌入模型**: BAAI/bge-m3 (知识库向量检索)
+## 仓库结构
 
-### 前端
-- **Web管理后台**: React + Vite + TypeScript + Ant Design
-- **移动APP**: React + Vite + TypeScript
-- **H5应用**: Vue 3 + TypeScript + Vant
-- **检查APP**: Flutter
-
-## 项目结构
-
-```
-expert_app_opencode/
-├── backend/           # 后端服务 (FastAPI)
-│   ├── app/
-│   │   ├── models/    # 数据库模型
-│   │   ├── routers/   # API路由
-│   │   ├── schemas/   # Pydantic模型
-│   │   └── services/  # 业务逻辑
-│   └── alembic/       # 数据库迁移
-├── web-admin/         # Web管理后台
-├── mobile-app/        # 移动端APP
-├── h5-app/            # H5应用
-└── inspection_app/    # Flutter检查APP
-```
+    expert_app_opencode/
+    ├── backend/
+    │   ├── alembic/                 # PostgreSQL 增量迁移
+    │   ├── app/
+    │   │   ├── models/              # 审核、会话、证据、项目资料、制品
+    │   │   ├── routers/             # REST / SSE API
+    │   │   ├── schemas/             # Pydantic 请求与响应模型
+    │   │   ├── services/            # Agent、RAG、证据、报告、制品服务
+    │   │   └── middleware/          # JWT、审计等中间件
+    │   └── tests/
+    ├── web-admin/                   # React 审核管理端
+    ├── h5-app/                      # Vue 移动现场审核端
+    ├── deploy_server.py             # 生产部署脚本
+    └── README.md
 
 ## 快速开始
 
 ### 环境要求
-- Python 3.10+
-- Node.js 18+
-- PostgreSQL 14+
 
-### 后端启动
+- Python 3.11+
+- Node.js ^20.19.0 或 >=22.12.0
+- PostgreSQL
+- backend/.env 已配置数据库、JWT、模型服务和文件存储参数
 
-```bash
-cd backend
+不要把凭据写入 README、前端源码或公开提交；私有仓库中的既有受控配置按当前部署策略保留。
 
-# 创建虚拟环境
-python -m venv .venv
+### 后端
 
-# 激活虚拟环境 (Windows)
-.venv\Scripts\activate
+    cd backend
+    .venv\Scripts\activate
+    pip install -r requirements.txt
+    alembic upgrade head
+    uvicorn app.main:app --host 127.0.0.1 --port 8000
 
-# 安装依赖
-pip install -r requirements.txt
+### Web 管理端
 
-# 配置环境变量
-copy .env.example .env
-# 编辑 .env 文件配置数据库连接等信息
+    cd web-admin
+    npm install
+    npm run dev
 
-# 运行数据库迁移
-alembic upgrade head
+默认地址：http://127.0.0.1:5173
 
-# 启动服务
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
+### H5 现场端
 
-### 前端启动
+    cd h5-app
+    npm install
+    npm run dev
 
-```bash
-# Web管理后台
-cd web-admin
-npm install
-npm run dev
+默认地址：http://127.0.0.1:5174/h5/
 
-# 移动APP
-cd mobile-app
-npm install
-npm run dev
+## 数据库迁移
 
-# H5应用
-cd h5-app
-npm install
-npm run dev
-```
+审核 Agent 的增量迁移：
 
-## 功能模块
+    backend/alembic/versions/a49ad7e0875f_add_project_audit_agent_p2_workflow.py
 
-### 后端API
+执行：
 
-#### 认证模块
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/logout` - 用户登出
-- `GET /api/auth/me` - 获取当前用户信息
-- `PUT /api/auth/me/password` - 修改密码
+    cd backend
+    alembic upgrade head
 
-#### 任务管理
-- `GET /api/tasks/` - 获取任务列表
-- `POST /api/tasks/` - 创建任务
-- `GET /api/tasks/{id}` - 获取任务详情
-- `POST /api/tasks/{id}/start` - 开始任务
-- `POST /api/tasks/{id}/complete` - 完成任务
-- `GET /api/tasks/{id}/records` - 获取任务记录
-- `POST /api/tasks/{id}/records` - 创建检查记录
+迁移包含正式审核会话、证据提交、证据条目、AI 草稿、项目资料、项目知识片段、制品任务，以及媒体文件的项目和会话关联字段。
 
-#### 模板管理
-- `GET /api/templates/categories` - 获取标准分类
-- `POST /api/templates/categories` - 创建分类
-- `GET /api/templates/items` - 获取检查项
-- `POST /api/templates/items` - 创建检查项
-- `GET /api/templates/` - 获取模板列表
-- `POST /api/templates/` - 创建模板
-- `POST /api/templates/{id}/publish` - 发布模板
+## 项目 Agent API
 
-#### 企业管理
-- `GET /api/enterprises/` - 获取企业列表
-- `POST /api/enterprises/` - 创建企业
-- `GET /api/enterprises/{id}` - 获取企业详情
-- `PUT /api/enterprises/{id}` - 更新企业
-- `DELETE /api/enterprises/{id}` - 删除企业
-- `GET /api/enterprises/{id}/qualifications` - 获取资质信息
-- `POST /api/enterprises/{id}/qualifications` - 创建资质
-- `GET /api/enterprises/{id}/products` - 获取产品信息
-- `POST /api/enterprises/{id}/products` - 创建产品
-- `GET /api/enterprises/{id}/instruments` - 获取计量器具
-- `POST /api/enterprises/{id}/instruments` - 创建计量器具
-- `GET /api/enterprises/{id}/rectifications` - 获取整改记录
-- `POST /api/enterprises/{id}/rectifications` - 创建整改记录
+所有项目 Agent 接口位于 /api/audit-projects/{project_id}，并验证当前用户对项目的访问权限。
 
-#### 知识库管理
-- `GET /api/knowledge/categories` - 获取知识分类
-- `POST /api/knowledge/categories` - 创建分类
-- `GET /api/knowledge/documents` - 获取文档列表
-- `POST /api/knowledge/documents` - 创建文档
-- `POST /api/knowledge/documents/upload` - 上传 PDF、Word、Excel 或 TXT 知识文件并自动建立向量索引
-- `GET /api/knowledge/documents/{id}` - 获取文档详情
-- `PUT /api/knowledge/documents/{id}` - 更新文档；正文更新后自动重建向量索引
-- `DELETE /api/knowledge/documents/{id}` - 删除文档
-- `GET /api/knowledge/guidelines` - 获取审查细则
-- `POST /api/knowledge/guidelines` - 创建审查细则
+| 能力 | 接口 |
+| --- | --- |
+| 项目资料列表/上传 | GET/POST /documents |
+| 项目资料重新索引 | POST /documents/{document_id}/reindex |
+| 合并检索 | POST /knowledge/search |
+| 审核会话 | GET/POST /sessions |
+| 获取会话 | GET /sessions/{session_id} |
+| 会话照片 | POST /sessions/{session_id}/media |
+| 提交证据并生成草稿 | POST /sessions/{session_id}/evidence |
+| 确认或驳回草稿 | POST /sessions/{session_id}/drafts/confirm |
+| 会话质量检查 | POST /sessions/{session_id}/quality-check |
+| 提交正式区域记录 | POST /sessions/{session_id}/submit |
+| 确认 NC 草稿 | POST /nonconformities/{nc_id}/confirm |
+| 项目质量门禁 | POST /quality-check |
+| 生成制品 | POST /artifacts/generate |
+| 查询/重试制品 | GET /artifacts、POST /artifacts/{artifact_id}/retry |
+| 下载资料包 | GET /package |
 
-#### LLM智能辅助
-- `POST /api/llm/suggestion` - 获取检查建议
-- `POST /api/llm/basis` - 获取法规依据
-- `GET /api/records/{record_id}/items/{item_id}/ai-stream` - 流式生成AI建议（SSE）
+## 项目级 RAG 隔离规则
 
-#### AI照片分析
-- `POST /api/ai-enhanced/photo/analyze` - 单张照片分析
-- `POST /api/ai-enhanced/photo/analyze/stream` - 流式照片分析（SSE）
-- `POST /api/ai-enhanced/photo/batch-analyze` - 批量照片分析
+1. 项目资料和项目知识片段必须携带 project_id。
+2. 项目知识片段通过项目与文档的复合关联约束，避免跨项目引用。
+3. 检索同时返回全局法规和当前项目资料；source_scope 为 global_regulation 或 project。
+4. Web 与 H5 必须显示来源域和文档标题，不能把全局法规误标为项目资料。
+5. AI 草稿和报告快照保存使用过的引用，保证可追溯。
 
-#### 知识库向量检索
-- `POST /api/knowledge/embeddings/create` - 为文档创建向量嵌入
-- `POST /api/knowledge/search` - 语义搜索知识库
-- `POST /api/ai-enhanced/link-regulations` - 自动关联检查项与法规
+## 质量门禁与提交规则
 
-#### 媒体管理
-- `POST /api/media/upload` - 上传文件
-- `GET /api/media/task/{task_id}` - 获取任务媒体文件
-- `DELETE /api/media/{id}` - 删除媒体文件
+- 有待确认草稿时不能提交区域审核记录。
+- 证据质量不足、必要附件缺失或高风险异常会作为阻断项或警告项返回。
+- 不符合项只有在组长或管理员确认后进入正式整改流程。
+- 已提交会话不可再采集证据、确认草稿或重复写入；后端提交接口幂等返回已提交快照。
+- 项目报告与资料包生成前必须通过完整性和一致性检查。
 
-#### 数据分析
-- `GET /api/analytics/dashboard` - 获取仪表盘数据
-- `GET /api/analytics/audit-logs` - 获取审计日志
-- `GET /api/analytics/llm-logs` - 获取LLM调用日志
+## 验证命令
 
-### Web管理后台功能
+    # 后端
+    cd backend
+    python -m pytest tests -q
 
-- **仪表盘**：统计概览、任务进度、用户统计
-- **企业管理**：企业信息、资质、产品、设备、整改记录管理
-- **检查模板**：标准分类、检查项、模板管理
-- **检查任务**：任务创建、分配、执行、完成
-- **知识库**：政策法规、审查细则管理；支持文件上传、正文编辑与自动索引重建
-- **数据分析**：操作审计、LLM调用分析
+    # Web
+    cd ..\web-admin
+    npx tsc --noEmit
+    npm run build
 
-### H5应用功能
+    # H5
+    cd ..\h5-app
+    npm run type-check
+    npm run build
 
-- **登录/注册**：支持用户名密码登录
-- **任务列表**：查看分配的任务
-- **任务执行**：现场检查、拍照上传、结果记录
-- **快速检查**：无需任务的快速检查模式
-- **个人中心**：个人信息、修改密码
+    # 工作区
+    cd ..
+    git diff --check
 
-## 数据库模型
+浏览器端到端验证至少覆盖：
 
-### 核心模型
-- **User**：用户（管理员、专家、检查员）
-- **Organization**：组织机构
-- **Enterprise**：企业信息
-- **EnterpriseQualification**：企业资质
-- **EnterpriseProduct**：企业产品
-- **EnterpriseEquipment**：生产设备
-- **EnterpriseInstrument**：计量器具
-- **EnterprisePersonnel**：企业人员
-- **RectificationRecord**：整改记录
-- **InspectionTask**：检查任务
-- **InspectionRecord**：检查记录
-- **InspectionTemplate**：检查模板
-- **CheckItem**：检查项
-- **StandardCategory**：标准分类
-- **KnowledgeCategory**：知识分类
-- **KnowledgeDocument**：知识文档
-- **InspectionGuideline**：审查细则
-- **MediaFile**：媒体文件
-- **AuditLog**：审计日志
+1. 从 H5 审核计划项进入正式 AI 会话。
+2. 保存一条文字、语音或照片证据，刷新后仍看到证据及确认记录。
+3. 生成多个候选条款，人工确认后检查正式区域记录和计划项状态。
+4. 从 Web 验证项目资料来源标识、质量门禁、制品任务和 ZIP manifest.json。
+5. 在桌面 Web 与小屏、横屏 H5 下检查无溢出、无重叠、按钮可触达。
 
-## 配置
+## 生产部署
 
-### 数据库配置 (.env)
-```
-DATABASE_URL=postgresql+asyncpg://username:password@host:port/dbname
-```
+生产部署目标由下列文件统一维护：
 
-### LLM配置 (.env)
-```
-LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-LLM_API_KEY=your_api_key
-LLM_MODEL=deepseek-ai/deepseek-v3.2
-```
+- deploy_server.py
+- web-admin/.env.production
+- h5-app/.env.production
 
-### JWT配置 (.env)
-```
-SECRET_KEY=your_secret_key
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=7
-```
+目标主机为 49.232.213.79:22，用户为 ubuntu。部署前确认服务器凭据、数据库连通性、Alembic 当前版本和前端构建产物；部署后验证 Web、H5、后端健康检查和一个正式审核会话。
 
-## 开发规范
+## 角色
 
-### 代码风格
-- 后端：遵循 PEP 8 规范
-- 前端：使用 ESLint + Prettier
+| 角色 | 权限 |
+| --- | --- |
+| super_admin | 全部权限 |
+| admin | 项目、模板、团队、报告、NC 确认与制品管理 |
+| expert | 执行分配的现场审核、提交证据、确认草稿 |
+| auditor | 只读查看 |
 
-### Git提交规范
-```
-feat: 新功能
-fix: 修复bug
-docs: 文档更新
-style: 代码格式调整
-refactor: 重构
-test: 测试相关
-chore: 构建/工具相关
-```
+## 提交规范
 
-## 测试
+    feat: 新能力
+    fix: 缺陷修复
+    docs: 文档变更
+    test: 测试变更
+    refactor: 内部重构
+    chore: 构建或工具调整
 
-### 后端测试
-```bash
-cd backend
-pytest
-```
-
-### 前端测试
-```bash
-cd web-admin
-npm run test
-```
-
-## 部署
-
-### Docker部署
-```bash
-docker-compose up -d
-```
-
-### 手动部署
-1. 配置生产环境数据库
-2. 配置环境变量
-3. 运行数据库迁移
-4. 启动后端服务
-5. 构建并部署前端应用
-
-## 贡献指南
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
-
-## 更新日志
-
-### v1.5.1 (2026-07-15)
-
-- 修复知识库文档上传时 PDF 解析依赖缺失问题（补齐 PyMuPDF 安装）
-- 修复检查助手（Agent 聊天）AI 回复中 Markdown 格式（标题、粗体、分割线等）未渲染、显示为原始符号的问题，改用 `marked` + `DOMPurify` 统一渲染，与 AI 检查准备简报保持一致的展示效果
-- 修复审核员工作量统计、审核员排行接口中用户姓名字段引用错误（`user.name` → `user.full_name`）
-
-### v1.5.0 (2026-07-15)
-
-- 完善 Web 知识库维护闭环
-  - 支持上传 PDF、Word、Excel、TXT 并自动提取正文
-  - 新增、上传和修改知识正文后自动建立或重建向量索引
-  - 支持在 Web 端编辑已入库的政策法规文档
-  - 补充 H5 Agent 知识库查询验证与演示流程
-
-### v1.4.0 (2026-03-17)
-- 新增多模态照片智能分析功能
-  - 集成通义千问 Qwen3.5 Plus 多模态模型
-  - 支持单张/批量/流式照片分析
-  - 自动识别照片中的合规问题、安全隐患
-  - 分析结果包含问题描述、严重程度、改进建议
-- 新增知识库向量检索功能 (RAG)
-  - 集成 BAAI/bge-m3 嵌入模型
-  - 支持文档自动分块与向量化
-  - 支持语义搜索知识库
-  - 支持自动关联检查项与相关法规
-- 新增详细使用文档 `backend/docs/multimodal-usage.md`
-
-### v1.3.0 (2026-03-07)
-- 新增检查结果统计汇总功能
-  - H5端：完成检查后自动显示符合项、不符合项、不适用项统计
-  - Web端：记录详情页显示检查结果统计卡片
-  - AI生成最终判定自动包含统计信息
-- 新增模板复制自定义名称功能
-  - 复制模板时可自定义新模板名称
-  - 修复复制模板时忽略用户输入名称的问题
-- 修复 AI 生成最终判定时空值转换错误
-
-### v1.2.0 (2026-03-07)
-- 新增最终判定 AI 生成功能，自动总结所有检查项
-- AI 自动识别判定结果（合格/基本合格/不合格）
-- AI 生成总体评价填入判定说明
-- 优化最终判定 prompt，简化输出格式
-- 修复流式输出数据库会话问题
-
-### v1.1.0 (2026-03-07)
-- 新增 AI 流式输出功能，实时显示思考过程
-- 新增认证审查检查模板
-- 新增安全生产检查模板
-- 修复模板项 is_category 字段查询问题
-- 修复检查记录项创建逻辑
-- 优化 LLM 提示词，生成更简洁的检查结论
-- 修复 LLM 调用日志外键约束问题
-- 改进企业管理页面，增加编辑功能
-
-### v1.0.0 (2026-02-25)
-- 初始版本发布
-- 实现基础检查任务管理
-- 实现模板管理功能
-- 实现 LLM 智能辅助
-- 实现企业信息管理
-- 实现知识库管理
-- 实现操作审计功能
+提交前执行对应模块测试，并保留用户已有的未关联工作区改动。不要使用破坏性 Git 命令重置工作树。
 
 ## 许可证
 
 MIT License
-
-## 联系方式
-
-如有问题或建议，欢迎提交 Issue 或 Pull Request。

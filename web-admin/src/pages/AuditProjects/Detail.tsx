@@ -9,12 +9,16 @@ import {
   FilePdfOutlined,
   RobotOutlined,
   BulbOutlined,
+  DatabaseOutlined,
+  FileDoneOutlined,
 } from '@ant-design/icons'
 import { auditProjectApi, auditReportApi, auditAIApi } from '@/services/auditProjectApi'
 import TeamManagement from './components/TeamManagement'
 import PlanManagement from './components/PlanManagement'
 import RecordsList from './components/RecordsList'
 import NonconformitiesList from './components/NonconformitiesList'
+import ProjectDocuments from './components/ProjectDocuments'
+import ProjectArtifacts from './components/ProjectArtifacts'
 
 const auditTypeMap: Record<string, string> = {
   initial: '初审',
@@ -39,6 +43,7 @@ export default function AuditProjectDetail() {
   const [aiModalVisible, setAiModalVisible] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult] = useState<any>(null)
+  const [activeTab, setActiveTab] = useState('team')
 
   useEffect(() => {
     if (id) {
@@ -201,7 +206,6 @@ export default function AuditProjectDetail() {
               返回
             </Button>
             <Button
-              type="primary"
               icon={<EditOutlined />}
               onClick={() => navigate(`/audit-projects/${id}/edit`)}
             >
@@ -246,9 +250,15 @@ export default function AuditProjectDetail() {
                   },
                   {
                     key: 'generate',
-                    label: 'AI 生成报告内容',
+                    label: '报告与资料包',
                     icon: <FileWordOutlined />,
-                    onClick: handleAIGenerateReport,
+                    onClick: () => setActiveTab('artifacts'),
+                  },
+                  {
+                    key: 'documents',
+                    label: '项目资料与知识库',
+                    icon: <DatabaseOutlined />,
+                    onClick: () => setActiveTab('documents'),
                   },
                 ],
               }}
@@ -338,6 +348,8 @@ export default function AuditProjectDetail() {
 
         <Card>
           <Tabs
+            activeKey={activeTab}
+            onChange={setActiveTab}
             items={[
               {
                 key: 'team',
@@ -358,6 +370,26 @@ export default function AuditProjectDetail() {
                 key: 'nonconformities',
                 label: '不符合项',
                 children: <NonconformitiesList projectId={id!} />,
+              },
+              {
+                key: 'documents',
+                label: (
+                  <Space size={6}>
+                    <DatabaseOutlined />
+                    项目资料与知识库
+                  </Space>
+                ),
+                children: <ProjectDocuments projectId={id!} />,
+              },
+              {
+                key: 'artifacts',
+                label: (
+                  <Space size={6}>
+                    <FileDoneOutlined />
+                    报告与资料包
+                  </Space>
+                ),
+                children: <ProjectArtifacts projectId={id!} />,
               },
             ]}
           />

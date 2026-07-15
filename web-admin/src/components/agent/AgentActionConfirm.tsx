@@ -1,175 +1,115 @@
 import { useState } from 'react'
-import { Card, Button, Descriptions, Input, Tag, Modal } from 'antd'
+import { Button, Card, Descriptions, Input, Space, Tag, Typography } from 'antd'
 import {
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
-  WarningOutlined,
   FileTextOutlined,
+  SafetyCertificateOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 
-interface ActionConfirm {
-  type: 'create_task' | 'judgment' | 'operation'
+const { Paragraph, Text } = Typography
+
+export interface AgentAction {
+  type: 'create_task' | 'judgment' | 'final_verdict' | 'operation'
+  serverAction?: string
   title: string
   data: Record<string, unknown>
-  status: 'pending' | 'confirmed' | 'cancelled'
+  status: 'pending' | 'confirmed' | 'cancelled' | 'failed'
 }
 
-interface AgentActionConfirmProps {
-  action: ActionConfirm
-  onConfirm: (modifiedData?: Record<string, unknown>) => void
+interface Props {
+  action: AgentAction
+  applying?: boolean
+  onConfirm: (modifiedData?: Record<string, unknown>) => void | Promise<void>
   onCancel: () => void
 }
 
-export default function AgentActionConfirm({
-  action,
-  onConfirm,
-  onCancel,
-}: AgentActionConfirmProps) {
-  const [isEditing, setIsEditing] = useState(false)
+const resultConfig: Record<string, { text: string; color: string }> = {
+  pass: { text: '符合', color: 'success' },
+  partial_pass: { text: '基本符合', color: 'warning' },
+  fail: { text: '不符合', color: 'error' },
+  na: { text: '不适用', color: 'default' },
+}
+
+export default function AgentActionConfirm({ action, applying = false, onConfirm, onCancel }: Props) {
+  const [editing, setEditing] = useState(false)
   const [editedData, setEditedData] = useState<Record<string, unknown>>(action.data)
-  const [showDetailModal, setShowDetailModal] = useState(false)
 
-  const getActionIcon = () => {
-    switch (action.type) {
-      case 'create_task':
-        return <FileTextOutlined />
-      case 'judgment':
-        return <WarningOutlined />
-      default:
-        return <WarningOutlined />
-    }
-  }
+  const icon = action.type === 'create_task'
+    ? <FileTextOutlined />
+    : action.type === 'final_verdict'
+      ? <SafetyCertificateOutlined />
+      : <WarningOutlined />
 
-  const getActionColor = () => {
-    switch (action.type) {
-      case 'create_task':
-        return '#1677FF'
-      case 'judgment':
-        return '#FAAD14'
-      default:
-        return '#FAAD14'
-    }
-  }
+  const color = action.type === 'judgment' ? '#d46b08' : '#1677ff'
 
-  const handleEdit = () => {
-    setIsEditing(true)
-  }
-
-  const handleSaveEdit = () => {
-    setIsEditing(false)
-    onConfirm(editedData)
-  }
-
-  const handleCancelEdit = () => {
-    setIsEditing(false)
-    setEditedData(action.data)
-  }
-
-  const renderJudgmentContent = () => {
-    const data = action.data as {
-      checkItem?: string
-      result?: string
-      problemDescription?: string
-      rectificationSuggestion?: string
-    }
-
+  const renderJudgment = () => {
+    const result = String(action.data.result || '')
+    const config = resultConfig[result] || { text: result || '待判断', color: 'default' }
     return (
-      <div className="judgment-content">
-        <div className="judgment-item">
-          <span className="label">检查项：</span>
-          <span className="value">{data.checkItem}</span>
-        </div>
-        <div className="judgment-item">
-          <span className="label">建议结果：</span>
-          <Tag
-            color={
-              data.result === 'pass'
-                ? 'success'
-                : data.result === 'fail'
-                ? 'error'
-                : 'warning'
-            }
-          >
-            {data.result === 'pass'
-              ? '合格'
-              : data.result === 'fail'
-              ? '不合格'
-              : '基本合格'}
-          </Tag>
-        </div>
-        {data.problemDescription && (
-          <div className="judgment-item">
-            <span className="label">问题描述：</span>
-            <div className="description-box">{data.problemDescription}</div>
-          </div>
-        )}
-        {data.rectificationSuggestion && (
-          <div className="judgment-item">
-            <span className="label">整改建议：</span>
-            <div className="description-box">{data.rectificationSuggestion}</div>
-          </div>
-        )}
-      </div>
+      <Descriptions column={1} size="small">
+        <Descriptions.Item label="检查项">{String(action.data.checkItem || action.data.item_title || '-')}</Descriptions.Item>
+        <Descriptions.Item label="建议结果"><Tag color={config.color}>{config.text}</Tag></Descriptions.Item>
+        <Descriptions.Item label="问题描述">
+          <Paragraph style={{ marginBottom: 0 }}>{String(action.data.problemDescription || action.data.problem_description || '-')}</Paragraph>
+        </Descriptions.Item>
+        <Descriptions.Item label="整改建议">
+          <Paragraph style={{ marginBottom: 0 }}>{String(action.data.rectificationSuggestion || action.data.rectification_suggestion || '-')}</Paragraph>
+        </Descriptions.Item>
+      </Descriptions>
     )
   }
 
-  const renderTaskContent = () => {
-    const data = action.data as {
-      enterprise?: string
-      template?: string
-      date?: string
-      inspector?: string
-    }
+  const renderFinalVerdict = () => {
+    const verdict = String(action.data.verdict || '')
+    const config = resultConfig[verdict] || { text: verdict || '待判断', color: 'default' }
+    return (
+      <Descriptions column={1} size="small">
+        <Descriptions.Item label="最终结论"><Tag color={config.color}>{config.text}</Tag></Descriptions.Item>
+        <Descriptions.Item label="结论说明">
+          <Paragraph style={{ marginBottom: 0 }}>{String(action.data.comment || '-')}</Paragraph>
+        </Descriptions.Item>
+      </Descriptions>
+    )
+  }
 
-    if (isEditing) {
+  const renderTask = () => {
+    if (editing) {
       return (
-        <div className="edit-form">
-          <div className="edit-item">
-            <label>企业：</label>
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <label>
+            <Text>企业</Text>
             <Input
-              value={editedData.enterprise as string}
-              onChange={(e) =>
-                setEditedData({ ...editedData, enterprise: e.target.value })
-              }
+              value={String(editedData.enterprise || '')}
+              onChange={(event) => setEditedData({ ...editedData, enterprise: event.target.value })}
             />
-          </div>
-          <div className="edit-item">
-            <label>模板：</label>
+          </label>
+          <label>
+            <Text>模板</Text>
             <Input
-              value={editedData.template as string}
-              onChange={(e) =>
-                setEditedData({ ...editedData, template: e.target.value })
-              }
+              value={String(editedData.template || '')}
+              onChange={(event) => setEditedData({ ...editedData, template: event.target.value })}
             />
-          </div>
-          <div className="edit-item">
-            <label>日期：</label>
+          </label>
+          <label>
+            <Text>日期</Text>
             <Input
-              value={editedData.date as string}
-              onChange={(e) =>
-                setEditedData({ ...editedData, date: e.target.value })
-              }
+              value={String(editedData.date || '')}
+              onChange={(event) => setEditedData({ ...editedData, date: event.target.value })}
             />
-          </div>
-          <div className="edit-actions">
-            <Button size="small" onClick={handleCancelEdit}>
-              取消
-            </Button>
-            <Button type="primary" size="small" onClick={handleSaveEdit}>
-              保存
-            </Button>
-          </div>
-        </div>
+          </label>
+        </Space>
       )
     }
 
     return (
       <Descriptions column={1} size="small">
-        <Descriptions.Item label="企业">{data.enterprise}</Descriptions.Item>
-        <Descriptions.Item label="模板">{data.template}</Descriptions.Item>
-        <Descriptions.Item label="日期">{data.date}</Descriptions.Item>
-        <Descriptions.Item label="检查员">{data.inspector}</Descriptions.Item>
+        <Descriptions.Item label="企业">{String(action.data.enterprise || '-')}</Descriptions.Item>
+        <Descriptions.Item label="模板">{String(action.data.template || '-')}</Descriptions.Item>
+        <Descriptions.Item label="日期">{String(action.data.date || '-')}</Descriptions.Item>
+        <Descriptions.Item label="检查员">{String(action.data.inspector || '-')}</Descriptions.Item>
       </Descriptions>
     )
   }
@@ -178,41 +118,59 @@ export default function AgentActionConfirm({
     <Card
       className="agent-action-confirm"
       size="small"
-      title={
-        <div className="action-title" style={{ color: getActionColor() }}>
-          {getActionIcon()}
-          <span>{action.title}</span>
-        </div>
-      }
-      style={{ borderLeftColor: getActionColor(), borderLeftWidth: 3 }}
+      title={<Space style={{ color }}>{icon}<span>{action.title}</span></Space>}
+      style={{ borderLeftColor: color, borderLeftWidth: 3 }}
     >
-      {action.type === 'judgment' && renderJudgmentContent()}
-      {action.type === 'create_task' && renderTaskContent()}
+      {action.type === 'judgment' && renderJudgment()}
+      {action.type === 'final_verdict' && renderFinalVerdict()}
+      {action.type === 'create_task' && renderTask()}
       {action.type === 'operation' && (
-        <div className="operation-content">
-          <pre>{JSON.stringify(action.data, null, 2)}</pre>
-        </div>
+        <Descriptions column={1} size="small">
+          <Descriptions.Item label="项目ID">
+            {String(action.data.project_id || '-')}
+          </Descriptions.Item>
+          {action.data.plan_item_id ? (
+            <Descriptions.Item label="计划项ID">
+              {String(action.data.plan_item_id)}
+            </Descriptions.Item>
+          ) : null}
+          {action.data.evidence ? (
+            <Descriptions.Item label="现场证据">
+              <Paragraph style={{ marginBottom: 0 }}>
+                {String(action.data.evidence)}
+              </Paragraph>
+            </Descriptions.Item>
+          ) : null}
+          {action.data.draft_count !== undefined ? (
+            <Descriptions.Item label="草稿范围">
+              {action.data.safe_only
+                ? '仅证据充分的非异常草稿'
+                : `${String(action.data.draft_count)} 条已选草稿`}
+            </Descriptions.Item>
+          ) : null}
+          <Descriptions.Item label="写入方式">
+            当前项目内受控写入，确认成功后刷新项目数据。
+          </Descriptions.Item>
+        </Descriptions>
       )}
 
-      {!isEditing && (
-        <div className="action-buttons">
-          <Button
-            type="primary"
-            icon={<CheckOutlined />}
-            onClick={() => onConfirm()}
-          >
-            确认
-          </Button>
-          {action.type === 'create_task' && (
-            <Button icon={<EditOutlined />} onClick={handleEdit}>
-              修改
-            </Button>
-          )}
-          <Button icon={<CloseOutlined />} onClick={onCancel}>
-            取消
-          </Button>
-        </div>
-      )}
+      <Space wrap style={{ marginTop: 12 }}>
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          loading={applying}
+          onClick={() => onConfirm(editing ? editedData : undefined)}
+        >
+          {editing ? '保存并确认' : '确认执行'}
+        </Button>
+        {action.type === 'create_task' && !editing && (
+          <Button icon={<EditOutlined />} disabled={applying} onClick={() => setEditing(true)}>修改</Button>
+        )}
+        {editing && (
+          <Button disabled={applying} onClick={() => { setEditedData(action.data); setEditing(false) }}>取消修改</Button>
+        )}
+        <Button icon={<CloseOutlined />} disabled={applying} onClick={onCancel}>拒绝</Button>
+      </Space>
     </Card>
   )
 }

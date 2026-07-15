@@ -30,6 +30,15 @@ export default function MainLayout() {
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const { collapsed, toggleCollapsed } = useAppStore()
+  const projectMatch = location.pathname.match(/^\/audit-projects\/([^/]+)/)
+  const activeProjectId = projectMatch?.[1] === 'create' ? undefined : projectMatch?.[1]
+  const searchParams = new URLSearchParams(location.search)
+  const agentContext = {
+    page: location.pathname,
+    projectId: activeProjectId,
+    auditSessionId: searchParams.get('sessionId') || undefined,
+    planItemId: searchParams.get('planItemId') || undefined,
+  }
 
   // 根据角色过滤菜单
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
@@ -218,7 +227,7 @@ export default function MainLayout() {
         <Content className="site-layout-content">
           <Outlet />
         </Content>
-        <AgentSidebar context={{}} />
+        <AgentSidebar context={agentContext} />
       </Layout>
     </Layout>
   )

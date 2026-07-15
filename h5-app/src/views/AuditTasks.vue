@@ -68,7 +68,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { getMyAuditTasks } from '../api/auditProjects'
+import { createAuditSession, getMyAuditTasks, listAuditSessions } from '../api/auditProjects'
 
 const router = useRouter()
 const tasks = ref([])
@@ -120,12 +120,28 @@ const onRefresh = () => {
   onLoad()
 }
 
-const goToTask = (task) => {
-  router.push({
-    name: 'AuditTaskDetail',
-    params: { id: task.id },
-    query: { projectId: task.project_id }
-  })
+const goToTask = async (task) => {
+  try {
+    const response = await listAuditSessions(task.project_id)
+    const sessions = Array.isArray(response?.data) ? response.data : []
+    const existing = sessions.find((session) => {
+      const context = session.context_snapshot || {}
+      return session.status === 'active' && String(context.plan_item_id || '') === String(task.id)
+    })
+    const sessionResponse = existing
+      ? { data: existing }
+      : await createAuditSession(task.project_id, {
+          title: `${task.area_name || '现场'}审核`,
+          plan_item_id: task.id
+        })
+    router.push({
+      name: 'AiAuditSession',
+      params: { sessionId: sessionResponse.data.id },
+      query: { projectId: task.project_id, planItemId: task.id }
+    })
+  } catch (error) {
+    showToast(error.message || '进入 AI 现场审核失败')
+  }
 }
 
 onMounted(() => {

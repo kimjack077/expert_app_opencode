@@ -144,7 +144,9 @@ class AuditReportGenerator:
         
         # 统计数据
         total_records = len(records)
-        completed_records = sum(1 for r in records if r.status == 'reviewed')
+        completed_records = sum(
+            1 for r in records if r.status in {'submitted', 'reviewed'}
+        )
         major_nc = sum(1 for nc in nonconformities if nc.severity == 'major')
         minor_nc = sum(1 for nc in nonconformities if nc.severity == 'minor')
         observations = sum(1 for nc in nonconformities if nc.severity == 'observation')

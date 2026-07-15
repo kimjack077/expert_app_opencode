@@ -128,13 +128,13 @@ EXTRACT_TEMPLATE_ITEMS_PROMPT = """
 class AIExtractService:
     def __init__(self):
         self.client = AsyncOpenAI(
-            base_url=settings.MINIMAX_BASE_URL,
-            api_key=settings.MINIMAX_API_KEY,
-            timeout=180,
+            base_url=settings.LLM_BASE_URL,
+            api_key=settings.LLM_API_KEY,
+            timeout=settings.LLM_TIMEOUT,
         )
-        self.model = settings.MINIMAX_MODEL
-        self.api_key = settings.MINIMAX_API_KEY
-        self.base_url = settings.MINIMAX_BASE_URL
+        self.model = settings.LLM_MODEL
+        self.api_key = settings.LLM_API_KEY
+        self.base_url = settings.LLM_BASE_URL
 
     async def _parse_file_bytes(self, file_content: bytes, filename: str) -> str:
         """从文件字节中提取文本内容（本地解析，无需上传到第三方）"""
@@ -399,14 +399,14 @@ class AIExtractService:
 """
 
         client = AsyncOpenAI(
-            base_url=settings.MINIMAX_BASE_URL,
-            api_key=settings.MINIMAX_API_KEY,
-            timeout=120,
+            base_url=settings.LLM_BASE_URL,
+            api_key=settings.LLM_API_KEY,
+            timeout=settings.LLM_TIMEOUT,
         )
 
         try:
             response = await client.chat.completions.create(
-                model=settings.MINIMAX_MODEL,
+                model=settings.LLM_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=8192,
                 temperature=0.3,

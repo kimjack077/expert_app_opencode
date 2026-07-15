@@ -1,7 +1,7 @@
 <template>
   <div class="app-container">
     <router-view />
-    <template v-if="!hasEmbeddedAgent">
+    <template v-if="showGlobalAgent">
       <AgentFab @click="showChat = true" />
       <AgentChatPanel
         v-model:show="showChat"
@@ -21,14 +21,25 @@ const route = useRoute()
 const showChat = ref(false)
 
 const hasEmbeddedAgent = computed(() =>
-  route.path.startsWith('/inspection/') || /^\/task\/[^/]+\/execute$/.test(route.path)
+  route.path.startsWith('/inspection/') ||
+  /^\/task\/[^/]+\/execute$/.test(route.path) ||
+  route.path.startsWith('/audit-session/')
+)
+
+const showGlobalAgent = computed(() =>
+  route.path !== '/login' && !hasEmbeddedAgent.value
 )
 
 const chatContext = computed(() => ({
-  recordId: route.params.id || '',
+  recordId: route.path.startsWith('/record/') || route.path.startsWith('/inspection/')
+    ? route.params.id || ''
+    : '',
   currentItemTitle: '',
   currentItemId: '',
-  enterpriseId: route.query.enterprise_id || ''
+  enterpriseId: route.query.enterprise_id || '',
+  projectId: route.query.projectId || route.params.projectId || '',
+  planItemId: route.path.startsWith('/audit-task/') ? route.params.id || '' : '',
+  sessionId: route.params.sessionId || ''
 }))
 </script>
 

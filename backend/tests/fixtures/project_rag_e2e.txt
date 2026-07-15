@@ -1,0 +1,5 @@
+Codex P2 end-to-end audit fixture
+
+The quality management department maintains controlled documents under clause 7.5.
+The unique project verification phrase is PROJECT-RAG-CODEX-20260715.
+Document changes require approval, version history, distribution records, and obsolete-copy withdrawal.
