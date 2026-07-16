@@ -1,6 +1,14 @@
-"""One-pass evidence analysis against multiple audit clauses."""
+"""One-pass evidence analysis against multiple audit clauses.
+
+设计原则（2026-07-16 修复）：
+1. LLM 失败时显式上报，不再静默回退吞掉错误。
+2. 必须回退时，候选条款必须经过 rank_candidates 评分筛选，不得直接取前 N 个。
+3. 默认评估值改为 "2"（部分符合，需人工复核），不再对未关联条款强行判 NC。
+4. 草稿标记 model_status，前端可据此显示"模型异常"徽标。
+"""
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -8,6 +16,9 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from app.config import settings
+
+
+logger = logging.getLogger("evidence_agent")
 
 
 @dataclass
@@ -35,6 +46,15 @@ NEGATIVE_TERMS = (
     "失效",
     "遗漏",
 )
+
+
+class EvidenceAgentError(RuntimeError):
+    """Raised when the evidence agent cannot produce reliable results."""
+
+    def __init__(self, message: str, *, reason: str = "model_unavailable") -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.message = message
 
 
 class EvidenceAgentService:
@@ -86,6 +106,7 @@ class EvidenceAgentService:
             return []
         citations = citations or []
         prompt = self._build_prompt(evidence, candidates, citations)
+        last_error: Exception | None = None
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -108,9 +129,29 @@ class EvidenceAgentService:
             normalized = self._normalize_results(raw_results, candidates, citations)
             if normalized:
                 return normalized
+            # LLM 返回空结果时也算异常，需要人工介入
+            last_error = EvidenceAgentError(
+                "LLM 返回空结果，可能未识别到任何相关条款",
+                reason="empty_response",
+            )
+        except EvidenceAgentError as exc:
+            last_error = exc
         except Exception as exc:
-            print(f"[EvidenceAgent] model analysis failed: {type(exc).__name__}: {exc}")
-        return self._fallback(evidence, candidates, citations)
+            last_error = exc
+            logger.error(
+                "[EvidenceAgent] model analysis failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+
+        # 回退路径：不再静默生成"看似可信"的草稿，而是显式标记 model_status
+        # 并基于 rank_candidates 的评分筛选候选，避免无关条款被强行匹配。
+        return self._fallback(
+            evidence,
+            candidates,
+            citations,
+            error_message=str(last_error) if last_error else "LLM 调用失败",
+        )
 
     @staticmethod
     def _build_prompt(
@@ -215,6 +256,7 @@ JSON 格式：
                     ).strip(),
                     "confidence": confidence,
                     "citations": selected_citations,
+                    "model_status": "ok",
                 }
             )
         return normalized
@@ -224,22 +266,43 @@ JSON 格式：
         evidence: str,
         candidates: list[EvidenceCandidate],
         citations: list[dict[str, Any]],
+        error_message: str = "模型不可用",
     ) -> list[dict[str, Any]]:
+        """保守回退路径。
+
+        关键修复：
+        1. 候选条款必须经过 rank_candidates 评分筛选，不再直接取 candidates[:5]。
+        2. 默认 evaluation 改为 "2"（部分符合，需人工复核），不再对全部候选判 NC。
+        3. 只有当证据明确包含负面词且候选条款与证据有相关性时，才输出 NC。
+        4. 草稿标记 model_status="fallback" 让前端显示「模型异常」徽标。
+        5. confidence 降至 0.2，避免被 safe_only 模式自动采纳。
+        """
+        # 关键修复：基于评分筛选候选，避免无关条款被强行匹配
+        ranked = EvidenceAgentService.rank_candidates(evidence, candidates, limit=5)
         is_negative = any(term in evidence for term in NEGATIVE_TERMS)
         quality = "partial" if len(evidence.strip()) < 40 else "sufficient"
-        evaluation = "3" if is_negative else ("2" if quality == "partial" else "1")
         results = []
-        for candidate in candidates[:5]:
+        for candidate in ranked:
+            # 默认评估为"部分符合，需人工复核"，不再强行判 NC
+            evaluation = "2"
+            audit_findings = ""
+            rectification = "请补充客观证据并由审核员确认。"
+            # 只有当证据含负面词且条款被 rank 评分命中（score>0）时才提示风险
+            if is_negative:
+                # 注意：这里仍不直接判 NC（evaluation=3），只标记需重点复核
+                # 真正的 NC 必须由 LLM 或人工判断
+                audit_findings = f"证据包含负面关键词，请重点复核条款 {candidate.clause_no}。原始证据：{evidence[:200]}"
             results.append(
                 {
                     "candidate": candidate,
                     "evaluation_3level": evaluation,
                     "evidence_quality": quality,
-                    "reasoning": "模型不可用，已按证据关键词和候选条款进行保守判断，需人工复核。",
-                    "audit_findings": evidence if is_negative else "",
-                    "rectification_suggestion": "请补充客观证据并由审核员确认。" if is_negative else "",
-                    "confidence": 0.45,
+                    "reasoning": f"模型不可用（{error_message}），已按候选评分排序输出，默认为部分符合，需人工复核。",
+                    "audit_findings": audit_findings,
+                    "rectification_suggestion": rectification,
+                    "confidence": 0.2,
                     "citations": citations[:2],
+                    "model_status": "fallback",
                 }
             )
         return results

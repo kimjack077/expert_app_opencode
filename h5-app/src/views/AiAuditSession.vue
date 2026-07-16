@@ -7,6 +7,12 @@
         <p class="eyebrow">{{ planItem?.area_name || session.title || '现场审核' }}</p>
         <h1>{{ statusText }}</h1>
         <p>{{ planItem ? `${planItem.plan_date} ${planItem.time_start || ''}-${planItem.time_end || ''}` : '正在加载审核任务' }}</p>
+        <p v-if="analyzing" class="progress-hint">
+          <van-icon name="loading" spin /> AI 正在分析证据，请稍候...
+        </p>
+        <p v-else-if="session.model_status === 'fallback'" class="progress-hint warning">
+          <van-icon name="warning-o" /> {{ session.model_status_message || '部分草稿由保守回退生成，需人工复核' }}
+        </p>
       </div>
       <van-progress :percentage="progress" stroke-width="8" color="#0369A1" />
     </section>
@@ -53,8 +59,8 @@
       <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted" @click="showAgent = true">
         打开 AI 审核助手
       </van-button>
-      <van-button block type="primary" class="primary-action" :loading="analyzing" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
-        生成多条款 AI 记录
+      <van-button block type="primary" class="primary-action" :loading="analyzing" loading-text="AI 正在分析..." :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
+        {{ analyzing ? 'AI 正在分析...' : '生成多条款 AI 记录' }}
       </van-button>
     </section>
 
@@ -65,17 +71,23 @@
       </div>
       <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里" />
       <van-checkbox-group v-else v-model="selectedDraftIds">
-        <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft) }">
+        <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
           <van-checkbox :name="draft.id" shape="square">
             <div class="draft-heading">
               <strong>{{ clauseText(draft) }}</strong>
               <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
             </div>
           </van-checkbox>
+          <p v-if="isFallback(draft)" class="draft-fallback-notice">
+            <van-icon name="warning-o" /> 模型异常，此草稿为保守回退结果，必须人工复核后才能采纳
+          </p>
           <p class="draft-evidence">{{ draft.finding_text || draft.record_payload?.audit_evidence || '未提供证据摘要' }}</p>
           <div class="draft-meta">
             <span>证据：{{ qualityText(draft) }}</span>
-            <span>置信度：{{ confidenceText(draft) }}</span>
+            <span class="confidence-cell">
+              置信度：
+              <van-tag size="mini" :type="confidenceTagType(draft)">{{ confidenceText(draft) }} · {{ confidenceLabel(draft) }}</van-tag>
+            </span>
           </div>
           <p class="reasoning">{{ draft.reasoning }}</p>
           <details v-if="draft.citations?.length">
@@ -103,7 +115,13 @@
           <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
         </div>
         <p class="draft-evidence">{{ draft.finding_text || draft.record_payload?.audit_evidence || '已确认审核记录' }}</p>
-        <p class="draft-meta">证据：{{ qualityText(draft) }} · 置信度：{{ confidenceText(draft) }}</p>
+        <p class="draft-meta">
+          证据：{{ qualityText(draft) }}
+          <span class="confidence-cell">
+            · 置信度：
+            <van-tag size="mini" :type="confidenceTagType(draft)">{{ confidenceText(draft) }} · {{ confidenceLabel(draft) }}</van-tag>
+          </span>
+        </p>
       </article>
     </section>
 
@@ -181,11 +199,20 @@ const agentContext = computed(() => ({
 
 const evaluationCode = (draft) => String(draft.record_payload?.evaluation_3level || draft.evaluation || '2')
 const isAbnormal = (draft) => evaluationCode(draft) === '3' || ['insufficient', 'partial'].includes(draft.quality?.level)
+const isFallback = (draft) => draft.model_status === 'fallback' || draft.quality?.model_status === 'fallback' || draft.source_snapshot?.model_status === 'fallback'
 const evaluationText = (draft) => ({ 1: '符合', 2: '基本符合', 3: '不符合' }[evaluationCode(draft)] || '待确认')
 const evaluationType = (draft) => ({ 1: 'success', 2: 'warning', 3: 'danger' }[evaluationCode(draft)] || 'default')
 const clauseText = (draft) => draft.primary_clause_no || draft.clause_refs?.map((item) => item.clause_no).filter(Boolean).join(' / ') || '候选条款'
 const qualityText = (draft) => ({ sufficient: '充分', partial: '部分充分', insufficient: '不足' }[draft.quality?.level || draft.quality?.evidence_quality] || '待复核')
 const confidenceText = (draft) => `${Math.round(Number(draft.confidence || 0) * 100)}%`
+const confidenceLevel = (draft) => {
+  const value = Number(draft.confidence || 0)
+  if (value >= 0.8) return 'high'
+  if (value >= 0.5) return 'medium'
+  return 'low'
+}
+const confidenceLabel = (draft) => ({ high: '高', medium: '中', low: '低' }[confidenceLevel(draft)] || '低')
+const confidenceTagType = (draft) => ({ high: 'success', medium: 'warning', low: 'danger' }[confidenceLevel(draft)] || 'default')
 const submissionTitle = (submission) => submission.title || `${submission.input_type === 'voice' ? '语音' : '现场'}证据`
 const formatSubmissionTime = (submission) => submission.submitted_at ? new Date(submission.submitted_at).toLocaleString('zh-CN', { hour12: false }) : '刚刚保存'
 
@@ -335,7 +362,7 @@ onMounted(loadSession)
 .eyebrow{margin:0 0 3px;font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--primary-color)}.session-summary .eyebrow{color:rgba(255,255,255,.72)}
 .section-title,.card-title,.draft-heading,.draft-meta,.review-actions{display:flex;align-items:center}.section-title{justify-content:space-between;margin-bottom:12px}.section-title h2{margin:0;font-size:18px}.icon-button{width:44px;height:44px;border:0;border-radius:12px;color:var(--primary-color);background:var(--info-bg)}
 .primary-action{min-height:48px;margin-top:14px}.alert-card{border-color:#fecaca;background:#fff7f7;color:#991b1b}.card-title{gap:8px;font-weight:700}.alert-card ul{margin:10px 0 0 20px}
-.draft-card,.saved-evidence-card{margin:10px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px}.draft-card.abnormal{border-color:#fca5a5;background:linear-gradient(90deg,var(--error-bg),#fff 45%)}.draft-heading{gap:8px;justify-content:space-between;min-width:220px}.draft-evidence,.reasoning{margin:10px 0;font-size:14px;line-height:1.6}.draft-meta{flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary)}.citation{padding:8px;border-radius:8px;background:var(--bg-light);font-size:12px}.review-actions{flex-direction:column;gap:10px;margin-top:14px}.final-card{margin-bottom:0}
+.draft-card,.saved-evidence-card{margin:10px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px}.draft-card.abnormal{border-color:#fca5a5;background:linear-gradient(90deg,var(--error-bg),#fff 45%)}.draft-card.fallback{border-color:#fbbf24;background:linear-gradient(90deg,#fef3c7,#fff 45%)}.draft-fallback-notice{margin:8px 0 6px;padding:6px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:12px;font-weight:600}.progress-hint{margin:6px 0 0;color:rgba(255,255,255,.92);font-size:13px;font-weight:500}.progress-hint.warning{color:#fde68a}.draft-heading{gap:8px;justify-content:space-between;min-width:220px}.draft-evidence,.reasoning{margin:10px 0;font-size:14px;line-height:1.6}.draft-meta{flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary)}.confidence-cell{display:inline-flex;align-items:center;gap:4px}.citation{padding:8px;border-radius:8px;background:var(--bg-light);font-size:12px}.review-actions{flex-direction:column;gap:10px;margin-top:14px}.final-card{margin-bottom:0}
 .agent-entry{min-height:44px;margin-top:10px}
 @media(min-width:700px){.audit-session-page{max-width:680px;margin:0 auto}}
 </style>

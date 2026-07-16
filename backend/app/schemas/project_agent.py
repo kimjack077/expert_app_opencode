@@ -35,10 +35,19 @@ class DraftOverride(BaseModel):
 
 
 class DraftConfirmRequest(BaseModel):
+    # P1-6 修复：同时兼容 draft_ids（复数，推荐）与 draft_id（单数，向后兼容）
     draft_ids: list[UUID] = Field(default_factory=list)
+    draft_id: Optional[UUID] = None
     action: Literal["confirm", "reject"] = "confirm"
     safe_only: bool = False
     overrides: list[DraftOverride] = Field(default_factory=list)
+
+    def resolve_draft_ids(self) -> list[UUID]:
+        """合并 draft_ids 与 draft_id，避免调用方误用单数字段导致 count=0。"""
+        ids = list(self.draft_ids or [])
+        if self.draft_id and self.draft_id not in ids:
+            ids.append(self.draft_id)
+        return ids
 
 
 class ArtifactGenerateRequest(BaseModel):

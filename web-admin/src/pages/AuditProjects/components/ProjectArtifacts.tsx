@@ -258,29 +258,66 @@ export default function ProjectArtifacts({ projectId }: Props) {
     }
   }
 
-  const normalizedExtraIssues = (
-    values: Array<string | Record<string, unknown>> | undefined,
-    level: string
-  ): QualityIssue[] => (Array.isArray(values) ? values : []).map((value) => {
-    if (typeof value === 'string') return { level, message: value }
-    return {
-      ...value,
-      level: String(value.level || level),
-      title: value.title ? String(value.title) : undefined,
-      message: value.message ? String(value.message) : undefined,
-      suggestion: value.suggestion ? String(value.suggestion) : undefined,
-    }
-  })
-  const issues = [
-    ...(Array.isArray(quality?.issues) ? quality.issues : []),
-    ...normalizedExtraIssues(quality?.blockers, 'blocker'),
-    ...normalizedExtraIssues(quality?.warnings, 'warning'),
-    ...normalizedExtraIssues(quality?.reminders, 'info'),
-  ]
+  // P1-3 修复：避免阻断项同时显示为"建议"和"阻断"
+  // 后端返回 blockers/warnings 两个独立数组，不重复渲染
+  const rawIssues = Array.isArray(quality?.issues) ? quality.issues : []
+  const rawBlockers = Array.isArray(quality?.blockers) ? quality.blockers : []
+  const rawWarnings = Array.isArray(quality?.warnings) ? quality.warnings : []
+  const rawReminders = Array.isArray(quality?.reminders) ? quality.reminders : []
+  // 仅当后端未单独提供 blockers/warnings 时，才从 issues 中提取（向后兼容）
+  const needExtractFromIssues = rawBlockers.length === 0 && rawWarnings.length === 0 && rawIssues.length > 0
+  const issues = needExtractFromIssues
+    ? rawIssues.map((value: any) => ({
+        ...value,
+        level: String(value.level || 'info'),
+        title: value.title ? String(value.title) : undefined,
+        message: value.message ? String(value.message) : undefined,
+        suggestion: value.suggestion ? String(value.suggestion) : undefined,
+      }))
+    : [
+        ...rawBlockers.map((value: any) => ({
+          ...value,
+          level: 'blocker',
+          title: value.title ? String(value.title) : undefined,
+          message: value.message ? String(value.message) : undefined,
+          suggestion: value.suggestion ? String(value.suggestion) : undefined,
+        })),
+        ...rawWarnings.map((value: any) => ({
+          ...value,
+          level: 'warning',
+          title: value.title ? String(value.title) : undefined,
+          message: value.message ? String(value.message) : undefined,
+          suggestion: value.suggestion ? String(value.suggestion) : undefined,
+        })),
+        ...rawReminders.map((value: any) => ({
+          ...value,
+          level: 'info',
+          title: value.title ? String(value.title) : undefined,
+          message: value.message ? String(value.message) : undefined,
+          suggestion: value.suggestion ? String(value.suggestion) : undefined,
+        })),
+      ]
   const blockerCount = quality?.blocking_count ?? issues.filter((item) => ['blocker', 'error'].includes(item.level || '')).length
   const warningCount = quality?.warning_count ?? issues.filter((item) => item.level === 'warning').length
   const score = Math.max(0, Math.min(100, Number(quality?.score ?? quality?.overall_score ?? quality?.completeness_score ?? 0)))
   const passed = quality?.passed ?? (Boolean(quality) && blockerCount === 0)
+  // P2-2 修复：默认仅展示每个类型的最新版本，旧版本折叠到「查看历史版本」
+  const [showAllVersions, setShowAllVersions] = useState(false)
+  const visibleArtifacts = useMemo(() => {
+    if (showAllVersions) return artifacts
+    // 每种类型仅保留版本号最大的
+    const latestByType = new Map<string, ProjectArtifact>()
+    for (const item of artifacts) {
+      const type = item.artifact_type || item.type || 'unknown'
+      const existing = latestByType.get(type)
+      if (!existing || Number(item.version || 0) > Number(existing.version || 0)) {
+        latestByType.set(type, item)
+      }
+    }
+    return Array.from(latestByType.values())
+  }, [artifacts, showAllVersions])
+  const hiddenVersionCount = artifacts.length - visibleArtifacts.length
+
   const completedSessions = useMemo(
     () => sessions.filter((session) => ['completed', 'submitted'].includes(session.status || '')).length,
     [sessions]
@@ -319,6 +356,12 @@ export default function ProjectArtifacts({ projectId }: Props) {
         const config = statusConfig[value || 'pending'] || { text: value || '待生成', color: 'default' }
         return <Tag color={config.color}>{config.text}</Tag>
       },
+    },
+    {
+      title: '版本',
+      key: 'version',
+      width: 80,
+      render: (_, artifact) => artifact.version ? <Tag color="blue">v{artifact.version}</Tag> : <Text type="secondary">-</Text>,
     },
     {
       title: '生成时间',
@@ -479,11 +522,18 @@ export default function ProjectArtifacts({ projectId }: Props) {
         <Table<ProjectArtifact>
           rowKey={(artifact) => artifact.id || `${artifact.artifact_type || artifact.type}-${artifact.filename || artifact.file_name || artifact.name}`}
           columns={columns}
-          dataSource={artifacts}
+          dataSource={visibleArtifacts}
           loading={loading}
           pagination={false}
           locale={{ emptyText: <Empty description="尚未生成项目成果" /> }}
         />
+        {hiddenVersionCount > 0 && (
+          <div style={{ marginTop: 12, textAlign: 'center' }}>
+            <Button type="link" onClick={() => setShowAllVersions(!showAllVersions)}>
+              {showAllVersions ? '收起历史版本' : `查看历史版本（${hiddenVersionCount} 个）`}
+            </Button>
+          </div>
+        )}
       </Card>
 
       <Collapse

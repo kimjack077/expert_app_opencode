@@ -148,10 +148,15 @@ async def list_audit_projects(
 @router.get("/my-tasks")
 async def get_my_audit_tasks(
     status: Optional[str] = None,
+    today_only: bool = True,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取我的审核任务列表（审核员视角）"""
+    """获取我的审核任务列表（审核员视角）
+
+    P1-4 修复：默认仅返回今日任务（plan_date == today），
+    传 today_only=false 可查看全部历史任务。
+    """
     # 查询分配给当前用户的审核计划项
     query = select(AuditPlanItem).where(
         AuditPlanItem.assigned_member_ids.contains([current_user.id])
@@ -159,6 +164,12 @@ async def get_my_audit_tasks(
 
     if status:
         query = query.where(AuditPlanItem.status == status)
+
+    # P1-4 修复：默认仅返回今日任务，避免「今日审核」显示历史数据
+    if today_only:
+        from datetime import date
+        today = date.today()
+        query = query.where(AuditPlanItem.plan_date == today)
 
     query = query.order_by(AuditPlanItem.plan_date, AuditPlanItem.time_start)
     result = await db.execute(query)
