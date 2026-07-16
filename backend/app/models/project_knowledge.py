@@ -21,9 +21,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class ProjectDocument(Base):
+class ProjectDocument(Base, SoftDeleteMixin):
     """An original project material and its project-isolated parse state."""
 
     __tablename__ = "project_documents"

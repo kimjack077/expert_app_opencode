@@ -86,7 +86,10 @@ async def get_task_media(
 
     result = await db.execute(
         select(MediaFile)
-        .where(MediaFile.task_id == task_id)
+        .where(
+            MediaFile.task_id == task_id,
+            MediaFile.is_deleted == False,  # noqa: E712
+        )
         .order_by(MediaFile.uploaded_at.desc())
     )
     files = result.scalars().all()
@@ -102,14 +105,17 @@ async def delete_media(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """删除媒体文件（软删除）"""
     media = await db.get(MediaFile, media_id)
-    if not media:
+    if not media or media.is_deleted:
         raise HTTPException(status_code=404, detail="Media not found")
 
     if str(media.uploaded_by) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    await db.delete(media)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, media)
     await db.commit()
 
     await AuditService.log_action(

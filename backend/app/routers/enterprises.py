@@ -60,7 +60,7 @@ async def get_enterprises(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Enterprise)
+    query = select(Enterprise).where(Enterprise.is_deleted == False)  # noqa: E712
 
     if name:
         query = query.where(Enterprise.name.ilike(f"%{name}%"))
@@ -77,7 +77,7 @@ async def get_enterprises(
     result = await db.execute(query)
     enterprises = result.scalars().all()
 
-    total_query = select(func.count(Enterprise.id))
+    total_query = select(func.count(Enterprise.id)).where(Enterprise.is_deleted == False)  # noqa: E712
     if name:
         total_query = total_query.where(Enterprise.name.ilike(f"%{name}%"))
     if credit_code:
@@ -136,6 +136,7 @@ async def get_enterprise(
             selectinload(Enterprise.instruments),
         )
         .where(Enterprise.id == enterprise_id)
+        .where(Enterprise.is_deleted == False)  # noqa: E712
     )
     enterprise = result.scalar_one_or_none()
 
@@ -153,7 +154,7 @@ async def update_enterprise(
     current_user: User = Depends(get_current_admin_user),
 ):
     enterprise = await db.get(Enterprise, enterprise_id)
-    if not enterprise:
+    if not enterprise or enterprise.is_deleted:
         raise HTTPException(status_code=404, detail="Enterprise not found")
 
     update_data = enterprise_data.model_dump(exclude_unset=True)
@@ -173,10 +174,12 @@ async def delete_enterprise(
     current_user: User = Depends(get_current_admin_user),
 ):
     enterprise = await db.get(Enterprise, enterprise_id)
-    if not enterprise:
+    if not enterprise or enterprise.is_deleted:
         raise HTTPException(status_code=404, detail="Enterprise not found")
 
-    await db.delete(enterprise)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, enterprise, unique_fields=["credit_code"])
     await db.commit()
 
     return make_response(message="Enterprise deleted")
@@ -190,7 +193,10 @@ async def get_qualifications(
 ):
     result = await db.execute(
         select(EnterpriseQualification)
-        .where(EnterpriseQualification.enterprise_id == enterprise_id)
+        .where(
+            EnterpriseQualification.enterprise_id == enterprise_id,
+            EnterpriseQualification.is_deleted == False,  # noqa: E712
+        )
         .order_by(EnterpriseQualification.valid_until.desc())
     )
     qualifications = result.scalars().all()
@@ -224,7 +230,7 @@ async def update_qualification(
     current_user: User = Depends(get_current_admin_user),
 ):
     qualification = await db.get(EnterpriseQualification, qual_id)
-    if not qualification:
+    if not qualification or qualification.is_deleted:
         raise HTTPException(status_code=404, detail="Qualification not found")
 
     update_data = qual_data.model_dump(exclude_unset=True)
@@ -243,11 +249,14 @@ async def delete_qualification(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
+    """删除企业资质（软删除）"""
     qualification = await db.get(EnterpriseQualification, qual_id)
-    if not qualification:
+    if not qualification or qualification.is_deleted:
         raise HTTPException(status_code=404, detail="Qualification not found")
 
-    await db.delete(qualification)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, qualification)
     await db.commit()
 
     return make_response(message="Qualification deleted")
@@ -415,7 +424,7 @@ async def get_enterprise_risk_profile(
     current_user: User = Depends(get_current_user),
 ):
     enterprise = await db.get(Enterprise, enterprise_id)
-    if not enterprise:
+    if not enterprise or enterprise.is_deleted:
         raise HTTPException(status_code=404, detail="Enterprise not found")
 
     history_records_result = await db.execute(

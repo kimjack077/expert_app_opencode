@@ -5,9 +5,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class InspectionRecord(Base):
+class InspectionRecord(Base, SoftDeleteMixin):
     """检查记录 - 主表（简化版，不需要任务）"""
     __tablename__ = "inspection_records"
 
@@ -17,8 +18,8 @@ class InspectionRecord(Base):
     template_id = Column(
         UUID(as_uuid=True),
         ForeignKey("inspection_templates.id"),
-        nullable=False,
-        comment="使用的检查模板 ID"
+        nullable=True,
+        comment="使用的检查模板 ID（模板删除后置 NULL，历史数据由 template_snapshot 保留）"
     )
     
     # 企业关联（可选，支持手动输入企业信息）

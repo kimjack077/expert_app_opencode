@@ -32,8 +32,8 @@ async def get_categories(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(KnowledgeCategory)
-    
+    query = select(KnowledgeCategory).where(KnowledgeCategory.is_deleted == False)  # noqa: E712
+
     if category_type:
         query = query.where(KnowledgeCategory.category_type == category_type)
     if parent_id:
@@ -98,7 +98,7 @@ async def get_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(KnowledgeDocument).options(selectinload(KnowledgeDocument.category))
+    query = select(KnowledgeDocument).options(selectinload(KnowledgeDocument.category)).where(KnowledgeDocument.is_deleted == False)  # noqa: E712
 
     if category_id:
         query = query.where(KnowledgeDocument.category_id == category_id)
@@ -275,7 +275,7 @@ async def get_document(
     current_user: User = Depends(get_current_user),
 ):
     document = await db.get(KnowledgeDocument, doc_id)
-    if not document:
+    if not document or document.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
     document.view_count += 1
@@ -309,7 +309,7 @@ async def update_document(
     current_user: User = Depends(get_current_admin_user),
 ):
     document = await db.get(KnowledgeDocument, doc_id)
-    if not document:
+    if not document or document.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
     update_data = data.model_dump(exclude_unset=True)
@@ -337,10 +337,12 @@ async def delete_document(
     current_user: User = Depends(get_current_admin_user),
 ):
     document = await db.get(KnowledgeDocument, doc_id)
-    if not document:
+    if not document or document.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    await db.delete(document)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, document)
     await db.commit()
 
     return make_response(message="Document deleted")

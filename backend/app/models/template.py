@@ -16,9 +16,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class InspectionTemplate(Base):
+class InspectionTemplate(Base, SoftDeleteMixin):
     """检查模板 - 主表"""
     __tablename__ = "inspection_templates"
 
@@ -60,7 +61,7 @@ class InspectionTemplate(Base):
         return f"<InspectionTemplate {self.name}>"
 
 
-class TemplateItem(Base):
+class TemplateItem(Base, SoftDeleteMixin):
     """检查项目 - 支持层级结构"""
     __tablename__ = "template_items"
 

@@ -5,9 +5,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class Organization(Base):
+class Organization(Base, SoftDeleteMixin):
     __tablename__ = "organizations"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -19,7 +20,7 @@ class Organization(Base):
     users = relationship("User", back_populates="organization")
 
 
-class User(Base):
+class User(Base, SoftDeleteMixin):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

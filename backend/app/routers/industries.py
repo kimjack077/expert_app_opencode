@@ -24,7 +24,7 @@ async def get_industry_tree(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    query = select(Industry)
+    query = select(Industry).where(Industry.is_deleted == False)  # noqa: E712
     if is_active is not None:
         query = query.where(Industry.is_active == is_active)
     query = query.order_by(Industry.sort_order.asc())
@@ -70,7 +70,9 @@ async def get_industries(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    result = await db.execute(select(Industry).order_by(Industry.sort_order.asc()))
+    result = await db.execute(
+        select(Industry).where(Industry.is_deleted == False).order_by(Industry.sort_order.asc())  # noqa: E712
+    )
     industries = result.scalars().all()
     return make_response(data=[IndustryResponse.model_validate(i).model_dump() for i in industries])
 
@@ -81,7 +83,7 @@ async def get_industry(
     current_user: dict = Depends(get_current_user)
 ):
     ind = await db.get(Industry, industry_id)
-    if not ind:
+    if not ind or ind.is_deleted:
         raise HTTPException(status_code=404, detail="行业分类不存在")
     return make_response(data=IndustryResponse.model_validate(ind).model_dump())
 
@@ -110,7 +112,7 @@ async def update_industry(
     current_user: dict = Depends(get_current_user)
 ):
     ind = await db.get(Industry, industry_id)
-    if not ind:
+    if not ind or ind.is_deleted:
         raise HTTPException(status_code=404, detail="行业分类不存在")
         
     update_data = data.model_dump(exclude_unset=True)
@@ -133,9 +135,11 @@ async def delete_industry(
     current_user: dict = Depends(get_current_user)
 ):
     ind = await db.get(Industry, industry_id)
-    if not ind:
+    if not ind or ind.is_deleted:
         raise HTTPException(status_code=404, detail="行业分类不存在")
-        
-    await db.delete(ind)
+
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, ind, unique_fields=["code"])
     await db.commit()
     return make_response(message="删除成功")

@@ -23,14 +23,15 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class AuditProject(Base):
+class AuditProject(Base, SoftDeleteMixin):
     """审核项目 - 顶层容器，替代原有 InspectionTask 用于认证审核场景"""
     __tablename__ = "audit_projects"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    
+
     # 项目基本信息
     project_no = Column(String(50), unique=True, nullable=False, comment="项目编号，如 LYEC-2025-1058")
     title = Column(String(300), nullable=False, comment="项目名称")
@@ -171,7 +172,7 @@ class AuditProject(Base):
         return f"<AuditProject {self.project_no}: {self.title}>"
 
 
-class AuditTeamMember(Base):
+class AuditTeamMember(Base, SoftDeleteMixin):
     """审核工作组成员"""
     __tablename__ = "audit_team_members"
 
@@ -248,7 +249,7 @@ class AuditTeamMember(Base):
         return f"<AuditTeamMember {self.member_id} in {self.project_id}>"
 
 
-class AuditPlanItem(Base):
+class AuditPlanItem(Base, SoftDeleteMixin):
     """
     审核计划项 = 工作任务单元
     这是核心实体：既是计划矩阵中的一个格子，也是审核员的工作任务

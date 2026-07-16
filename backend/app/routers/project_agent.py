@@ -148,7 +148,7 @@ async def _run_artifact_generation(job_id: UUID) -> None:
 @router.get("/{project_id}/documents")
 async def list_documents(project_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user)
-    result = await db.execute(select(ProjectDocument).where(ProjectDocument.project_id == project_id).options(selectinload(ProjectDocument.chunks)).order_by(ProjectDocument.created_at.desc()))
+    result = await db.execute(select(ProjectDocument).where(ProjectDocument.project_id == project_id, ProjectDocument.is_deleted == False).options(selectinload(ProjectDocument.chunks)).order_by(ProjectDocument.created_at.desc()))
     return response([document_dict(item) for item in result.scalars().unique().all()])
 
 
@@ -178,12 +178,17 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
 
 @router.delete("/{project_id}/documents/{document_id}")
 async def delete_document(project_id: UUID, document_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """删除项目资料（软删除，保留文件以备审计）"""
+    from app.utils.soft_delete import soft_delete
+
     await ensure_project_access(db, project_id, current_user, require_manage=True)
     document = await db.get(ProjectDocument, document_id)
-    if not document or document.project_id != project_id:
+    if not document or document.project_id != project_id or document.is_deleted:
         raise HTTPException(status_code=404, detail="项目资料不存在")
-    path = Path(document.stored_path); await db.delete(document); await db.commit()
-    if path.is_file(): path.unlink(missing_ok=True)
+    path = Path(document.stored_path)
+    await soft_delete(db, document)
+    await db.commit()
+    # 保留物理文件以便审计追溯，不再 unlink
     return response({"id": str(document_id)}, "项目资料已删除")
 
 
@@ -191,7 +196,7 @@ async def delete_document(project_id: UUID, document_id: UUID, db: AsyncSession 
 async def reindex_document(project_id: UUID, document_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user)
     document = await db.get(ProjectDocument, document_id)
-    if not document or document.project_id != project_id: raise HTTPException(status_code=404, detail="项目资料不存在")
+    if not document or document.project_id != project_id or document.is_deleted: raise HTTPException(status_code=404, detail="项目资料不存在")
     path = Path(document.stored_path)
     if not path.is_file(): raise HTTPException(status_code=404, detail="原始文件不存在")
     return response(await project_knowledge_service.index_document(db, document, path.read_bytes()), "索引已重建")
@@ -463,7 +468,7 @@ async def project_quality(project_id: UUID, db: AsyncSession = Depends(get_db), 
 
 @router.get("/{project_id}/artifacts")
 async def list_artifacts(project_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await ensure_project_access(db, project_id, current_user); items=(await db.execute(select(ProjectArtifact).where(ProjectArtifact.project_id==project_id, ProjectArtifact.status != "missing").order_by(ProjectArtifact.created_at.desc()))).scalars().all(); return response([artifact_dict(item) for item in items])
+    await ensure_project_access(db, project_id, current_user); items=(await db.execute(select(ProjectArtifact).where(ProjectArtifact.project_id==project_id, ProjectArtifact.is_deleted == False, ProjectArtifact.status != "missing").order_by(ProjectArtifact.created_at.desc()))).scalars().all(); return response([artifact_dict(item) for item in items])
 
 
 @router.post("/{project_id}/artifacts/generate")
@@ -525,6 +530,7 @@ async def retry_artifact_generation(
         not job
         or job.project_id != project_id
         or job.artifact_type != "generation_job"
+        or job.is_deleted
     ):
         raise HTTPException(status_code=404, detail="成果生成任务不存在")
     if job.status != "failed":
@@ -549,7 +555,7 @@ async def retry_artifact_generation(
 @router.get("/{project_id}/artifacts/{artifact_id}/download")
 async def download_artifact(project_id: UUID, artifact_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user); item=await db.get(ProjectArtifact,artifact_id)
-    if not item or item.project_id != project_id or not Path(item.path).is_file(): raise HTTPException(status_code=404,detail="成果文件不存在")
+    if not item or item.project_id != project_id or item.is_deleted or not Path(item.path).is_file(): raise HTTPException(status_code=404,detail="成果文件不存在")
     # P0-5 修复：制品下载必须通过质量门禁（与 /package 接口一致）
     # 仅 generation_job 元数据任务文件不强制门禁（用户不会直接下载此类文件）
     if item.artifact_type != "generation_job":
@@ -584,6 +590,7 @@ async def download_package(project_id: UUID, db: AsyncSession = Depends(get_db),
                 ProjectArtifact.project_id == project_id,
                 ProjectArtifact.artifact_type == "package",
                 ProjectArtifact.status == "ready",
+                ProjectArtifact.is_deleted == False,  # noqa: E712
             )
             .order_by(ProjectArtifact.version.desc())
         )

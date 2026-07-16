@@ -5,8 +5,9 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
-class Industry(Base):
+class Industry(Base, SoftDeleteMixin):
     __tablename__ = "industries"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

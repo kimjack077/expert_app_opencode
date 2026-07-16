@@ -5,9 +5,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class KnowledgeCategory(Base):
+class KnowledgeCategory(Base, SoftDeleteMixin):
     __tablename__ = "knowledge_categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -23,7 +24,7 @@ class KnowledgeCategory(Base):
     documents = relationship("KnowledgeDocument", back_populates="category")
 
 
-class KnowledgeDocument(Base):
+class KnowledgeDocument(Base, SoftDeleteMixin):
     __tablename__ = "knowledge_documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

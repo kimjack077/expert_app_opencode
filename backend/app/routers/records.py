@@ -61,7 +61,7 @@ async def get_records(
         selectinload(InspectionRecord.template),
         selectinload(InspectionRecord.enterprise),
         selectinload(InspectionRecord.inspector),
-    )
+    ).where(InspectionRecord.is_deleted == False)  # noqa: E712
 
     # 非管理员用户只能查看自己的记录
     if current_user.role != "admin":
@@ -237,6 +237,7 @@ async def create_record(
         InspectionRecord.inspector_id == current_user.id,
         InspectionRecord.template_id == record_data.template_id,
         InspectionRecord.status == "draft",
+        InspectionRecord.is_deleted == False,  # noqa: E712
         InspectionRecord.created_at >= today_start,
         InspectionRecord.created_at < tomorrow_start,
     )
@@ -379,7 +380,10 @@ async def get_record(
             selectinload(InspectionRecord.enterprise),
             selectinload(InspectionRecord.inspector),
         )
-        .where(InspectionRecord.id == record_id)
+        .where(
+            InspectionRecord.id == record_id,
+            InspectionRecord.is_deleted == False,  # noqa: E712
+        )
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -740,7 +744,7 @@ async def update_record(
 ):
     """更新检查记录"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
@@ -768,7 +772,7 @@ async def submit_record(
 ):
     """提交检查记录"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
@@ -799,12 +803,14 @@ async def delete_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """删除检查记录（仅管理员）"""
+    """删除检查记录（仅管理员，软删除）"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    await db.delete(record)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, record)
     await db.commit()
 
     return make_response(message="Record deleted")
@@ -820,7 +826,7 @@ async def create_or_update_record_item(
 ):
     """创建或更新检查记录项"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
@@ -914,7 +920,7 @@ async def get_record_items(
 ):
     """获取检查记录的所有项目"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
@@ -1061,7 +1067,7 @@ async def get_record_item(
 ):
     """获取单个检查记录项详情"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     if current_user.role != "admin" and str(record.inspector_id) != str(
@@ -1231,7 +1237,7 @@ async def generate_ai_suggestion(
 ):
     """为检查记录项生成AI建议"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     if current_user.role != "admin" and str(record.inspector_id) != str(
@@ -1314,7 +1320,7 @@ async def accept_ai_suggestion(
 ):
     """采纳AI建议"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
@@ -1349,7 +1355,7 @@ async def generate_ai_suggestion_stream(
 ):
     """流式生成AI建议"""
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     if current_user.role != "admin" and str(record.inspector_id) != str(
@@ -1518,7 +1524,7 @@ async def get_item_history_stats(
     - 最近几次检查记录详情
     """
     record = await db.get(InspectionRecord, record_id)
-    if not record:
+    if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
     if current_user.role != "admin" and str(record.inspector_id) != str(

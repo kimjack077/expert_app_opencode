@@ -76,6 +76,9 @@ async def get_templates(
     """
     query = select(InspectionTemplate)
 
+    # 过滤软删除的模板
+    query = query.where(InspectionTemplate.is_deleted == False)  # noqa: E712
+
     # 非管理员只能看到公共模板或自己创建的模板
     if not is_admin(current_user):
         query = query.where(
@@ -184,7 +187,7 @@ async def get_template(
     - 专家：只能查看公共模板和自己创建的模板
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
     # 权限检查
@@ -192,7 +195,10 @@ async def get_template(
         raise HTTPException(status_code=403, detail="您没有权限访问此模板")
 
     # 加载所有检查项目
-    query = select(TemplateItem).where(TemplateItem.template_id == template_id).order_by(TemplateItem.sort_order)
+    query = select(TemplateItem).where(
+        TemplateItem.template_id == template_id,
+        TemplateItem.is_deleted == False,  # noqa: E712
+    ).order_by(TemplateItem.sort_order)
     result = await db.execute(query)
     items = result.scalars().all()
 
@@ -259,7 +265,7 @@ async def update_template(
     - 专家：只能更新自己创建的模板
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
     # 权限检查
@@ -293,7 +299,7 @@ async def publish_template(
     - 专家：只能发布自己创建的模板
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
     # 权限检查
@@ -321,33 +327,43 @@ async def delete_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除模板（级联清理关联的检查记录项引用）
+    """删除模板（软删除）
 
     权限规则：
     - 管理员：可以删除所有模板
     - 专家：只能删除自己创建的模板
+
+    说明：
+    - 采用软删除（is_deleted=True），保留模板及其检查项的原始数据
+    - 历史检查记录、审核计划等引用此模板的记录仍可正常访问
+    - 唯一字段 code 会被重命名以避免阻塞新模板创建
     """
+    from app.utils.soft_delete import soft_delete
+
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
     # 权限检查
     if not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限删除此模板")
 
-    # 找出该模板下所有 template_items
-    items_result = await db.execute(
-        select(TemplateItem).where(TemplateItem.template_id == template_id)
-    )
-    item_ids = [str(it.id) for it in items_result.scalars().all()]
+    # 软删除：设置标记并重命名唯一字段
+    await soft_delete(db, template, unique_fields=["code"])
 
-    # (由于已经去除了 inspection_record_items 对 template_item_id 的强外键约束)
-    # 历史检查记录中的数据将原样保留最初的 UUID 以支持快照匹配
-
-    await db.delete(template)
     await db.commit()
 
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "delete_template",
+        "inspection_template",
+        str(template.id),
+    )
+
     return make_response(message="Template deleted")
+
 
 
 @router.post("/{template_id}/copy", response_model=ApiResponse)
@@ -365,7 +381,7 @@ async def copy_template(
     """
     # 获取源模板
     source_template = await db.get(InspectionTemplate, template_id)
-    if not source_template:
+    if not source_template or source_template.is_deleted:
         raise HTTPException(status_code=404, detail="Source template not found")
 
     # 权限检查
@@ -387,7 +403,10 @@ async def copy_template(
     await db.flush()  # 获取新模板的 ID
 
     # 获取源模板的所有检查项目
-    query = select(TemplateItem).where(TemplateItem.template_id == template_id)
+    query = select(TemplateItem).where(
+        TemplateItem.template_id == template_id,
+        TemplateItem.is_deleted == False,  # noqa: E712
+    )
     result = await db.execute(query)
     source_items = result.scalars().all()
 
@@ -543,14 +562,16 @@ async def delete_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除检查项目（若为分类节点则级联删除所有子项，并解除 inspection_record_items 的引用）
+    """删除检查项目（软删除，若为分类节点则级联软删除所有子项）
 
     权限规则：
     - 管理员：可以删除所有检查项目
     - 专家：只能删除自己创建的模板中的项目
     """
+    from app.utils.soft_delete import soft_delete
+
     item = await db.get(TemplateItem, item_id)
-    if not item:
+    if not item or item.is_deleted:
         raise HTTPException(status_code=404, detail="Item not found")
 
     # 获取所属模板进行权限检查
@@ -566,7 +587,8 @@ async def delete_item(
         queue = []
         children_result = await db.execute(
             select(TemplateItem).where(
-                TemplateItem.parent_id.in_([UUID(i) for i in current_ids])
+                TemplateItem.parent_id.in_([UUID(i) for i in current_ids]),
+                TemplateItem.is_deleted == False,  # noqa: E712
             )
         )
         for child in children_result.scalars().all():
@@ -574,13 +596,11 @@ async def delete_item(
             all_ids_to_delete.append(child_id)
             queue.append(child_id)
 
-    # (已去除外键约束，历史记录可自动留存 UUID 用于匹配模板快照，无需再置 NULL)
-
-    # 按叶节点优先顺序（reverse 即可，BFS 最后加入的是最深层）删除
+    # 软删除所有收集到的节点（按任意顺序，软删除不会触发外键问题）
     for del_id in reversed(all_ids_to_delete):
         obj = await db.get(TemplateItem, del_id)
-        if obj:
-            await db.delete(obj)
+        if obj and not obj.is_deleted:
+            await soft_delete(db, obj)
 
     await db.commit()
 

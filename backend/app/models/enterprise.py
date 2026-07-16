@@ -5,9 +5,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class Enterprise(Base):
+class Enterprise(Base, SoftDeleteMixin):
     __tablename__ = "enterprises"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -60,7 +61,7 @@ class Enterprise(Base):
     industry = relationship("Industry")
 
 
-class EnterpriseQualification(Base):
+class EnterpriseQualification(Base, SoftDeleteMixin):
     __tablename__ = "enterprise_qualifications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

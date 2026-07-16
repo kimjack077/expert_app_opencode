@@ -43,7 +43,7 @@ async def get_tasks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(InspectionTask)
+    query = select(InspectionTask).where(InspectionTask.is_deleted == False)  # noqa: E712
 
     if current_user.role == "expert":
         query = query.where(InspectionTask.assigned_to == current_user.id)
@@ -55,7 +55,7 @@ async def get_tasks(
     result = await db.execute(query)
     tasks = result.scalars().all()
 
-    total = (await db.execute(select(func.count(InspectionTask.id)))).scalar()
+    total = (await db.execute(select(func.count(InspectionTask.id)).where(InspectionTask.is_deleted == False))).scalar()  # noqa: E712
 
     return make_response(
         data={
@@ -129,7 +129,7 @@ async def get_task(
     current_user: User = Depends(get_current_user),
 ):
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
@@ -148,7 +148,7 @@ async def update_task(
     from app.models.audit_project import AuditPlanItem, AuditProject
 
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 专家用户只能更新分配给自己的任务状态
@@ -213,7 +213,7 @@ async def start_task(
     from app.models.audit_project import AuditPlanItem, AuditProject
 
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 管理员可以启动任何任务，专家只能启动分配给自己的任务
@@ -261,7 +261,7 @@ async def complete_task(
     from sqlalchemy import text
 
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 管理员可以完成任何任务，专家只能完成分配给自己的任务
@@ -315,15 +315,17 @@ async def delete_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除检查任务（仅管理员可删除）"""
+    """删除检查任务（仅管理员可删除，软删除）"""
     if current_user.role not in ["admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admin can delete tasks")
 
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    await db.delete(task)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, task, unique_fields=["task_no"])
     await db.commit()
 
     await AuditService.log_action(
@@ -345,7 +347,7 @@ async def get_task_records(
     current_user: User = Depends(get_current_user),
 ):
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
@@ -372,7 +374,7 @@ async def create_or_update_record(
     current_user: User = Depends(get_current_user),
 ):
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 管理员可以为任何任务创建记录，专家只能为分配给自己的任务创建记录
@@ -458,7 +460,7 @@ async def get_task_summary(
     current_user: User = Depends(get_current_user),
 ):
     task = await db.get(InspectionTask, task_id)
-    if not task:
+    if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
     result = await db.execute(

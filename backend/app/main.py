@@ -42,7 +42,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,
-    redirect_slashes=False,
+    redirect_slashes=True,
 )
 
 
@@ -80,6 +80,35 @@ app.include_router(statistics_router, prefix="/api/statistics", tags=["审核统
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    # 无效 UUID / 数据类型错误 → 404（资源不存在）
+    exc_msg = str(exc).lower()
+    if (
+        "invalid input syntax for type uuid" in exc_msg
+        or "invalid uuid" in exc_msg
+        or "badly formed hexadecimal uuid string" in exc_msg
+    ):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "code": 404,
+                "message": "资源不存在",
+                "data": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
+    # 数据完整性错误（外键约束等）→ 409
+    if "foreign key constraint" in exc_msg or "unique constraint" in exc_msg:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": 409,
+                "message": "数据冲突，可能存在关联引用",
+                "data": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+
     print(f"[API] Unhandled error: {type(exc).__name__}: {exc}")
     return JSONResponse(
         status_code=500,
@@ -90,6 +119,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "timestamp": datetime.utcnow().isoformat(),
         },
     )
+
 
 
 @app.get("/api/health")

@@ -20,9 +20,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class ProjectArtifact(Base):
+class ProjectArtifact(Base, SoftDeleteMixin):
     """A generated file with enough metadata for listing and safe download."""
 
     __tablename__ = "project_artifacts"

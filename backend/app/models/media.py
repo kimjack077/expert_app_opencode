@@ -5,9 +5,10 @@ from sqlalchemy.sql import func
 import uuid
 
 from ..database import Base
+from .base import SoftDeleteMixin
 
 
-class MediaFile(Base):
+class MediaFile(Base, SoftDeleteMixin):
     __tablename__ = "media_files"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

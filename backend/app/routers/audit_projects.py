@@ -60,7 +60,7 @@ from app.schemas.audit_project import (
 )
 from app.utils.security import get_current_user, get_user_from_token
 
-router = APIRouter(prefix="/api/v1/audit-projects", tags=["audit-projects"])
+router = APIRouter(prefix="/api/audit-projects", tags=["audit-projects"])
 
 
 def make_response(data=None, code=200, message="success"):
@@ -122,7 +122,7 @@ async def list_audit_projects(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核项目列表"""
-    query = select(AuditProject)
+    query = select(AuditProject).where(AuditProject.is_deleted == False)  # noqa: E712
 
     # 过滤条件
     conditions = []
@@ -159,7 +159,8 @@ async def get_my_audit_tasks(
     """
     # 查询分配给当前用户的审核计划项
     query = select(AuditPlanItem).where(
-        AuditPlanItem.assigned_member_ids.contains([current_user.id])
+        AuditPlanItem.assigned_member_ids.contains([current_user.id]),
+        AuditPlanItem.is_deleted == False,  # noqa: E712
     )
 
     if status:
@@ -184,7 +185,10 @@ async def get_audit_project(
 ):
     """获取审核项目详情"""
     result = await db.execute(
-        select(AuditProject).where(AuditProject.id == project_id)
+        select(AuditProject).where(
+            AuditProject.id == project_id,
+            AuditProject.is_deleted == False,  # noqa: E712
+        )
     )
     project = result.scalar_one_or_none()
     if not project:
@@ -201,7 +205,10 @@ async def update_audit_project(
 ):
     """更新审核项目"""
     result = await db.execute(
-        select(AuditProject).where(AuditProject.id == project_id)
+        select(AuditProject).where(
+            AuditProject.id == project_id,
+            AuditProject.is_deleted == False,  # noqa: E712
+        )
     )
     project = result.scalar_one_or_none()
     if not project:
@@ -222,15 +229,18 @@ async def delete_audit_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除审核项目"""
+    """删除审核项目（软删除）"""
     result = await db.execute(
         select(AuditProject).where(AuditProject.id == project_id)
     )
     project = result.scalar_one_or_none()
-    if not project:
+    if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="审核项目不存在")
 
-    await db.delete(project)
+    from app.utils.soft_delete import soft_delete
+
+    # 软删除项目本身（project_no 唯一字段需追加后缀避免冲突）
+    await soft_delete(db, project, unique_fields=["project_no"])
     await db.commit()
     return make_response(message="审核项目已删除")
 
@@ -281,7 +291,10 @@ async def list_team_members(
     """获取审核组成员列表"""
     result = await db.execute(
         select(AuditTeamMember)
-        .where(AuditTeamMember.project_id == project_id)
+        .where(
+            AuditTeamMember.project_id == project_id,
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+        )
         .order_by(AuditTeamMember.created_at)
     )
     members = result.scalars().all()
@@ -316,7 +329,10 @@ async def update_team_member(
 ):
     """更新审核组成员"""
     result = await db.execute(
-        select(AuditTeamMember).where(AuditTeamMember.id == member_id)
+        select(AuditTeamMember).where(
+            AuditTeamMember.id == member_id,
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+        )
     )
     member = result.scalar_one_or_none()
     if not member:
@@ -336,15 +352,20 @@ async def remove_team_member(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """移除审核组成员"""
+    """移除审核组成员（软删除）"""
     result = await db.execute(
-        select(AuditTeamMember).where(AuditTeamMember.id == member_id)
+        select(AuditTeamMember).where(
+            AuditTeamMember.id == member_id,
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+        )
     )
     member = result.scalar_one_or_none()
     if not member:
         raise HTTPException(status_code=404, detail="审核组成员不存在")
 
-    await db.delete(member)
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, member)
     await db.commit()
     return make_response(message="审核组成员已移除")
 
@@ -422,7 +443,10 @@ async def list_plan_items(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核计划项列表"""
-    query = select(AuditPlanItem).where(AuditPlanItem.project_id == project_id)
+    query = select(AuditPlanItem).where(
+        AuditPlanItem.project_id == project_id,
+        AuditPlanItem.is_deleted == False,  # noqa: E712
+    )
 
     if plan_date:
         query = query.where(AuditPlanItem.plan_date == plan_date)
@@ -442,7 +466,10 @@ async def get_plan_item(
 ):
     """获取审核计划项详情"""
     result = await db.execute(
-        select(AuditPlanItem).where(AuditPlanItem.id == plan_item_id)
+        select(AuditPlanItem).where(
+            AuditPlanItem.id == plan_item_id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+        )
     )
     plan_item = result.scalar_one_or_none()
     if not plan_item:
@@ -459,7 +486,10 @@ async def update_plan_item(
 ):
     """更新审核计划项，同时同步更新关联的检查任务"""
     result = await db.execute(
-        select(AuditPlanItem).where(AuditPlanItem.id == plan_item_id)
+        select(AuditPlanItem).where(
+            AuditPlanItem.id == plan_item_id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+        )
     )
     plan_item = result.scalar_one_or_none()
     if not plan_item:
@@ -513,21 +543,27 @@ async def delete_plan_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除审核计划项，同时删除关联的检查任务"""
+    """删除审核计划项（软删除），同时软删除关联的检查任务"""
     result = await db.execute(
-        select(AuditPlanItem).where(AuditPlanItem.id == plan_item_id)
+        select(AuditPlanItem).where(
+            AuditPlanItem.id == plan_item_id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+        )
     )
     plan_item = result.scalar_one_or_none()
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
 
-    # 删除关联的检查任务
+    from app.utils.soft_delete import soft_delete
+
+    # 软删除关联的检查任务
     if plan_item.inspection_task_id:
         inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
-        if inspection_task:
-            await db.delete(inspection_task)
+        if inspection_task and not inspection_task.is_deleted:
+            await soft_delete(db, inspection_task, unique_fields=["task_no"])
 
-    await db.delete(plan_item)
+    # 软删除计划项本身
+    await soft_delete(db, plan_item)
     await db.commit()
     return make_response(message="审核计划项及关联的检查任务已删除")
 
@@ -836,7 +872,10 @@ async def get_project_progress(
     """获取审核项目进度"""
     # 获取所有计划项
     plan_items_result = await db.execute(
-        select(AuditPlanItem).where(AuditPlanItem.project_id == project_id)
+        select(AuditPlanItem).where(
+            AuditPlanItem.project_id == project_id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+        )
     )
     plan_items = plan_items_result.scalars().all()
 

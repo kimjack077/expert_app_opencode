@@ -26,10 +26,10 @@ async def get_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    query = select(User)
+    query = select(User).where(User.is_deleted == False)  # noqa: E712
     if role:
         query = query.where(User.role == role)
-        
+
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
@@ -43,7 +43,7 @@ async def get_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     user = await db.get(User, user_id)
-    if not user:
+    if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
     return make_response(data=UserResponse.model_validate(user).model_dump())
 
@@ -75,9 +75,9 @@ async def update_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     user = await db.get(User, user_id)
-    if not user:
+    if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     update_data = data.model_dump(exclude_unset=True)
     
     if "username" in update_data and update_data["username"] != user.username:
@@ -103,9 +103,11 @@ async def delete_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     user = await db.get(User, user_id)
-    if not user:
+    if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
-        
-    await db.delete(user)
+
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, user, unique_fields=["username", "email"])
     await db.commit()
     return make_response(message="User deleted successfully")
