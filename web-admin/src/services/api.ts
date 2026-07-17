@@ -263,17 +263,17 @@ export const aiExtractApi = {
 
 export const industryApi = {
   getTree: (params?: any) => api.get('/industries/tree', { params }),
-  getIndustries: (params?: any) => api.get('/industries/', { params }),
+  getIndustries: (params?: any) => api.get('/industries', { params }),
   getIndustry: (id: string) => api.get(`/industries/${id}`),
-  createIndustry: (data: any) => api.post('/industries/', data),
+  createIndustry: (data: any) => api.post('/industries', data),
   updateIndustry: (id: string, data: any) => api.put(`/industries/${id}`, data),
   deleteIndustry: (id: string) => api.delete(`/industries/${id}`),
 }
 
 export const userApi = {
-  getUsers: (params?: any) => api.get('/users/', { params }),
+  getUsers: (params?: any) => api.get('/users', { params }),
   getUser: (id: string) => api.get(`/users/${id}`),
-  createUser: (data: any) => api.post('/users/', data),
+  createUser: (data: any) => api.post('/users', data),
   updateUser: (id: string, data: any) => api.put(`/users/${id}`, data),
   deleteUser: (id: string) => api.delete(`/users/${id}`),
 }

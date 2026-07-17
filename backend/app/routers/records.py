@@ -37,7 +37,6 @@ def make_response(data=None, code=200, message="success"):
 
 
 @router.get("", response_model=ApiResponse)
-@router.get("/", response_model=ApiResponse)
 async def get_records(
     template_id: Optional[str] = Query(None),
     enterprise_id: Optional[str] = Query(None),

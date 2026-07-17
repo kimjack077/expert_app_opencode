@@ -65,7 +65,7 @@ async def get_industry_tree(
     sort_children(tree)
     return make_response(data=tree)
 
-@router.get("/", response_model=ApiResponse)
+@router.get("", response_model=ApiResponse)
 async def get_industries(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
@@ -87,7 +87,7 @@ async def get_industry(
         raise HTTPException(status_code=404, detail="行业分类不存在")
     return make_response(data=IndustryResponse.model_validate(ind).model_dump())
 
-@router.post("/", response_model=ApiResponse)
+@router.post("", response_model=ApiResponse)
 async def create_industry(
     data: IndustryCreate, 
     db: AsyncSession = Depends(get_db),

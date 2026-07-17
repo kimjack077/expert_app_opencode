@@ -87,6 +87,62 @@ async def create_category(
     return make_response(data={"id": str(category.id), "name": category.name})
 
 
+@router.get("/categories/{category_id}", response_model=ApiResponse)
+async def get_category(
+    category_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    category = await db.get(KnowledgeCategory, category_id)
+    if not category or category.is_deleted:
+        raise HTTPException(status_code=404, detail="知识分类不存在")
+    return make_response(data={
+        "id": str(category.id),
+        "name": category.name,
+        "code": category.code,
+        "category_type": category.category_type,
+        "sort_order": category.sort_order,
+        "description": category.description,
+    })
+
+
+@router.put("/categories/{category_id}", response_model=ApiResponse)
+async def update_category(
+    category_id: str,
+    data: CategoryCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    category = await db.get(KnowledgeCategory, category_id)
+    if not category or category.is_deleted:
+        raise HTTPException(status_code=404, detail="知识分类不存在")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(category, key, value)
+
+    await db.commit()
+    await db.refresh(category)
+    return make_response(data={"id": str(category.id), "name": category.name})
+
+
+@router.delete("/categories/{category_id}", response_model=ApiResponse)
+async def delete_category(
+    category_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    category = await db.get(KnowledgeCategory, category_id)
+    if not category or category.is_deleted:
+        raise HTTPException(status_code=404, detail="知识分类不存在")
+
+    from app.utils.soft_delete import soft_delete
+
+    await soft_delete(db, category, unique_fields=["code"])
+    await db.commit()
+    return make_response(message="删除成功")
+
+
 @router.get("/documents", response_model=ApiResponse)
 async def get_documents(
     category_id: Optional[str] = Query(None),

@@ -148,6 +148,17 @@ async def create_template(
     - 专家创建的模板默认为个人模板(is_public=False)
     - 管理员可以创建公共模板
     """
+    # 检查 code 唯一性（如果提供了 code）
+    if template_data.code:
+        existing = await db.execute(
+            select(InspectionTemplate).where(
+                InspectionTemplate.code == template_data.code,
+                InspectionTemplate.is_deleted == False,  # noqa: E712
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail=f"模板编码 '{template_data.code}' 已存在")
+
     template = InspectionTemplate(
         name=template_data.name,
         code=template_data.code,
@@ -471,6 +482,47 @@ async def copy_template(
 
 
 # 检查项目管理
+@router.get("/{template_id}/items", response_model=ApiResponse)
+async def get_template_items(
+    template_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """获取模板的所有检查项目（树形结构）"""
+    template = await db.get(InspectionTemplate, template_id)
+    if not template or template.is_deleted:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if not can_access_template(current_user, template):
+        raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+
+    query = select(TemplateItem).where(
+        TemplateItem.template_id == template_id,
+        TemplateItem.is_deleted == False,  # noqa: E712
+    ).order_by(TemplateItem.sort_order)
+    result = await db.execute(query)
+    items = result.scalars().all()
+
+    def build_tree(item_list: List[TemplateItem], parent_id: Optional[str] = None) -> List[dict]:
+        tree = []
+        for item in item_list:
+            if (item.parent_id and str(item.parent_id) == parent_id) or (not item.parent_id and not parent_id):
+                tree.append({
+                    "id": str(item.id),
+                    "title": item.title,
+                    "check_method": item.check_method,
+                    "result_type": item.result_type,
+                    "is_required": item.is_required,
+                    "is_category": item.is_category,
+                    "sort_order": item.sort_order,
+                    "parent_id": str(item.parent_id) if item.parent_id else None,
+                    "children": build_tree(item_list, str(item.id)),
+                })
+        return tree
+
+    return make_response(data=build_tree(items))
+
+
 @router.post("/{template_id}/items", response_model=ApiResponse)
 async def create_item(
     template_id: str,

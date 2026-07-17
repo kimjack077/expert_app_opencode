@@ -3,7 +3,7 @@ import request from './request'
 // 获取我的审核任务列表
 export function getMyAuditTasks(params) {
   return request({
-    url: '/v1/audit-projects/my-tasks',
+    url: '/audit-projects/my-tasks',
     method: 'get',
     params
   })
@@ -12,7 +12,7 @@ export function getMyAuditTasks(params) {
 // 获取审核计划项详情
 export function getAuditPlanItem(id) {
   return request({
-    url: `/v1/audit-projects/plan/${id}`,
+    url: `/audit-projects/plan/${id}`,
     method: 'get'
   })
 }
@@ -20,7 +20,7 @@ export function getAuditPlanItem(id) {
 // 创建审核区域记录
 export function createAuditRecord(projectId, data) {
   return request({
-    url: `/v1/audit-projects/${projectId}/records`,
+    url: `/audit-projects/${projectId}/records`,
     method: 'post',
     data
   })
@@ -29,7 +29,7 @@ export function createAuditRecord(projectId, data) {
 // 获取审核区域记录详情
 export function getAuditRecord(recordId) {
   return request({
-    url: `/v1/audit-projects/records/${recordId}`,
+    url: `/audit-projects/records/${recordId}`,
     method: 'get'
   })
 }
@@ -37,7 +37,7 @@ export function getAuditRecord(recordId) {
 // 更新审核区域记录
 export function updateAuditRecord(recordId, data) {
   return request({
-    url: `/v1/audit-projects/records/${recordId}`,
+    url: `/audit-projects/records/${recordId}`,
     method: 'put',
     data
   })
@@ -46,7 +46,7 @@ export function updateAuditRecord(recordId, data) {
 // 创建不符合项
 export function createNonconformity(projectId, data) {
   return request({
-    url: `/v1/audit-projects/${projectId}/nonconformities`,
+    url: `/audit-projects/${projectId}/nonconformities`,
     method: 'post',
     data
   })
@@ -55,7 +55,7 @@ export function createNonconformity(projectId, data) {
 // 获取审核项目进度
 export function getAuditProgress(projectId) {
   return request({
-    url: `/v1/audit-projects/${projectId}/progress`,
+    url: `/audit-projects/${projectId}/progress`,
     method: 'get'
   })
 }
@@ -65,7 +65,7 @@ export function getAuditProgress(projectId) {
 // AI 证据充分性评估
 export function evaluateEvidenceWithAI(projectId, params) {
   return request({
-    url: `/v1/audit-projects/${projectId}/ai/evaluate-evidence`,
+    url: `/audit-projects/${projectId}/ai/evaluate-evidence`,
     method: 'post',
     params
   })
@@ -74,7 +74,7 @@ export function evaluateEvidenceWithAI(projectId, params) {
 // AI 建议不符合项
 export function suggestNCWithAI(projectId, params) {
   return request({
-    url: `/v1/audit-projects/${projectId}/ai/suggest-nc`,
+    url: `/audit-projects/${projectId}/ai/suggest-nc`,
     method: 'post',
     params
   })

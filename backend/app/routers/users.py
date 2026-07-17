@@ -18,7 +18,7 @@ def make_response(data=None, code=200, message="success"):
         code=code, message=message, data=data, timestamp=datetime.utcnow()
     )
 
-@router.get("/", response_model=ApiResponse)
+@router.get("", response_model=ApiResponse)
 async def get_users(
     skip: int = 0,
     limit: int = 100,
@@ -33,7 +33,7 @@ async def get_users(
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
-    
+
     return make_response(data=[UserResponse.model_validate(u).model_dump() for u in users])
 
 @router.get("/{user_id}", response_model=ApiResponse)
@@ -47,7 +47,7 @@ async def get_user(
         raise HTTPException(status_code=404, detail="User not found")
     return make_response(data=UserResponse.model_validate(user).model_dump())
 
-@router.post("/", response_model=ApiResponse)
+@router.post("", response_model=ApiResponse)
 async def create_user(
     data: UserCreate, 
     db: AsyncSession = Depends(get_db),

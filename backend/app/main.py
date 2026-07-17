@@ -156,6 +156,17 @@ async def serve_h5_app():
 
 @app.get("/{full_path:path}")
 async def serve_spa_routes(full_path: str):
+    # API 路径未匹配到路由时返回标准 404 JSON，而不是 SPA index.html
+    if full_path.startswith("api/") or full_path == "api":
+        return JSONResponse(
+            status_code=404,
+            content={
+                "code": 404,
+                "message": "API endpoint not found",
+                "data": None,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
     if full_path.startswith("h5/"):
         index_path = os.path.join(H5_APP_DIR, "index.html")
         if os.path.exists(index_path):
