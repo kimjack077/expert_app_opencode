@@ -136,10 +136,37 @@ class ReportService:
     def _flatten_items(self, items: List[Any]) -> List[Any]:
         result = []
         for item in items:
-            if not item.get('is_category', False):
+            # 兼容字典和 SQLAlchemy 对象
+            if isinstance(item, dict):
+                is_category = item.get('is_category', False)
+                children = item.get('children')
+            else:
+                is_category = getattr(item, 'is_category', False)
+                children = getattr(item, 'children', None)
+                # 将 SQLAlchemy 对象转换为字典
+                if not isinstance(item, dict):
+                    item = {
+                        'id': str(getattr(item, 'id', '')),
+                        'parent_id': str(getattr(item, 'parent_id', '')) if getattr(item, 'parent_id', None) else None,
+                        'title': getattr(item, 'title', '') or '',
+                        'description': getattr(item, 'description', None),
+                        'check_method': getattr(item, 'check_method', None),
+                        'legal_basis': getattr(item, 'legal_basis', None),
+                        'standard_ref': getattr(item, 'standard_ref', None),
+                        'check_type': getattr(item, 'check_type', None),
+                        'result_type': getattr(item, 'result_type', None),
+                        'result_options': getattr(item, 'result_options', None),
+                        'risk_level': getattr(item, 'risk_level', 'medium'),
+                        'is_category': is_category,
+                        'sort_order': getattr(item, 'sort_order', 0),
+                        'radio_value': getattr(item, 'radio_value', None),
+                        'problem_description': getattr(item, 'problem_description', None),
+                        'rectification_suggestion': getattr(item, 'rectification_suggestion', None),
+                    }
+            if not is_category:
                 result.append(item)
-            if item.get('children'):
-                result.extend(self._flatten_items(item['children']))
+            if children:
+                result.extend(self._flatten_items(children))
         return result
 
     def _build_cover_page(self, record: InspectionRecord, report_number: str) -> List:
@@ -402,9 +429,50 @@ class ReportService:
         elif record.template:
             template_items = record.template.items if hasattr(record.template, 'items') else []
         all_items = self._flatten_items(template_items)
+
+        # 合并检查记录项的实际结果（InspectionRecordItem）
+        # record.items 包含用户填写的实际检查结果（radio_value 等）
+        record_items_map = {}
+        record_items = getattr(record, 'items', None) or []
+        for ri in record_items:
+            tid = str(getattr(ri, 'template_item_id', '') or '')
+            if tid:
+                record_items_map[tid] = {
+                    'radio_value': getattr(ri, 'radio_value', None),
+                    'result': getattr(ri, 'result', None),
+                    'result_text': getattr(ri, 'result_text', None),
+                    'problem_description': getattr(ri, 'problem_description', None),
+                    'rectification_suggestion': getattr(ri, 'rectification_suggestion', None),
+                    'score_value': getattr(ri, 'score_value', None),
+                    'numeric_value': getattr(ri, 'numeric_value', None),
+                    'text_value': getattr(ri, 'text_value', None),
+                    'multi_value': getattr(ri, 'multi_value', None),
+                    'audit_evidence': getattr(ri, 'audit_evidence', None),
+                    'audit_findings': getattr(ri, 'audit_findings', None),
+                }
+
+        # 将实际检查结果合并到模板项中
+        for item in all_items:
+            item_id = str(item.get('id', '') or '')
+            if item_id and item_id in record_items_map:
+                ri_data = record_items_map[item_id]
+                # 用实际结果覆盖模板定义中的空值
+                if ri_data.get('radio_value'):
+                    item['radio_value'] = ri_data['radio_value']
+                if ri_data.get('problem_description'):
+                    item['problem_description'] = ri_data['problem_description']
+                if ri_data.get('rectification_suggestion'):
+                    item['rectification_suggestion'] = ri_data['rectification_suggestion']
+                if ri_data.get('result_text'):
+                    item['result_text'] = ri_data['result_text']
+                if ri_data.get('audit_evidence'):
+                    item['audit_evidence'] = ri_data['audit_evidence']
+                if ri_data.get('audit_findings'):
+                    item['audit_findings'] = ri_data['audit_findings']
+
         pass_count = sum(1 for item in all_items if item.get('radio_value') == 'pass')
         fail_count = sum(1 for item in all_items if item.get('radio_value') == 'fail')
-        na_count = sum(1 for item in all_items if item.get('radio_value') == 'na')
+        na_count = sum(1 for item in all_items if item.get('radio_value') in ('na', 'not_applicable'))
         total = len(all_items)
         fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
         return {

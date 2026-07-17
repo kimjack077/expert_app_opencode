@@ -37,7 +37,7 @@ class LLMCallLog(Base):
     )
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     task_id = Column(UUID(as_uuid=True), nullable=True)
-    record_id = Column(UUID(as_uuid=True), ForeignKey("inspection_records.id"))
+    record_id = Column(UUID(as_uuid=True), nullable=True)  # 多态关联：可能指向 task_item_records 或 inspection_record_items，不加外键约束
     call_type = Column(String(20), nullable=False)
     prompt = Column(Text, nullable=False)
     response = Column(Text)

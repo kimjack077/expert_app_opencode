@@ -1020,11 +1020,16 @@ const onQuickInput = async (item, field, value) => {
   }
 
   try {
+    // 后端 schema 要求 score_value / numeric_value 为字符串类型
+    let sendValue = value
+    if ((field === 'score_value' || field === 'numeric_value') && sendValue !== '' && sendValue != null) {
+      sendValue = String(sendValue)
+    }
     const data = {
       template_item_id: item.template_item_id || item.id,
-      [field]: value
+      [field]: sendValue
     }
-    
+
     if (field === 'radio_value' && checkType === 'pass_fail') {
       data.problem_description = quickInputs.value[item.id].problem_description || ''
     }
@@ -1097,7 +1102,71 @@ const completeInspection = async () => {
 
   submitting.value = true
   try {
-    // 先保存最终判定
+    // 先保存所有检查项结果（确保默认值也被持久化到后端）
+    // 只发送与检查项 result_type 相关的字段，避免 422 验证错误
+    const savePromises = []
+    for (const item of flattenItems.value) {
+      if (item.is_category === true) continue
+      const inputs = quickInputs.value[item.id]
+      if (!inputs) continue
+      const data = {
+        template_item_id: item.template_item_id || item.id,
+      }
+      const resultType = item.result_type || (!item.check_type ? 'pass_fail' : item.check_type)
+      let hasValue = false
+
+      // 判定型（pass_fail / 默认）
+      if (resultType === 'pass_fail' || (!resultType && !item.check_type)) {
+        if (inputs.radio_value) { data.radio_value = inputs.radio_value; hasValue = true }
+        if (inputs.problem_description) { data.problem_description = inputs.problem_description; hasValue = true }
+      }
+
+      // 数值型
+      else if (resultType === 'numeric') {
+        if (inputs.numeric_value !== '' && inputs.numeric_value != null) {
+          data.numeric_value = String(inputs.numeric_value)
+          hasValue = true
+        }
+      }
+
+      // 文本型
+      else if (resultType === 'text') {
+        if (inputs.text_value) { data.text_value = inputs.text_value; hasValue = true }
+      }
+
+      // 打分型
+      else if (resultType === 'score') {
+        if (inputs.score_value !== '' && inputs.score_value != null && inputs.score_value !== 0) {
+          data.score_value = String(inputs.score_value)
+          hasValue = true
+        }
+      }
+
+      // 多选型
+      else if (resultType === 'multi_check') {
+        if (inputs.multi_value && inputs.multi_value.length) { data.multi_value = inputs.multi_value; hasValue = true }
+      }
+
+      // 通用：problem_description 始终发送（若存在）
+      if (inputs.problem_description && !data.problem_description) {
+        data.problem_description = inputs.problem_description
+        hasValue = true
+      }
+
+      if (hasValue) {
+        savePromises.push(createOrUpdateRecordItem(currentRecordId.value, data))
+      }
+    }
+    if (savePromises.length > 0) {
+      await Promise.all(savePromises)
+    }
+
+    // 等待之前的异步保存完成
+    if (pendingItemSaves.size > 0) {
+      await Promise.all(Array.from(pendingItemSaves))
+    }
+
+    // 再保存最终判定
     await updateRecord(currentRecordId.value, {
       overall_result: finalJudgment.result,
       remarks: finalJudgment.remarks,

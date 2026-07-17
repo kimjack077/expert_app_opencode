@@ -1656,9 +1656,10 @@ async def get_report_data(
     result = await db.execute(
         select(InspectionRecord)
         .options(
-            selectinload(InspectionRecord.template),
+            selectinload(InspectionRecord.template).selectinload(InspectionTemplate.items),
             selectinload(InspectionRecord.enterprise),
             selectinload(InspectionRecord.inspector),
+            selectinload(InspectionRecord.items),
         )
         .where(InspectionRecord.id == record_id)
     )
