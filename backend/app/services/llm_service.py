@@ -90,7 +90,11 @@ class LLMService:
             return cached_suggestion, True, 0
 
         result_text = self._get_result_text(record)
-        problem_description = getattr(record, 'problem_description', None) or "无"
+        problem_description = (
+            getattr(record, 'problem_description', None)
+            or getattr(record, 'inspector_note', None)
+            or "无"
+        )
 
         prompt = SUGGESTION_PROMPT.format(
             check_item_title=template_item.title,
@@ -119,7 +123,11 @@ class LLMService:
         record: Union[TaskItemRecord, InspectionRecordItem],
     ) -> AsyncGenerator[dict, None]:
         result_text = self._get_result_text(record)
-        problem_description = getattr(record, 'problem_description', None) or "无"
+        problem_description = (
+            getattr(record, 'problem_description', None)
+            or getattr(record, 'inspector_note', None)
+            or "无"
+        )
 
         prompt = SUGGESTION_PROMPT.format(
             check_item_title=template_item.title,

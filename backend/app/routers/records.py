@@ -389,9 +389,9 @@ async def get_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     # 加载关联数据
@@ -691,6 +691,28 @@ async def get_record(
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         "template": template_data,
+        # 同步返回扁平 items，便于 H5/Web 明细页与 Agent 写回定位
+        "items": [
+            {
+                "id": str(i.id),
+                "template_item_id": str(i.template_item_id)
+                if i.template_item_id
+                else None,
+                "radio_value": i.radio_value,
+                "score_value": float(i.score_value)
+                if i.score_value is not None
+                else None,
+                "numeric_value": float(i.numeric_value)
+                if i.numeric_value is not None
+                else None,
+                "text_value": i.text_value,
+                "multi_value": i.multi_value or [],
+                "problem_description": i.problem_description,
+                "result": i.result,
+                "item_title": i.item_title,
+            }
+            for i in items
+        ],
         "enterprise": {
             "id": str(record.enterprise.id),
             "name": record.enterprise.name,
@@ -747,9 +769,9 @@ async def update_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     # 更新字段
@@ -775,9 +797,9 @@ async def submit_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     record.status = "submitted"
@@ -829,9 +851,9 @@ async def create_or_update_record_item(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     # 查找是否已存在（优先按 id 查找，其次按 template_item_id 查找）
@@ -923,9 +945,9 @@ async def get_record_items(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1069,9 +1091,9 @@ async def get_record_item(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1239,9 +1261,9 @@ async def generate_ai_suggestion(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1323,9 +1345,9 @@ async def accept_ai_suggestion(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1357,9 +1379,9 @@ async def generate_ai_suggestion_stream(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1427,9 +1449,9 @@ async def generate_final_judgment_stream(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     items_result = await db.execute(
@@ -1526,9 +1548,9 @@ async def get_item_history_stats(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -1667,9 +1689,9 @@ async def get_report_data(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     report_data = report_service.generate_report_data(record)
@@ -1701,9 +1723,9 @@ async def download_report_pdf(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role != "admin" and str(record.inspector_id) != str(
-        current_user.id
-    ):
+    if current_user.role not in ("admin", "super_admin") and str(
+        record.inspector_id
+    ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     pdf_bytes = report_service.generate_pdf(record)

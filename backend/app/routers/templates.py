@@ -196,6 +196,7 @@ async def get_template(
     权限规则：
     - 管理员：可以查看所有模板
     - 专家：只能查看公共模板和自己创建的模板
+    - 额外：若专家被分配了使用该模板的检查任务，也允许查看（现场执行需要）
     """
     template = await db.get(InspectionTemplate, template_id)
     if not template or template.is_deleted:
@@ -203,7 +204,17 @@ async def get_template(
 
     # 权限检查
     if not can_access_template(current_user, template):
-        raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+        from app.models.task import InspectionTask
+
+        assigned = await db.execute(
+            select(InspectionTask.id).where(
+                InspectionTask.template_id == template.id,
+                InspectionTask.assigned_to == current_user.id,
+                InspectionTask.is_deleted == False,  # noqa: E712
+            ).limit(1)
+        )
+        if assigned.scalar_one_or_none() is None:
+            raise HTTPException(status_code=403, detail="您没有权限访问此模板")
 
     # 加载所有检查项目
     query = select(TemplateItem).where(

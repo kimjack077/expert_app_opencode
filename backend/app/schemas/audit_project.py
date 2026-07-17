@@ -79,8 +79,13 @@ class AuditTeamMemberBase(BaseModel):
 
 
 class AuditTeamMemberCreate(AuditTeamMemberBase):
-    """创建审核组成员"""
-    project_id: UUID = Field(..., description="所属审核项目 ID")
+    """创建审核组成员
+
+    project_id 可由路径参数提供，请求体可不传；若传了则以路径为准。
+    """
+    project_id: Optional[UUID] = Field(
+        None, description="所属审核项目 ID（可选，优先使用路径参数）"
+    )
 
 
 class AuditTeamMemberUpdate(BaseModel):
@@ -128,8 +133,13 @@ class AuditPlanItemBase(BaseModel):
 
 
 class AuditPlanItemCreate(AuditPlanItemBase):
-    """创建审核计划项"""
-    project_id: UUID = Field(..., description="所属审核项目 ID")
+    """创建审核计划项
+
+    project_id 可由路径参数提供，请求体可不传；若传了则以路径为准。
+    """
+    project_id: Optional[UUID] = Field(
+        None, description="所属审核项目 ID（可选，优先使用路径参数）"
+    )
 
 
 class AuditPlanItemUpdate(BaseModel):

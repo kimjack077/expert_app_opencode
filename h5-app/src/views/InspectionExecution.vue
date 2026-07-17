@@ -54,6 +54,10 @@
 
       <!-- 检查项列表 -->
       <div class="items-container">
+        <van-empty
+          v-if="flattenItems.length === 0"
+          description="暂无检查项。请确认任务已关联检查模板（Web 端计划项需选择模板）"
+        />
         <template v-for="item in flattenItems" :key="item.id">
           <!-- 分类节点 -->
           <div
@@ -371,8 +375,16 @@
 import { ref, computed, onMounted, watch, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showSuccessToast, showConfirmDialog } from 'vant'
-import { getRecord, submitRecord, updateRecord, createRecord, createOrUpdateRecordItem, getEnterpriseRiskProfile } from '../api/records'
-import { getTask } from '../api/tasks'
+import { getRecord, submitRecord, updateRecord, createOrUpdateRecordItem, getEnterpriseRiskProfile } from '../api/records'
+import {
+  getTask,
+  getTaskRecords,
+  getTemplateItems,
+  submitCheckRecord,
+  startTask,
+  completeTask,
+  updateTask,
+} from '../api/tasks'
 import RiskAlertPopup from '../components/RiskAlertPopup.vue'
 import AgentFab from '../components/agent/AgentFab.vue'
 import AgentChatPanel from '../components/agent/AgentChatPanel.vue'
@@ -387,6 +399,9 @@ const expandedItems = ref([])
 const itemResults = ref({})
 const quickInputs = ref({})
 const pendingItemSaves = new Set()
+/** record: 独立检查记录；task: 检查任务（与 Web 同一条任务数据链） */
+const executionMode = ref('record')
+const currentTaskId = ref(null)
 
 const aiJudgmentLoading = ref(false)
 const aiJudgmentThinking = ref(false)
@@ -598,11 +613,245 @@ const actualRecordId = ref(null)
 const currentRecordId = computed(() => actualRecordId.value || record.value?.id || route.params.id)
 
 const agentContext = computed(() => ({
-  recordId: currentRecordId.value,
+  recordId: executionMode.value === 'record' ? currentRecordId.value : '',
+  taskId: executionMode.value === 'task' ? currentTaskId.value : '',
   currentItemTitle: currentItemId.value ? flattenItems.value.find(i => i.id === currentItemId.value)?.title : '',
   currentItemId: currentItemId.value,
   enterpriseId: record.value?.enterprise_id
 }))
+
+const mergeTemplateResults = (items, resultByItemId) => {
+  return (items || []).map((item) => {
+    const id = String(item.id)
+    const existing = resultByItemId[id] || {}
+    return {
+      ...item,
+      id,
+      template_item_id: id,
+      radio_value: existing.radio_value || '',
+      text_value: existing.text_value || '',
+      numeric_value: existing.numeric_value ?? '',
+      score_value: existing.score_value ?? '',
+      problem_description: existing.problem_description || '',
+      multi_value: existing.multi_value || [],
+      children: item.children ? mergeTemplateResults(item.children, resultByItemId) : [],
+    }
+  })
+}
+
+/** 将任务结果映射到检查表单字段（与 Web 端 task_item_records 一致） */
+const mapTaskRecordToForm = (taskRecord) => {
+  const result = taskRecord?.result || ''
+  const resultValue = taskRecord?.result_value
+  return {
+    radio_value: result || '',
+    text_value: taskRecord?.result_text || '',
+    numeric_value: resultValue ?? '',
+    score_value: resultValue ?? '',
+    problem_description: taskRecord?.inspector_note || '',
+    multi_value: [],
+  }
+}
+
+/** 表单字段映射为任务检查项写入载荷 */
+const buildTaskItemPayload = (item, inputs = {}) => {
+  const checkType = item.check_type || item.result_type || 'pass_fail'
+  const payload = {
+    template_item_id: item.template_item_id || item.id,
+  }
+
+  if (checkType === 'pass_fail' || checkType === 'radio' || (!item.result_type && !item.check_type)) {
+    if (inputs.radio_value) payload.result = inputs.radio_value
+  } else if (checkType === 'text') {
+    if (inputs.text_value) payload.result_text = inputs.text_value
+  } else if (checkType === 'numeric' || checkType === 'score') {
+    const val = checkType === 'score' ? inputs.score_value : inputs.numeric_value
+    if (val !== '' && val != null) {
+      payload.result_value = String(val)
+      payload.result = inputs.radio_value || 'pass'
+    }
+  } else if (checkType === 'multi_check') {
+    if (Array.isArray(inputs.multi_value) && inputs.multi_value.length) {
+      payload.result_text = inputs.multi_value.join(',')
+    }
+  }
+
+  if (inputs.problem_description) {
+    payload.inspector_note = inputs.problem_description
+  }
+  return payload
+}
+
+const saveItemResult = async (item, field, value) => {
+  if (executionMode.value === 'task') {
+    if (!currentTaskId.value) throw new Error('任务 ID 无效')
+    const inputs = {
+      ...(quickInputs.value[item.id] || {}),
+      ...(itemResults.value[item.id] || {}),
+      [field]: value,
+    }
+    const payload = buildTaskItemPayload(item, inputs)
+    // 至少要有可保存字段
+    if (
+      payload.result == null &&
+      payload.result_value == null &&
+      payload.result_text == null &&
+      payload.inspector_note == null
+    ) {
+      return
+    }
+    await submitCheckRecord(currentTaskId.value, payload)
+    return
+  }
+
+  let sendValue = value
+  if ((field === 'score_value' || field === 'numeric_value') && sendValue !== '' && sendValue != null) {
+    sendValue = String(sendValue)
+  }
+  const data = {
+    template_item_id: item.template_item_id || item.id,
+    [field]: sendValue,
+  }
+  const checkType = item.check_type || item.result_type || 'pass_fail'
+  if (field === 'radio_value' && checkType === 'pass_fail') {
+    data.problem_description = quickInputs.value[item.id]?.problem_description || ''
+  }
+  await createOrUpdateRecordItem(currentRecordId.value, data)
+}
+
+/**
+ * 以任务模式加载执行页：与 Web /inspection/:taskId 使用同一任务数据链
+ * （InspectionTask + TaskItemRecord），不再错误地创建孤立 InspectionRecord。
+ */
+const loadTaskExecution = async (task) => {
+  executionMode.value = 'task'
+  currentTaskId.value = String(task.id)
+  actualRecordId.value = String(task.id)
+
+  if (task.status === 'pending') {
+    try {
+      await startTask(task.id)
+      task.status = 'in_progress'
+    } catch (e) {
+      console.warn('自动开始任务失败，继续加载检查项', e)
+    }
+  }
+
+  let templateId = task.template_id
+  let taskRecords = []
+  try {
+    const recordsRes = await getTaskRecords(task.id)
+    if (recordsRes.code === 200) {
+      taskRecords = Array.isArray(recordsRes.data) ? recordsRes.data : []
+    }
+  } catch (e) {
+    console.warn('获取任务检查项失败', e)
+  }
+
+  // 历史任务可能 template_id 为空：尝试从已有 task_item_records 反推
+  if (!templateId) {
+    const linked = taskRecords.find((r) => r.template_item_id || r.template_item?.template_id)
+    if (linked?.template_item?.template_id) {
+      templateId = linked.template_item.template_id
+    }
+  }
+
+  // 若后端按模板补齐了检查项，重新拉取一次以拿到最新 task_item_records
+  if (templateId && !taskRecords.some((r) => r.template_item_id)) {
+    try {
+      const recordsRes = await getTaskRecords(task.id)
+      if (recordsRes.code === 200) {
+        taskRecords = Array.isArray(recordsRes.data) ? recordsRes.data : []
+      }
+    } catch (e) {
+      console.warn('刷新任务检查项失败', e)
+    }
+  }
+
+  let template = {
+    id: templateId || null,
+    name: task.title || '检查任务',
+    version: '',
+    is_quantified: false,
+    items: [],
+  }
+
+  if (templateId) {
+    try {
+      const tplRes = await getTemplateItems(templateId)
+      if (tplRes.code === 200 && tplRes.data) {
+        template = {
+          id: tplRes.data.id,
+          name: tplRes.data.name || template.name,
+          version: tplRes.data.version || '',
+          is_quantified: !!tplRes.data.is_quantified,
+          items: tplRes.data.items || [],
+        }
+      }
+    } catch (e) {
+      console.error('获取任务模板失败', e)
+      showToast('获取检查模板失败，请确认模板仍可访问')
+    }
+  } else {
+    showToast('该任务未关联检查模板，暂无检查项可填写')
+  }
+
+  const resultByItemId = {}
+  for (const tr of taskRecords) {
+    if (!tr.template_item_id) continue
+    resultByItemId[String(tr.template_item_id)] = mapTaskRecordToForm(tr)
+  }
+
+  record.value = {
+    id: task.id,
+    enterprise_name: task.target_name,
+    enterprise_address: task.target_address,
+    contact_person: task.target_contact,
+    contact_phone: task.target_phone,
+    remarks: task.remarks,
+    status: task.status,
+    overall_result: null,
+    template: {
+      ...template,
+      items: mergeTemplateResults(template.items || [], resultByItemId),
+    },
+    items: taskRecords.map((tr) => ({
+      id: tr.id,
+      template_item_id: tr.template_item_id,
+      result: tr.result,
+      result_value: tr.result_value,
+      result_text: tr.result_text,
+      inspector_note: tr.inspector_note,
+    })),
+  }
+
+  loadExistingResults()
+  await initQuickInputs()
+  initExpandedItems()
+}
+
+const applyRecordData = async (data, recordId) => {
+  executionMode.value = 'record'
+  currentTaskId.value = null
+  actualRecordId.value = recordId
+  record.value = data
+  loadExistingResults()
+  await initQuickInputs()
+  if (data.overall_result) {
+    finalJudgment.result = data.overall_result
+  }
+  if (data.remarks) {
+    finalJudgment.remarks = data.remarks
+  }
+  initExpandedItems()
+
+  const shownRecordId = sessionStorage.getItem('riskAlertShownRecordId')
+  if (shownRecordId !== String(recordId) && data.enterprise_id) {
+    await fetchAndShowRiskProfile(data.enterprise_id, recordId)
+  } else if (data.enterprise_id) {
+    fetchRiskProfileSilent(data.enterprise_id)
+  }
+}
 
 // Agent 写回后，同步本地状态，让检查表单立即显示 Agent 填写的结果
 const onAgentResultApplied = ({ itemId, result, problemDescription }) => {
@@ -633,73 +882,56 @@ const onAgentVerdictApplied = ({ verdict, comment }) => {
 const fetchRecord = async () => {
   try {
     const id = route.params.id
-    let recordId = id
+    if (!id || id === 'undefined' || id === 'null') {
+      showToast('无效的检查 ID')
+      return
+    }
 
-    // First try to get as a record
+    const isTaskRoute = route.path.includes('/task/') && route.path.includes('/execute')
+
+    // 任务执行路由：直接走任务数据链（与 Web 一致）
+    if (isTaskRoute) {
+      const taskRes = await getTask(id)
+      if (taskRes.code === 200 && taskRes.data) {
+        await loadTaskExecution(taskRes.data)
+        return
+      }
+      showToast(taskRes.message || '获取任务失败')
+      return
+    }
+
+    // 记录路由：先按检查记录加载
     try {
       const res = await getRecord(id)
-      if (res.code === 200) {
-        actualRecordId.value = id
-        record.value = res.data
-        loadExistingResults()
-        await initQuickInputs()
-        if (res.data.overall_result) {
-          finalJudgment.result = res.data.overall_result
-        }
-        if (res.data.remarks) {
-          finalJudgment.remarks = res.data.remarks
-        }
-        initExpandedItems()
-
-        const shownRecordId = sessionStorage.getItem('riskAlertShownRecordId')
-        if (shownRecordId !== recordId && res.data.enterprise_id) {
-          await fetchAndShowRiskProfile(res.data.enterprise_id, recordId)
-        } else if (res.data.enterprise_id) {
-          fetchRiskProfileSilent(res.data.enterprise_id)
-        }
+      if (res.code === 200 && res.data) {
+        await applyRecordData(res.data, id)
         return
       }
     } catch (e) {
-      // Not a record, try as a task
-      console.log('Not a record, trying as task...')
+      // 可能是任务 ID 被传到 /inspection/:id（兼容 Web 跳转）
+      console.log('Not a record, trying as task...', e?.message || e)
     }
 
-    // If record not found, try to get as a task and create a record
+    // 兼容：/inspection/:taskId 按任务加载
     try {
       const taskRes = await getTask(id)
-      if (taskRes.code === 200) {
-        const task = taskRes.data
-        // Create a new record from the task
-        const createRes = await createRecord({
-          template_id: task.template_id,
-          enterprise_name: task.target_name,
-          enterprise_address: task.target_address,
-          contact_person: task.target_contact,
-          contact_phone: task.target_phone,
-          remarks: task.remarks
-        })
-        if (createRes.code === 200) {
-          recordId = createRes.data.id
-          actualRecordId.value = recordId
-          // Now fetch the newly created record
-          const res = await getRecord(recordId)
-          if (res.code === 200) {
-            record.value = res.data
-            loadExistingResults()
-            await initQuickInputs()
-            initExpandedItems()
-            return
-          }
-        }
+      if (taskRes.code === 200 && taskRes.data) {
+        await loadTaskExecution(taskRes.data)
+        return
       }
     } catch (e) {
-      console.error('Failed to create record from task:', e)
+      console.error('Failed to load task execution:', e)
     }
 
     showToast('获取记录失败')
   } catch (error) {
     console.error('获取记录失败:', error)
-    showToast('获取记录失败')
+    const msg =
+      error?.response?.data?.detail ||
+      error?.response?.data?.message ||
+      error?.message ||
+      '获取记录失败'
+    showToast(typeof msg === 'string' ? msg : '获取记录失败')
   } finally {
     loading.value = false
   }
@@ -1014,27 +1246,13 @@ const onQuickInput = async (item, field, value) => {
 
   const checkType = item.check_type || item.result_type || 'pass_fail'
   if (field === 'radio_value' && value === 'fail' && checkType === 'pass_fail') {
-    if (!quickInputs.value[item.id].problem_description) {
+    if (!quickInputs.value[item.id]?.problem_description) {
       showToast('请填写不合格问题描述')
     }
   }
 
   try {
-    // 后端 schema 要求 score_value / numeric_value 为字符串类型
-    let sendValue = value
-    if ((field === 'score_value' || field === 'numeric_value') && sendValue !== '' && sendValue != null) {
-      sendValue = String(sendValue)
-    }
-    const data = {
-      template_item_id: item.template_item_id || item.id,
-      [field]: sendValue
-    }
-
-    if (field === 'radio_value' && checkType === 'pass_fail') {
-      data.problem_description = quickInputs.value[item.id].problem_description || ''
-    }
-
-    const savePromise = createOrUpdateRecordItem(currentRecordId.value, data)
+    const savePromise = saveItemResult(item, field, value)
     pendingItemSaves.add(savePromise)
     try {
       await savePromise
@@ -1048,6 +1266,13 @@ const onQuickInput = async (item, field, value) => {
 }
 
 const goToItem = (item) => {
+  // 任务模式使用列表快速录入（与 Web 任务数据链一致），暂不进入记录明细页
+  if (executionMode.value === 'task') {
+    currentItemId.value = item.id
+    showToast('请在当前页快速填写检查结果')
+    return
+  }
+
   currentItemId.value = item.id
   const recordItem = record.value?.items?.find(i =>
     i.template_item_id === item.id || i.id === item.id
@@ -1103,12 +1328,25 @@ const completeInspection = async () => {
   submitting.value = true
   try {
     // 先保存所有检查项结果（确保默认值也被持久化到后端）
-    // 只发送与检查项 result_type 相关的字段，避免 422 验证错误
     const savePromises = []
     for (const item of flattenItems.value) {
       if (item.is_category === true) continue
       const inputs = quickInputs.value[item.id]
       if (!inputs) continue
+
+      if (executionMode.value === 'task') {
+        const payload = buildTaskItemPayload(item, inputs)
+        if (
+          payload.result != null ||
+          payload.result_value != null ||
+          payload.result_text != null ||
+          payload.inspector_note != null
+        ) {
+          savePromises.push(submitCheckRecord(currentTaskId.value, payload))
+        }
+        continue
+      }
+
       const data = {
         template_item_id: item.template_item_id || item.id,
       }
@@ -1166,6 +1404,25 @@ const completeInspection = async () => {
       await Promise.all(Array.from(pendingItemSaves))
     }
 
+    if (executionMode.value === 'task') {
+      // 任务模式：备注写入任务，并完成任务（与 Web 一致）
+      try {
+        await updateTaskStatusAndRemarks()
+      } catch (e) {
+        console.warn('更新任务备注失败，继续完成任务', e)
+      }
+      const res = await completeTask(currentTaskId.value)
+      if (res.code === 200) {
+        showSuccessToast('检查已完成')
+        setTimeout(() => {
+          router.push('/tasks')
+        }, 1500)
+      } else {
+        showToast(res.message || '提交失败')
+      }
+      return
+    }
+
     // 再保存最终判定
     await updateRecord(currentRecordId.value, {
       overall_result: finalJudgment.result,
@@ -1191,6 +1448,21 @@ const completeInspection = async () => {
   }
 }
 
+const updateTaskStatusAndRemarks = async () => {
+  const remarksParts = []
+  if (finalJudgment.result) {
+    remarksParts.push(`最终判定: ${finalJudgment.result}`)
+  }
+  if (finalJudgment.remarks) {
+    remarksParts.push(finalJudgment.remarks)
+  }
+  if (remarksParts.length) {
+    await updateTask(currentTaskId.value, {
+      remarks: remarksParts.join(' | '),
+    })
+  }
+}
+
 const goBack = () => {
   router.back()
 }
@@ -1213,11 +1485,16 @@ const generateFinalJudgment = async () => {
       }
     }
 
-    const recordId = currentRecordId.value
     const token = localStorage.getItem('token')
-    
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/final-judgment-stream`, {
+
+    // 任务模式走任务数据链；记录模式走 InspectionRecord
+    const streamUrl =
+      executionMode.value === 'task'
+        ? `${API_BASE_URL}/api/tasks/${currentTaskId.value}/final-judgment-stream`
+        : `${API_BASE_URL}/api/records/${currentRecordId.value}/final-judgment-stream`
+
+    const response = await fetch(streamUrl, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'text/event-stream',
@@ -1225,12 +1502,20 @@ const generateFinalJudgment = async () => {
     })
     
     if (!response.ok) {
-      throw new Error('请求失败')
+      let detail = `请求失败 (${response.status})`
+      try {
+        const errBody = await response.json()
+        detail = errBody.detail || errBody.message || detail
+      } catch (_) {
+        // ignore parse error
+      }
+      throw new Error(detail)
     }
     
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let receivedDone = false
     
     while (true) {
       const { done, value } = await reader.read()
@@ -1251,9 +1536,11 @@ const generateFinalJudgment = async () => {
               aiJudgmentResult.value = data.content
               aiJudgmentResultType.value = data.result || ''
               aiJudgmentThinking.value = false
+              receivedDone = true
             } else if (data.type === 'error') {
               showToast('AI 生成失败: ' + data.content)
               aiJudgmentThinking.value = false
+              receivedDone = true
             }
           } catch (e) {
             console.error('解析数据失败:', e)
@@ -1261,9 +1548,13 @@ const generateFinalJudgment = async () => {
         }
       }
     }
+
+    if (!receivedDone && !aiJudgmentResult.value) {
+      throw new Error('AI 未返回结果，请稍后重试')
+    }
   } catch (error) {
     console.error('AI 生成失败:', error)
-    showToast('AI 生成失败，请稍后重试')
+    showToast(error?.message || 'AI 生成失败，请稍后重试')
     aiJudgmentThinking.value = false
   } finally {
     aiJudgmentLoading.value = false

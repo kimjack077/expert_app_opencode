@@ -1,7 +1,10 @@
+import json
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -9,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User
 from app.models.task import InspectionTask, TaskItemRecord
-from app.models.template import TemplateItem
+from app.models.template import InspectionTemplate, TemplateItem
 from app.schemas import (
     ApiResponse,
     InspectionTaskCreate,
@@ -22,6 +25,7 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.services import AuditService
+from app.services.llm_service import llm_service
 
 # Alias for backward compatibility
 InspectionRecord = TaskItemRecord
@@ -134,6 +138,27 @@ async def get_task(
 
     if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized to view this task")
+
+    # 兼容历史数据：任务未写 template_id 时，尝试从关联审核计划项回填
+    if not task.template_id:
+        try:
+            from app.models.audit_project import AuditPlanItem
+
+            task_uuid = UUID(str(task_id))
+            plan_result = await db.execute(
+                select(AuditPlanItem).where(
+                    AuditPlanItem.inspection_task_id == task_uuid,
+                    AuditPlanItem.is_deleted == False,  # noqa: E712
+                )
+            )
+            plan_item = plan_result.scalar_one_or_none()
+            if plan_item and plan_item.template_id:
+                task.template_id = plan_item.template_id
+                await db.commit()
+                await db.refresh(task)
+        except Exception:
+            # 回填失败不影响任务详情返回
+            pass
 
     return make_response(data=InspectionTaskResponse.model_validate(task).model_dump())
 
@@ -361,9 +386,57 @@ async def get_task_records(
     )
     records = result.scalars().all()
 
-    return make_response(
-        data=[InspectionRecordResponse.model_validate(r).model_dump() for r in records]
-    )
+    # 任务已关联模板但没有可用检查项时，按模板自动补齐（兼容历史脏数据）
+    has_linked_items = any(r.template_item_id for r in records)
+    if task.template_id and not has_linked_items:
+        items_result = await db.execute(
+            select(TemplateItem)
+            .where(
+                TemplateItem.template_id == task.template_id,
+                TemplateItem.is_deleted == False,  # noqa: E712
+                TemplateItem.is_category != True,  # noqa: E712
+            )
+            .order_by(TemplateItem.sort_order)
+        )
+        template_items = items_result.scalars().all()
+        if template_items:
+            # 清理无模板项关联的空记录，避免干扰
+            for empty_rec in records:
+                if not empty_rec.template_item_id and not empty_rec.result:
+                    await db.delete(empty_rec)
+            for item in template_items:
+                db.add(
+                    InspectionRecord(
+                        task_id=task.id,
+                        template_item_id=item.id,
+                    )
+                )
+            await db.commit()
+            result = await db.execute(
+                select(InspectionRecord)
+                .options(selectinload(InspectionRecord.template_item))
+                .where(InspectionRecord.task_id == task_id)
+                .order_by(InspectionRecord.recorded_at)
+            )
+            records = result.scalars().all()
+
+    payload = []
+    for r in records:
+        item = InspectionRecordResponse.model_validate(r).model_dump()
+        if r.template_item is not None:
+            item["template_item"] = {
+                "id": str(r.template_item.id),
+                "title": r.template_item.title,
+                "template_id": str(r.template_item.template_id)
+                if r.template_item.template_id
+                else None,
+                "is_category": bool(r.template_item.is_category),
+                "result_type": r.template_item.result_type,
+                "check_type": r.template_item.check_type,
+            }
+        payload.append(item)
+
+    return make_response(data=payload)
 
 
 @router.post("/{task_id}/records", response_model=ApiResponse)
@@ -486,3 +559,144 @@ async def get_task_summary(
     )
 
     return make_response(data=summary.model_dump())
+
+
+@router.get("/{task_id}/final-judgment-stream")
+async def generate_task_final_judgment_stream(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """流式生成任务最终判定结论（与 H5/Web 任务检查共用 TaskItemRecord 数据链）"""
+    task = await db.get(InspectionTask, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    result = await db.execute(
+        select(TaskItemRecord)
+        .options(selectinload(TaskItemRecord.template_item))
+        .where(TaskItemRecord.task_id == task_id)
+        .order_by(TaskItemRecord.recorded_at)
+    )
+    task_items = result.scalars().all()
+
+    items_data = []
+    for item in task_items:
+        template_item = item.template_item
+        # 分类节点不参与最终判定统计
+        if template_item is not None and getattr(template_item, "is_category", False):
+            continue
+        title = (
+            template_item.title
+            if template_item and template_item.title
+            else "未知检查项"
+        )
+        items_data.append(
+            {
+                "title": title,
+                "result": item.result,
+                # 任务链字段映射到最终判定摘要使用的统一字段
+                "radio_value": item.result,
+                "score_value": item.result_value,
+                "numeric_value": item.result_value,
+                "text_value": item.result_text,
+                "multi_value": [],
+                "risk_level": template_item.risk_level if template_item else None,
+                "problem_description": item.inspector_note,
+                "pass_score": getattr(template_item, "pass_score", None)
+                if template_item
+                else None,
+                "max_score": getattr(template_item, "max_score", None)
+                if template_item
+                else None,
+                "min_value": template_item.min_value if template_item else None,
+                "max_value": template_item.max_value if template_item else None,
+                "unit": template_item.unit if template_item else None,
+            }
+        )
+
+    template_name = task.title
+    if task.template_id:
+        template = await db.get(InspectionTemplate, task.template_id)
+        if template and not template.is_deleted:
+            template_name = template.name
+
+    inspection_date = None
+    if task.started_at:
+        inspection_date = task.started_at.isoformat()
+    elif task.scheduled_at:
+        inspection_date = task.scheduled_at.isoformat()
+    elif task.created_at:
+        inspection_date = task.created_at.isoformat()
+
+    async def generate():
+        async for chunk in llm_service.get_final_judgment_stream(
+            template_name=template_name,
+            inspection_date=inspection_date,
+            items=items_data,
+        ):
+            data = json.dumps(chunk, ensure_ascii=False)
+            yield f"data: {data}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{task_id}/records/{record_id}/ai-stream")
+async def generate_task_item_ai_stream(
+    task_id: str,
+    record_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """流式生成任务检查项 AI 建议（record_id 可为 TaskItemRecord.id 或 template_item_id）"""
+    task = await db.get(InspectionTask, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    result = await db.execute(
+        select(TaskItemRecord)
+        .options(selectinload(TaskItemRecord.template_item))
+        .where(
+            TaskItemRecord.task_id == task_id,
+            (TaskItemRecord.id == record_id)
+            | (TaskItemRecord.template_item_id == record_id),
+        )
+    )
+    record_item = result.scalar_one_or_none()
+    if not record_item:
+        raise HTTPException(status_code=404, detail="Task item not found")
+
+    template_item = record_item.template_item
+    if not template_item:
+        raise HTTPException(status_code=400, detail="Template item not found")
+
+    async def generate():
+        async for chunk in llm_service.get_suggestion_stream(
+            template_item, record_item
+        ):
+            data = json.dumps(chunk, ensure_ascii=False)
+            yield f"data: {data}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

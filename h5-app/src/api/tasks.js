@@ -20,17 +20,25 @@ export const deleteTask = (id) => {
   return request.delete(`/tasks/${id}`)
 }
 
+export const startTask = (id) => {
+  return request.post(`/tasks/${id}/start`)
+}
+
+export const completeTask = (id) => {
+  return request.post(`/tasks/${id}/complete`)
+}
+
 // 获取模板的检查项目
 export const getTemplateItems = (templateId) => {
   return request.get(`/templates/${templateId}`)
 }
 
-// 提交检查记录
+// 提交/更新任务检查项结果（与 Web 端同一条任务数据链）
 export const submitCheckRecord = (taskId, data) => {
   return request.post(`/tasks/${taskId}/records`, data)
 }
 
-// 获取检查记录
+// 获取任务检查项记录
 export const getTaskRecords = (taskId) => {
   return request.get(`/tasks/${taskId}/records`)
 }
