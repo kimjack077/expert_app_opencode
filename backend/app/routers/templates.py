@@ -199,28 +199,45 @@ async def get_template(
     - 额外：若专家被分配了使用该模板的检查任务，也允许查看（现场执行需要）
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template or template.is_deleted:
+    if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # 权限检查
-    if not can_access_template(current_user, template):
-        from app.models.task import InspectionTask
+    # 已软删除的模板：若管理员或存在关联任务，仍允许只读加载（历史任务执行）
+    from app.models.task import InspectionTask
 
-        assigned = await db.execute(
-            select(InspectionTask.id).where(
+    if current_user.role == "expert":
+        related = await db.execute(
+            select(InspectionTask.id)
+            .where(
                 InspectionTask.template_id == template.id,
                 InspectionTask.assigned_to == current_user.id,
                 InspectionTask.is_deleted == False,  # noqa: E712
-            ).limit(1)
+            )
+            .limit(1)
         )
-        if assigned.scalar_one_or_none() is None:
-            raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+    else:
+        related = await db.execute(
+            select(InspectionTask.id)
+            .where(
+                InspectionTask.template_id == template.id,
+                InspectionTask.is_deleted == False,  # noqa: E712
+            )
+            .limit(1)
+        )
+    has_related_task = related.scalar_one_or_none() is not None
 
-    # 加载所有检查项目
-    query = select(TemplateItem).where(
-        TemplateItem.template_id == template_id,
-        TemplateItem.is_deleted == False,  # noqa: E712
-    ).order_by(TemplateItem.sort_order)
+    if template.is_deleted and not (is_admin(current_user) or has_related_task):
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    # 权限检查（未删除模板仍走常规权限；历史任务关联可只读）
+    if not can_access_template(current_user, template) and not has_related_task:
+        raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+
+    # 加载所有检查项目（历史模板即使软删项也尽量返回，便于旧任务回放）
+    item_filters = [TemplateItem.template_id == template_id]
+    if not template.is_deleted:
+        item_filters.append(TemplateItem.is_deleted == False)  # noqa: E712
+    query = select(TemplateItem).where(*item_filters).order_by(TemplateItem.sort_order)
     result = await db.execute(query)
     items = result.scalars().all()
 
