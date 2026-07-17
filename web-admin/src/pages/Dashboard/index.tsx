@@ -15,6 +15,7 @@ import {
 } from '@ant-design/icons'
 import { analyticsApi, taskApi } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
+import { formatTaskDisplay } from '@/utils/display'
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
@@ -122,25 +123,59 @@ export default function Dashboard() {
     return <Tag color={item.color}>{item.text}</Tag>
   }
 
+  const pendingTodos = (recentTasks || []).filter((t) => t.status === 'pending' || t.status === 'in_progress')
+  const todoCards = [
+    {
+      title: '待开始 / 进行中任务',
+      value: pendingTodos.length,
+      action: () => navigate('/tasks?status=in_progress'),
+      color: '#0369a1',
+      hint: '点击进入日常检查任务',
+    },
+    {
+      title: '高风险企业',
+      value: enterpriseRisk?.high || enterpriseRisk?.high_risk || 0,
+      action: () => navigate('/enterprises'),
+      color: '#dc2626',
+      hint: '优先安排现场复核',
+    },
+    {
+      title: '中风险企业',
+      value: enterpriseRisk?.medium || enterpriseRisk?.medium_risk || 0,
+      action: () => navigate('/enterprises'),
+      color: '#d97706',
+      hint: '关注整改闭环',
+    },
+    {
+      title: '审核项目',
+      value: '进入',
+      action: () => navigate('/audit-projects'),
+      color: '#0f766e',
+      hint: '计划 · 现场 · 交付',
+    },
+  ]
+
   const columns = [
-    { 
-      title: '任务编号', 
-      dataIndex: 'task_no', 
-      key: 'task_no',
-      width: 140,
+    {
+      title: '任务',
+      key: 'display',
+      render: (_: any, record: any) => {
+        const d = formatTaskDisplay(record)
+        return (
+          <div>
+            <div style={{ fontWeight: 600 }}>{d.primary}</div>
+            <div style={{ fontSize: 12, color: '#64748b' }}>{d.secondary || record.task_no}</div>
+          </div>
+        )
+      },
     },
-    { 
-      title: '任务标题', 
-      dataIndex: 'title', 
-      key: 'title',
-      ellipsis: true,
-    },
-    { 
-      title: '被检查对象', 
-      dataIndex: 'target_name', 
+    {
+      title: '企业/对象',
+      dataIndex: 'target_name',
       key: 'target_name',
       width: 150,
       ellipsis: true,
+      render: (v: string) => v || '-',
     },
     {
       title: '状态',
@@ -155,6 +190,20 @@ export default function Dashboard() {
       key: 'created_at',
       width: 160,
       render: (date: string) => new Date(date).toLocaleString('zh-CN'),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 120,
+      render: (_: any, record: any) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => navigate(record.status === 'completed' ? `/tasks/${record.id}` : `/inspection/${record.id}`)}
+        >
+          {record.status === 'completed' ? '查看' : record.status === 'pending' ? '开始' : '继续'}
+        </Button>
+      ),
     },
   ]
 
@@ -199,7 +248,12 @@ export default function Dashboard() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">仪表盘</h1>
+        <div>
+          <h1 className="page-title">工作台</h1>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            优先处理待办事项；合规率口径 = 已填报合格项 / 已填报项
+          </div>
+        </div>
         <Space>
           <RangePicker
             value={dateRange}
@@ -223,6 +277,23 @@ export default function Dashboard() {
           </Button>
         </Space>
       </div>
+
+      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        {todoCards.map((card) => (
+          <Col xs={24} sm={12} lg={6} key={card.title}>
+            <Card
+              hoverable
+              bordered={false}
+              onClick={card.action}
+              style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}` }}
+            >
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 6 }}>{card.title}</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: card.color }}>{card.value}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{card.hint}</div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
 
       {stats && (
         <>

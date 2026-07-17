@@ -71,12 +71,12 @@ async page => {
   });
 
   const webRoutes = [
-    ['web.dashboard', '/dashboard', /工作台|仪表|概览|Dashboard|统计|今日/i],
+    ['web.dashboard', '/dashboard', /工作台|待办|仪表|统计|任务|企业/i],
     ['web.templates', '/templates', /模板|检查模板|ISO|体系/i],
-    ['web.tasks', '/tasks', /任务|检查任务|状态|待处理|进行中/i],
+    ['web.tasks', '/tasks', /日常检查|任务|开始检查|继续检查|进行中|待开始/i],
     ['web.records', '/records', /记录|检查记录|结果|提交/i],
     ['web.enterprises', '/enterprises', /企业|信用|联系人|地址/i],
-    ['web.users', '/users', /用户|角色|管理员|专家/i],
+    ['web.users', '/users', /用户|角色|管理员|审核员/i],
     ['web.industries', '/industries', /行业|分类|代码/i],
     ['web.knowledge', '/knowledge', /知识|文档|分类|法规/i],
     ['web.analytics', '/analytics', /分析|统计|日志|调用/i],
@@ -177,16 +177,16 @@ async page => {
   });
 
   const h5Routes = [
-    ['h5.home', '/home', /首页|任务|记录|检查|今日|欢迎|工作/i],
-    ['h5.tasks', '/tasks', /任务|待处理|进行中|检查|暂无/i],
+    ['h5.home', '/home', /欢迎|今日审核|日常检查|任务|记录|进行中/i],
+    ['h5.tasks', '/tasks', /任务|待处理|进行中|检查|暂无|今日/i],
     ['h5.records', '/records', /记录|检查|结果|暂无|合格/i],
-    ['h5.today_audit', '/today-audit', /今日|审核|任务|计划|AI|暂无/i],
+    ['h5.today_audit', '/today-audit', /今日|审核|任务|优先|AI|暂无|分配/i],
     ['h5.audit_tasks', '/audit-tasks', /审核|任务|计划|开始|继续|暂无/i],
     ['h5.select_enterprise', '/select-enterprise', /企业|选择|搜索|检查/i],
-    ['h5.profile', '/profile', /我的|设置|退出|个人信息|专家|用户/i],
+    ['h5.profile', '/profile', /我的|设置|退出|个人信息|审核员|用户|管理员/i],
     ['h5.statistics', '/statistics', /统计|次数|合格|分析|图表|暂无/i],
     ['h5.settings', '/settings', /设置|关于|版本|通知|缓存/i],
-    ['h5.about', '/about', /关于|EFIS|辅助|版本|检查/i],
+    ['h5.about', '/about', /关于|EFIS|审核|版本|检查/i],
   ];
 
   for (const [name, path, re] of h5Routes) {
@@ -228,15 +228,22 @@ async page => {
       if (await ok.count()) await ok.click().catch(() => {});
       await sleep(1200);
     }
-    const execBtn = page.locator('button:has-text("执行检查"), .van-button:has-text("执行")').first();
+    const execBtn = page.locator(
+      'button:has-text("执行检查"), button:has-text("表格式检查"), button:has-text("AI 现场审核"), .van-button:has-text("执行"), .van-button:has-text("检查")'
+    ).first();
     if (await execBtn.count()) {
+      const label = (await execBtn.innerText().catch(() => '')) || ''
       await execBtn.click();
       await sleep(2500);
       const body = await page.locator('body').innerText();
       if (/获取记录失败/i.test(body)) throw new Error('获取记录失败 still present');
-      const ok = /检查|进度|合格|模板|最终判定|现场/i.test(body);
+      // AI 路径 or 表格式路径均可
+      const ok = /检查|进度|合格|模板|最终判定|现场|证据|草稿|审核/i.test(body);
       if (!ok) throw new Error('execute page unexpected: ' + body.slice(0, 160));
-      return 'execute ok url=' + page.url();
+      return 'execute ok via ' + label.slice(0, 40) + ' url=' + page.url();
+    }
+    if (/AI 现场审核|表格式检查|开始任务/.test(body1)) {
+      return 'detail shows dual-path actions: ' + body1.slice(0, 120);
     }
     return 'detail opened, no execute button body=' + body1.slice(0, 100);
   });

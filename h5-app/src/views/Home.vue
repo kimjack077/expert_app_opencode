@@ -35,16 +35,31 @@
     </div>
 
     <div class="content-section">
-      <div class="quick-action-card" @click="startNewInspection">
+      <!-- 主路径：正式认证审核 -->
+      <div class="quick-action-card primary-cta" @click="goToTodayAudit">
         <div class="action-icon-wrapper">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <van-icon name="todo-list-o" size="26" color="#fff" />
+        </div>
+        <div class="action-content">
+          <h3 class="action-title">继续今日审核</h3>
+          <p class="action-desc">正式认证现场：证据采集 · AI 多条款 · 确认提交</p>
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-arrow">
+          <path d="m9 18 6-6-6-6"/>
+        </svg>
+      </div>
+
+      <!-- 次要：日常检查 -->
+      <div class="quick-action-card secondary-cta" @click="startNewInspection">
+        <div class="action-icon-wrapper muted">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <path d="M12 5v14"/>
             <path d="M5 12h14"/>
           </svg>
         </div>
         <div class="action-content">
-          <h3 class="action-title">发起检查</h3>
-          <p class="action-desc">选择企业并开始新的检查任务</p>
+          <h3 class="action-title">日常检查（可选）</h3>
+          <p class="action-desc">非认证项目时：选企业 + 模板填表检查</p>
         </div>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="action-arrow">
           <path d="m9 18 6-6-6-6"/>
@@ -157,55 +172,18 @@
       </div>
     </div>
 
-    <van-tabbar v-model="activeTab" route class="custom-tabbar">
-      <van-tabbar-item to="/home">
-        <span>首页</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/select-enterprise">
-        <span>检查</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/>
-            <path d="m21 21-4.35-4.35"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/records">
-        <span>记录</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/profile">
-        <span>我的</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-    </van-tabbar>
+    <BottomNav />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getRecords, getTemplates } from '../api/records'
+import { getRecords } from '../api/records'
 import { getTasks } from '../api/tasks'
+import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
-const activeTab = ref(0)
 const userName = ref(localStorage.getItem('userName') || '')
 
 const tasksLoading = ref(false)
@@ -258,6 +236,10 @@ const fetchAllData = async () => {
   } catch (error) {
     console.error('加载数据失败:', error)
   }
+}
+
+const goToTodayAudit = () => {
+  router.push('/today-audit')
 }
 
 const startNewInspection = () => {
@@ -517,8 +499,22 @@ onMounted(() => {
   box-shadow: var(--shadow-primary);
 }
 
+.action-icon-wrapper.muted {
+  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+  box-shadow: none;
+}
+
 .action-icon-wrapper svg {
   color: var(--bg-white);
+}
+
+.quick-action-card.secondary-cta {
+  opacity: 0.95;
+  margin-bottom: 12px;
+}
+
+.quick-action-card.primary-cta {
+  border-color: rgba(3, 105, 161, 0.25);
 }
 
 .action-content {

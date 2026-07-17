@@ -43,7 +43,7 @@ export default function AuditProjectDetail() {
   const [aiModalVisible, setAiModalVisible] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState('team')
+  const [activeTab, setActiveTab] = useState('plan')
 
   useEffect(() => {
     if (id) {
@@ -304,46 +304,80 @@ export default function AuditProjectDetail() {
             </Descriptions.Item>
           </Descriptions>
 
-          {progress && (
-            <Card title="项目进度" style={{ marginTop: 16 }}>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <div>
-                  <div style={{ marginBottom: 8 }}>
-                    审核计划完成度：{progress.plan_items?.completion_rate || 0}%
+          {/* 项目工作台：下一步行动 */}
+          <Card
+            title="项目工作台"
+            style={{ marginTop: 16 }}
+            extra={
+              <span style={{ fontSize: 12, color: '#64748b' }}>
+                建议顺序：组员 → 计划 → 现场记录 → 不符合项 → 交付
+              </span>
+            }
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              {progress && (
+                <>
+                  <div>
+                    <div style={{ marginBottom: 8 }}>
+                      审核计划完成度：{progress.plan_items?.completion_rate || 0}%
+                    </div>
+                    <Progress percent={progress.plan_items?.completion_rate || 0} />
                   </div>
-                  <Progress percent={progress.plan_items?.completion_rate || 0} />
-                </div>
-                <Descriptions column={4} size="small">
-                  <Descriptions.Item label="总计划项">
-                    {progress.plan_items?.total || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="待开始">
-                    {progress.plan_items?.pending || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="进行中">
-                    {progress.plan_items?.in_progress || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="已完成">
-                    {progress.plan_items?.completed || 0}
-                  </Descriptions.Item>
-                </Descriptions>
-                <Descriptions column={4} size="small">
-                  <Descriptions.Item label="不符合项总数">
-                    {progress.nonconformities?.total || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="严重不符合">
-                    {progress.nonconformities?.major || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="一般不符合">
-                    {progress.nonconformities?.minor || 0}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="观察项">
-                    {progress.nonconformities?.observations || 0}
-                  </Descriptions.Item>
-                </Descriptions>
+                  <Descriptions column={4} size="small">
+                    <Descriptions.Item label="总计划项">
+                      {progress.plan_items?.total || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="待开始">
+                      {progress.plan_items?.pending || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="进行中">
+                      {progress.plan_items?.in_progress || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="已完成">
+                      {progress.plan_items?.completed || 0}
+                    </Descriptions.Item>
+                  </Descriptions>
+                  <Descriptions column={4} size="small">
+                    <Descriptions.Item label="不符合项总数">
+                      {progress.nonconformities?.total || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="严重不符合">
+                      {progress.nonconformities?.major || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="一般不符合">
+                      {progress.nonconformities?.minor || 0}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="观察项">
+                      {progress.nonconformities?.observations || 0}
+                    </Descriptions.Item>
+                  </Descriptions>
+                </>
+              )}
+              <Space wrap>
+                <Button type="primary" onClick={() => setActiveTab('plan')}>
+                  安排 / 查看计划
+                </Button>
+                <Button onClick={() => setActiveTab('documents')}>上传项目资料</Button>
+                <Button onClick={() => setActiveTab('records')}>查看现场记录</Button>
+                <Button onClick={() => setActiveTab('nonconformities')}>
+                  处理不符合项
+                  {(progress?.nonconformities?.total || 0) > 0
+                    ? ` (${progress.nonconformities.total})`
+                    : ''}
+                </Button>
+                <Button type="primary" ghost onClick={() => setActiveTab('artifacts')}>
+                  质量门禁 / 生成资料包
+                </Button>
               </Space>
-            </Card>
-          )}
+              {!progress?.plan_items?.total && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="下一步：请先在「审核计划」中添加区域计划项并指定检查模板与审核员"
+                />
+              )}
+            </Space>
+          </Card>
         </Card>
 
         <Card>
@@ -352,18 +386,18 @@ export default function AuditProjectDetail() {
             onChange={setActiveTab}
             items={[
               {
-                key: 'team',
-                label: '审核组',
-                children: <TeamManagement projectId={id!} />,
-              },
-              {
                 key: 'plan',
                 label: '审核计划',
                 children: <PlanManagement projectId={id!} />,
               },
               {
+                key: 'team',
+                label: '审核组',
+                children: <TeamManagement projectId={id!} />,
+              },
+              {
                 key: 'records',
-                label: '审核记录',
+                label: '现场记录',
                 children: <RecordsList projectId={id!} />,
               },
               {

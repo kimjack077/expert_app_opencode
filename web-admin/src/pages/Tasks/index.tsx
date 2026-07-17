@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm } from 'antd'
-import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined } from '@ant-design/icons'
+import { useState, useEffect, useMemo } from 'react'
+import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm, Typography } from 'antd'
+import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
+import { formatTaskDisplay } from '@/utils/display'
 import dayjs from 'dayjs'
 
 const { TextArea } = Input
@@ -16,12 +17,28 @@ export default function Tasks() {
   const [modalVisible, setModalVisible] = useState(false)
   const [form] = Form.useForm()
   const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
 
   useEffect(() => {
     fetchTasks()
     fetchTemplates()
     fetchUsers()
   }, [statusFilter])
+
+  const filteredTasks = useMemo(() => {
+    const q = keyword.trim().toLowerCase()
+    if (!q) return tasks
+    return tasks.filter((t) => {
+      const display = formatTaskDisplay(t)
+      return (
+        String(t.title || '').toLowerCase().includes(q) ||
+        String(t.target_name || '').toLowerCase().includes(q) ||
+        String(t.task_no || '').toLowerCase().includes(q) ||
+        String(display.primary || '').toLowerCase().includes(q) ||
+        String(display.secondary || '').toLowerCase().includes(q)
+      )
+    })
+  }, [tasks, keyword])
 
   const fetchUsers = async () => {
     try {
@@ -104,39 +121,56 @@ export default function Tasks() {
   }
 
   const columns = [
-    { title: '任务编号', dataIndex: 'task_no', key: 'task_no', width: 180 },
-    { title: '任务标题', dataIndex: 'title', key: 'title' },
-    { title: '被检查对象', dataIndex: 'target_name', key: 'target_name' },
-    { title: '检查地址', dataIndex: 'target_address', key: 'target_address', ellipsis: true },
+    {
+      title: '任务',
+      key: 'display',
+      render: (_: any, record: any) => {
+        const d = formatTaskDisplay(record)
+        return (
+          <div>
+            <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{d.primary}</div>
+            {d.secondary && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {d.secondary}
+              </Typography.Text>
+            )}
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{record.task_no}</div>
+          </div>
+        )
+      },
+    },
+    {
+      title: '企业/对象',
+      dataIndex: 'target_name',
+      key: 'target_name',
+      width: 160,
+      ellipsis: true,
+      render: (v: string) => v || '-',
+    },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 100,
       render: (status: string) => getStatusTag(status),
     },
     {
       title: '计划时间',
       dataIndex: 'scheduled_at',
       key: 'scheduled_at',
+      width: 150,
       render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'),
     },
     {
       title: '操作',
       key: 'action',
-      width: 200,
+      width: 280,
+      fixed: 'right' as const,
       render: (_: any, record: any) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => navigate(`/tasks/${record.id}`)}
-          >
-            详情
-          </Button>
+        <Space wrap>
           {record.status === 'pending' && (
             <Button
-              type="link"
+              type="primary"
               size="small"
               icon={<PlayCircleOutlined />}
               onClick={() => navigate(`/inspection/${record.id}`)}
@@ -146,13 +180,31 @@ export default function Tasks() {
           )}
           {record.status === 'in_progress' && (
             <Button
-              type="link"
+              type="primary"
               size="small"
+              icon={<PlayCircleOutlined />}
               onClick={() => navigate(`/inspection/${record.id}`)}
             >
               继续检查
             </Button>
           )}
+          {record.status === 'completed' && (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/inspection/${record.id}`)}
+            >
+              查看检查
+            </Button>
+          )}
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => navigate(`/tasks/${record.id}`)}
+          >
+            详情
+          </Button>
           <Popconfirm
             title="确认删除"
             description="确定要删除这个任务吗？"
@@ -171,11 +223,24 @@ export default function Tasks() {
 
   return (
     <div>
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 className="page-title">检查任务管理</h1>
-        <Space>
+      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title">日常检查任务</h1>
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            用于模板化日常检查。正式认证审核请使用「审核项目 / 我的审核任务」。
+          </Typography.Text>
+        </div>
+        <Space wrap>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索企业、区域、任务号"
+            style={{ width: 220 }}
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+          />
           <Select
-            placeholder="状态筛选"
+            placeholder="状态"
             allowClear
             style={{ width: 120 }}
             onChange={(value) => setStatusFilter(value)}
@@ -193,11 +258,11 @@ export default function Tasks() {
 
       <Card>
         <Table
-          dataSource={tasks}
+          dataSource={filteredTasks}
           columns={columns}
           rowKey="id"
           loading={loading}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 900 }}
         />
       </Card>
 

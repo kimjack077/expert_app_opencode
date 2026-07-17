@@ -22,6 +22,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import AgentSidebar from '@/components/agent/AgentSidebar'
+import { roleLabel } from '@/utils/display'
 
 const { Header, Sider, Content } = Layout
 
@@ -42,25 +43,48 @@ export default function MainLayout() {
 
   // 根据角色过滤菜单
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
+  const isFieldUser = user?.role === 'expert' || user?.role === 'auditor'
 
-  const allMenuItems = [
-    { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘', adminOnly: false },
-    { key: '/my-audit-tasks', icon: <ScheduleOutlined />, label: '我的任务', adminOnly: false },
-    { key: '/enterprises', icon: <BankOutlined />, label: '企业管理', adminOnly: false },
-    { key: '/audit-projects', icon: <AuditOutlined />, label: '审核项目', adminOnly: false },
-    { key: '/audit-statistics', icon: <PieChartOutlined />, label: '审核统计', adminOnly: false },
-    { key: '/templates', icon: <FileTextOutlined />, label: '检查模板', adminOnly: false },
-    { key: '/records', icon: <FileDoneOutlined />, label: '检查记录', adminOnly: false },
-    { key: '/tasks', icon: <UnorderedListOutlined />, label: '检查任务', adminOnly: false },
-    { key: '/knowledge', icon: <BookOutlined />, label: '知识库', adminOnly: false },
-    { key: '/analytics', icon: <BarChartOutlined />, label: '数据分析', adminOnly: false },
-    { key: '/users', icon: <TeamOutlined />, label: '用户管理', adminOnly: true },
-    { key: '/industries', icon: <AppstoreOutlined />, label: '行业分类', adminOnly: true },
+  // 分组菜单：现场工作 / 项目管理 / 基础配置
+  const menuItems = [
+    {
+      type: 'group' as const,
+      label: collapsed ? '' : '现场工作',
+      children: [
+        { key: '/dashboard', icon: <DashboardOutlined />, label: '工作台' },
+        { key: '/my-audit-tasks', icon: <ScheduleOutlined />, label: '我的审核任务' },
+        // 日常检查任务：管理员常用；审核员也可见但降为次要
+        ...(!isFieldUser || isAdmin
+          ? [{ key: '/tasks', icon: <UnorderedListOutlined />, label: '日常检查任务' }]
+          : [{ key: '/tasks', icon: <UnorderedListOutlined />, label: '日常检查任务' }]),
+        { key: '/records', icon: <FileDoneOutlined />, label: '检查记录' },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: collapsed ? '' : '项目管理',
+      children: [
+        { key: '/audit-projects', icon: <AuditOutlined />, label: '审核项目' },
+        { key: '/enterprises', icon: <BankOutlined />, label: '企业管理' },
+        { key: '/audit-statistics', icon: <PieChartOutlined />, label: '审核统计' },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: collapsed ? '' : '基础配置',
+      children: [
+        { key: '/templates', icon: <FileTextOutlined />, label: '检查模板' },
+        { key: '/knowledge', icon: <BookOutlined />, label: '知识库' },
+        { key: '/analytics', icon: <BarChartOutlined />, label: '数据分析' },
+        ...(isAdmin
+          ? [
+              { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
+              { key: '/industries', icon: <AppstoreOutlined />, label: '行业分类' },
+            ]
+          : []),
+      ],
+    },
   ]
-
-  const menuItems = allMenuItems
-    .filter(item => !item.adminOnly || isAdmin)
-    .map(({ adminOnly, ...rest }) => rest)
 
   const handleLogout = () => {
     logout()
@@ -116,15 +140,23 @@ export default function MainLayout() {
               <SafetyCertificateOutlined style={{ fontSize: 20, color: 'white' }} />
             </div>
             {!collapsed && (
-              <span className="sidebar-logo-text">EFIS</span>
+              <div>
+                <div className="sidebar-logo-text">EFIS</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, fontWeight: 400 }}>
+                  专家现场审核平台
+                </div>
+              </div>
             )}
           </div>
         </div>
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
+          defaultOpenKeys={['现场工作', '项目管理', '基础配置']}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => {
+            if (typeof key === 'string' && key.startsWith('/')) navigate(key)
+          }}
           style={{
             borderRight: 0,
             paddingTop: 8,
@@ -218,7 +250,7 @@ export default function MainLayout() {
                   color: 'var(--text-muted)',
                   whiteSpace: 'nowrap',
                 }}>
-                  {user?.role === 'admin' ? '管理员' : user?.role === 'manager' ? '主管' : '专家'}
+                  {roleLabel(user?.role)}
                 </span>
               </div>
             </div>

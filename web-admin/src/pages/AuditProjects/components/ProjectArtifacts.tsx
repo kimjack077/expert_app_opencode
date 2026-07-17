@@ -72,7 +72,8 @@ const statusConfig: Record<string, { text: string; color: string }> = {
   generating: { text: '生成中', color: 'processing' },
   completed: { text: '可下载', color: 'success' },
   ready: { text: '可下载', color: 'success' },
-  failed: { text: '生成失败', color: 'error' },
+  failed: { text: '生成失败 / 可重试', color: 'error' },
+  missing: { text: '文件缺失', color: 'error' },
 }
 
 const issueLevelConfig: Record<string, { text: string; color: string }> = {
@@ -213,10 +214,21 @@ export default function ProjectArtifacts({ projectId }: Props) {
     try {
       const response = await projectArtifactApi.download(projectId, artifactId)
       const type = artifact.artifact_type || artifact.type || 'artifact'
-      saveDownloadedBlob(response, artifact.filename || artifact.file_name || artifact.name || `${type}.docx`)
+      const stamp = new Date().toISOString().slice(0, 10)
+      const rawName = artifact.filename || artifact.file_name || artifact.name || `${type}.docx`
+      const safeName = rawName.includes(projectId)
+        ? rawName
+        : `${projectId.slice(0, 8)}_${stamp}_${rawName}`
+      saveDownloadedBlob(response, safeName)
       message.success('文件下载已开始')
     } catch (error: any) {
-      message.error(getErrorMessage(error, '下载成果失败'))
+      const status = error?.response?.status
+      const msg = getErrorMessage(error, '下载成果失败')
+      if (status === 404 || /不存在|missing|not found/i.test(msg)) {
+        message.error('文件缺失或尚未生成，请点击「重试生成」后再下载')
+      } else {
+        message.error(msg)
+      }
     } finally {
       setDownloadingId(undefined)
     }

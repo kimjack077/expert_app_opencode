@@ -1,5 +1,6 @@
 <template>
   <div class="app-container">
+    <OfflineBanner />
     <router-view />
     <template v-if="showGlobalAgent">
       <AgentFab @click="showChat = true" />
@@ -16,6 +17,7 @@ import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AgentFab from '@/components/agent/AgentFab.vue'
 import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
+import OfflineBanner from '@/components/OfflineBanner.vue'
 
 const route = useRoute()
 const showChat = ref(false)

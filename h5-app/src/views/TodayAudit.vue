@@ -25,7 +25,7 @@
       <section v-if="priorityTask" class="priority-section" aria-labelledby="priority-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">CURRENT PRIORITY</p>
+            <p class="eyebrow">优先处理</p>
             <h2 id="priority-title">当前优先任务</h2>
           </div>
           <van-tag :type="statusType(priorityTask.status)" size="medium">
@@ -60,14 +60,18 @@
       <section class="task-list-section" aria-labelledby="task-list-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">TODAY</p>
+            <p class="eyebrow">今日安排</p>
             <h2 id="task-list-title">任务列表</h2>
           </div>
           <button class="text-action" type="button" @click="router.push('/audit-tasks')">查看全部</button>
         </div>
 
         <van-skeleton v-if="loading" title :row="4" class="loading-card" />
-        <van-empty v-else-if="tasks.length === 0" description="今天没有分配的审核任务" />
+        <van-empty v-else-if="tasks.length === 0" image="search" description="今天没有分配给你的审核区域">
+          <p class="empty-hint">可能原因：计划未指派、非今日计划、或账号角色不匹配</p>
+          <van-button type="primary" size="small" @click="router.push('/audit-tasks')">查看全部审核任务</van-button>
+          <van-button plain size="small" style="margin-left:8px" @click="router.push('/home')">返回工作台</van-button>
+        </van-empty>
         <div v-else class="task-list">
           <button
             v-for="task in sortedTasks"
@@ -90,6 +94,7 @@
         </div>
       </section>
     </van-pull-refresh>
+    <BottomNav />
   </main>
 </template>
 
@@ -103,6 +108,7 @@ import {
   getMyAuditTasks,
   listAuditSessions
 } from '../api/auditProjects'
+import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
 const tasks = ref([])
@@ -202,7 +208,7 @@ onMounted(loadTasks)
 <style scoped>
 .today-audit-page {
   min-height: 100dvh;
-  padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
   background: var(--bg-light);
 }
 

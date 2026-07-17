@@ -24,7 +24,7 @@
 
     <section v-if="!loading && savedSubmissions.length" class="work-card">
       <div class="section-title">
-        <div><p class="eyebrow">SAVED</p><h2>已保存现场证据</h2></div>
+        <div><p class="eyebrow">已保存</p><h2>现场证据</h2></div>
         <van-tag type="primary">{{ savedSubmissions.length }} 条</van-tag>
       </div>
       <article v-for="submission in savedSubmissions" :key="submission.id" class="saved-evidence-card">
@@ -41,7 +41,7 @@
 
     <section class="work-card">
       <div class="section-title">
-        <div><p class="eyebrow">EVIDENCE</p><h2>采集现场证据</h2></div>
+        <div><p class="eyebrow">证据采集</p><h2>现场证据</h2></div>
         <button type="button" class="icon-button" aria-label="语音输入" :disabled="isCompleted" @click="toggleVoice">
           <van-icon :name="listening ? 'stop-circle-o' : 'volume-o'" size="22" />
         </button>
@@ -66,20 +66,20 @@
 
     <section class="work-card">
       <div class="section-title">
-        <div><p class="eyebrow">REVIEW</p><h2>待确认 AI 记录</h2></div>
+        <div><p class="eyebrow">人工复核</p><h2>待确认 AI 记录</h2></div>
         <van-tag v-if="pendingDrafts.length" type="warning">{{ pendingDrafts.length }} 条</van-tag>
       </div>
-      <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里" />
+      <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里。请逐条核对条款与判定后再采纳。" />
       <van-checkbox-group v-else v-model="selectedDraftIds">
         <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
-          <van-checkbox :name="draft.id" shape="square">
+          <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft)">
             <div class="draft-heading">
               <strong>{{ clauseText(draft) }}</strong>
               <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
             </div>
           </van-checkbox>
           <p v-if="isFallback(draft)" class="draft-fallback-notice">
-            <van-icon name="warning-o" /> 模型异常，此草稿为保守回退结果，必须人工复核后才能采纳
+            <van-icon name="warning-o" /> 模型异常：此为保守回退结果，不可批量采纳，请逐条打开人工复核
           </p>
           <p class="draft-evidence">{{ draft.finding_text || draft.record_payload?.audit_evidence || '未提供证据摘要' }}</p>
           <div class="draft-meta">
@@ -88,25 +88,40 @@
               置信度：
               <van-tag size="mini" :type="confidenceTagType(draft)">{{ confidenceText(draft) }} · {{ confidenceLabel(draft) }}</van-tag>
             </span>
+            <van-tag v-if="isFallback(draft)" size="mini" type="danger">需人工复核</van-tag>
           </div>
           <p class="reasoning">{{ draft.reasoning }}</p>
           <details v-if="draft.citations?.length">
-            <summary>查看 {{ draft.citations.length }} 条引用</summary>
+            <summary>查看 {{ draft.citations.length }} 条引用（请核对来源）</summary>
             <p v-for="(citation, index) in draft.citations" :key="index" class="citation">
-              {{ citation.document_title || citation.file_name || '项目资料' }}：{{ citation.content }}
+              <van-tag size="mini" plain>{{ citationSourceLabel(citation) }}</van-tag>
+              {{ citation.document_title || citation.file_name || '资料' }}：{{ citation.content }}
             </p>
           </details>
+          <van-button
+            v-if="isFallback(draft) && !isCompleted"
+            size="small"
+            type="warning"
+            block
+            style="margin-top: 8px"
+            :loading="confirming"
+            @click="confirmSingleDraft(draft.id)"
+          >
+            人工复核并采纳此项
+          </van-button>
         </article>
       </van-checkbox-group>
       <div v-if="pendingDrafts.length" class="review-actions">
-        <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted" @click="confirmSafeDrafts">批量采纳安全项</van-button>
+        <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted || safeDraftCount === 0" @click="confirmSafeDrafts">
+          批量采纳安全项（排除回退/异常）
+        </van-button>
         <van-button block type="primary" :loading="confirming" :disabled="isCompleted || selectedDraftIds.length === 0" @click="confirmSelected">采纳已选择记录</van-button>
       </div>
     </section>
 
     <section v-if="confirmedDrafts.length" class="work-card">
       <div class="section-title">
-        <div><p class="eyebrow">CONFIRMED</p><h2>已确认审核记录</h2></div>
+        <div><p class="eyebrow">已确认</p><h2>审核记录</h2></div>
         <van-tag type="success">{{ confirmedDrafts.length }} 条</van-tag>
       </div>
       <article v-for="draft in confirmedDrafts" :key="draft.id" class="saved-evidence-card">
@@ -126,7 +141,7 @@
     </section>
 
     <section class="work-card final-card">
-      <div class="section-title"><div><p class="eyebrow">CONCLUSION</p><h2>最终结论与提交</h2></div></div>
+      <div class="section-title"><div><p class="eyebrow">提交</p><h2>最终结论与提交</h2></div></div>
       <van-field v-model="conclusion" type="textarea" rows="4" label="区域结论" :readonly="isCompleted" placeholder="根据已确认记录形成最终审核结论" />
       <div class="review-actions">
         <van-button block plain type="primary" :loading="checking" @click="runQualityCheck">检查完整性</van-button>
@@ -146,6 +161,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
+import { citationSourceLabel } from '@/utils/display.js'
 
 import {
   checkAuditQuality,
@@ -200,6 +216,9 @@ const agentContext = computed(() => ({
 const evaluationCode = (draft) => String(draft.record_payload?.evaluation_3level || draft.evaluation || '2')
 const isAbnormal = (draft) => evaluationCode(draft) === '3' || ['insufficient', 'partial'].includes(draft.quality?.level)
 const isFallback = (draft) => draft.model_status === 'fallback' || draft.quality?.model_status === 'fallback' || draft.source_snapshot?.model_status === 'fallback'
+const safeDraftCount = computed(
+  () => pendingDrafts.value.filter((d) => !isFallback(d) && !isAbnormal(d)).length
+)
 const evaluationText = (draft) => ({ 1: '符合', 2: '基本符合', 3: '不符合' }[evaluationCode(draft)] || '待确认')
 const evaluationType = (draft) => ({ 1: 'success', 2: 'warning', 3: 'danger' }[evaluationCode(draft)] || 'default')
 const clauseText = (draft) => draft.primary_clause_no || draft.clause_refs?.map((item) => item.clause_no).filter(Boolean).join(' / ') || '候选条款'
@@ -319,8 +338,20 @@ const doConfirm = async (draftIds, safeOnly = false) => {
   }
 }
 
-const confirmSelected = () => doConfirm(selectedDraftIds.value)
+const confirmSelected = () => {
+  const selected = selectedDraftIds.value
+    .map((id) => pendingDrafts.value.find((d) => d.id === id))
+    .filter(Boolean)
+  const fallbackIds = selected.filter((d) => isFallback(d)).map((d) => d.id)
+  if (fallbackIds.length) {
+    showToast('回退结果不可批量采纳，请使用「人工复核并采纳此项」')
+    selectedDraftIds.value = selectedDraftIds.value.filter((id) => !fallbackIds.includes(id))
+    return
+  }
+  return doConfirm(selectedDraftIds.value)
+}
 const confirmSafeDrafts = () => doConfirm([], true)
+const confirmSingleDraft = (draftId) => doConfirm([draftId], false)
 
 const runQualityCheck = async () => {
   checking.value = true

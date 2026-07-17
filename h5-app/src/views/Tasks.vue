@@ -91,8 +91,8 @@
               <span class="task-date">{{ formatDate(task.created_at) }}</span>
             </div>
             
-            <h3 class="task-title">{{ task.title }}</h3>
-            <p class="task-desc">{{ task.description || '暂无描述' }}</p>
+            <h3 class="task-title">{{ formatTaskDisplay(task).primary }}</h3>
+            <p class="task-desc">{{ formatTaskDisplay(task).secondary || task.description || '暂无描述' }}</p>
             
             <div class="task-meta">
               <div class="meta-item" v-if="task.location">
@@ -141,44 +141,7 @@
       </van-list>
     </van-pull-refresh>
 
-    <van-tabbar v-model="activeTab" route class="custom-tabbar">
-      <van-tabbar-item to="/home">
-        <span>首页</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-            <polyline points="9 22 9 12 15 12 15 22"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/select-enterprise">
-        <span>检查</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/>
-            <path d="m21 21-4.35-4.35"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/records">
-        <span>记录</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-      <van-tabbar-item to="/profile">
-        <span>我的</span>
-        <template #icon="props">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-        </template>
-      </van-tabbar-item>
-    </van-tabbar>
+    <BottomNav />
   </div>
 </template>
 
@@ -186,10 +149,11 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getTasks } from '../api/tasks.js'
+import { formatTaskDisplay } from '../utils/display.js'
+import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
 const route = useRoute()
-const activeTab = ref(0)
 const searchText = ref('')
 const activeFilter = ref('all')
 const tasks = ref([])

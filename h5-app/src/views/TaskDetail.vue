@@ -102,6 +102,10 @@
       </div>
 
       <div class="action-bar">
+        <div v-if="isAuditLinkedTask" class="path-hint">
+          <van-icon name="info-o" />
+          <span>此任务关联认证审核项目。正式交付请走「AI 现场审核」；下方表格式检查仅作辅助填报。</span>
+        </div>
         <van-button
           v-if="task.status === 'pending'"
           type="primary"
@@ -113,14 +117,26 @@
           <span>开始任务</span>
         </van-button>
         <van-button
+          v-if="task.status === 'in_progress' || task.status === 'pending'"
+          type="primary"
+          block
+          class="action-btn primary"
+          style="margin-top: 10px;"
+          @click="goToTodayAudit"
+        >
+          <van-icon name="smile-comment-o" size="20" />
+          <span>{{ isAuditLinkedTask ? '进入 AI 现场审核（推荐）' : '打开今日审核' }}</span>
+        </van-button>
+        <van-button
           v-if="task.status === 'in_progress'"
           type="success"
           block
           class="action-btn success"
+          style="margin-top: 10px;"
           @click="goToExecution"
         >
           <van-icon name="edit" size="20" />
-          <span>执行检查</span>
+          <span>{{ isAuditLinkedTask ? '表格式检查（辅助）' : '执行检查' }}</span>
         </van-button>
         <van-button
           v-if="task.status === 'in_progress'"
@@ -150,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
 import { getTask, updateTask } from '../api/tasks.js'
@@ -285,6 +301,18 @@ const completeTask = async () => {
 
 const goToExecution = () => {
   router.push(`/task/${task.value.id}/execute`)
+}
+
+/** 标题含项目/计划特征时，视为认证审核关联任务 */
+const isAuditLinkedTask = computed(() => {
+  const t = task.value
+  if (!t) return false
+  const title = String(t.title || '')
+  return /审核|初审|监督|再认证|车间|部门/.test(title) || !!t.audit_project_id
+})
+
+const goToTodayAudit = () => {
+  router.push('/today-audit')
 }
 
 onMounted(() => {
@@ -567,6 +595,19 @@ onMounted(() => {
   padding: 16px 20px 24px;
   background: var(--bg-white);
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.path-hint {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: #0369a1;
+  background: #e0f2fe;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  line-height: 1.45;
 }
 
 .action-btn {

@@ -11,21 +11,21 @@
           </svg>
         </div>
       </div>
-      <h1 class="title">专家检查系统</h1>
-      <p class="subtitle">Expert Field Inspection System</p>
+      <h1 class="title">专家现场审核平台</h1>
+      <p class="subtitle">EFIS · 认证审核与现场检查</p>
       <div class="badges">
         <span class="badge">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
             <polyline points="22 4 12 14.01 9 11.01"/>
           </svg>
-          专业认证
+          审核员用手机端
         </span>
         <span class="badge accent">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
           </svg>
-          安全可靠
+          管理员用 Web 端
         </span>
       </div>
     </div>
@@ -34,7 +34,7 @@
       <div class="form-card">
         <div class="form-header">
           <h2 class="form-title">欢迎登录</h2>
-          <p class="form-subtitle">请使用您的账号密码登录系统</p>
+          <p class="form-subtitle">审核员登录后进入「今日审核」；日常检查可在任务页处理</p>
         </div>
         
         <van-form class="login-form">
