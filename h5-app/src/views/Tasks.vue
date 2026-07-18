@@ -6,7 +6,7 @@
         <div class="header-top">
           <div class="header-info">
             <h1 class="page-title">检查任务</h1>
-            <p class="page-subtitle">{{ tasks.length }} 个任务</p>
+            <p class="page-subtitle">{{ totalCount }} 个任务</p>
           </div>
           <div class="header-actions">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -157,6 +157,7 @@ const route = useRoute()
 const searchText = ref('')
 const activeFilter = ref('all')
 const tasks = ref([])
+const totalCount = ref(0)
 const loading = ref(false)
 const finished = ref(false)
 const refreshing = ref(false)
@@ -232,14 +233,19 @@ const fetchTasks = async (isRefresh = false) => {
       page_size: pageSize,
       search: searchText.value,
     })
-    
+
     const items = res.data?.items || []
+    if (typeof res.data?.total === 'number') {
+      totalCount.value = res.data.total
+    } else if (isRefresh) {
+      totalCount.value = items.length
+    }
     if (isRefresh) {
       tasks.value = items
     } else {
       tasks.value.push(...items)
     }
-    
+
     if (items.length < pageSize) {
       finished.value = true
     }

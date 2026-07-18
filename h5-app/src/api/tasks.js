@@ -1,7 +1,17 @@
 import request from './request.js'
 
 export const getTasks = (params) => {
-  return request.get('/tasks', { params })
+  // 将 page/page_size 参数转换为 skip/limit (后端期望的参数)
+  const { page, page_size, limit, ...rest } = params || {}
+  const effectiveLimit = limit || page_size || 20
+  const skip = page ? (page - 1) * effectiveLimit : 0
+  return request.get('/tasks', {
+    params: {
+      skip,
+      limit: effectiveLimit,
+      ...rest
+    }
+  })
 }
 
 export const getTask = (id) => {
