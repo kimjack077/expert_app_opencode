@@ -29,6 +29,7 @@ interface AuditTask {
   certification_systems: string[]
   template_id?: string
   record_id?: string
+  inspection_task_id?: string
 }
 
 const statusConfig: Record<string, { text: string; color: string; icon: React.ReactNode }> = {
@@ -65,7 +66,8 @@ export default function MyAuditTasks() {
   const fetchTasks = async () => {
     setLoading(true)
     try {
-      const response = await myTasksApi.list()
+      // 展示全部分配给我的计划（含历史），不限今日
+      const response = await myTasksApi.list({ today_only: false })
       setTasks(response.data || [])
     } catch (error: any) {
       message.error(error.response?.data?.message || '获取任务列表失败')
@@ -74,27 +76,28 @@ export default function MyAuditTasks() {
     }
   }
 
+  /** 有关联检查任务则进入任务检查页（可查看/修改结果）；否则回退区域记录入口 */
+  const goInspection = (task: AuditTask) => {
+    if (task.inspection_task_id) {
+      navigate(`/inspection/${task.inspection_task_id}`)
+      return
+    }
+    navigate(`/audit-projects/${task.project_id}/records/new?planItemId=${task.id}`)
+  }
+
   const handleStartTask = async (task: AuditTask) => {
     try {
-      // 如果任务还没有开始，更新状态
       if (task.status === 'pending') {
         await auditPlanApi.update(task.id, { status: 'in_progress' })
       }
-      // 跳转到审核记录填写页面
-      navigate(`/audit-projects/${task.project_id}/records/new?planItemId=${task.id}`)
+      goInspection(task)
     } catch (error: any) {
       message.error(error.response?.data?.message || '操作失败')
     }
   }
 
   const handleContinueTask = (task: AuditTask) => {
-    if (task.record_id) {
-      // 如果已有记录，跳转到记录详情
-      navigate(`/audit-projects/${task.project_id}/records/${task.record_id}`)
-    } else {
-      // 否则跳转到创建记录页面
-      navigate(`/audit-projects/${task.project_id}/records/new?planItemId=${task.id}`)
-    }
+    goInspection(task)
   }
 
   // 过滤任务
@@ -123,10 +126,11 @@ export default function MyAuditTasks() {
       render: (_: any, record: AuditTask) => (
         <div>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {record.project_title || record.project_no}
+            {record.project_title || record.project_no || '未命名项目'}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {record.enterprise_name}
+            {record.enterprise_name || '企业未关联'}
+            {record.project_no ? ` · ${record.project_no}` : ''}
           </div>
         </div>
       ),
@@ -237,12 +241,8 @@ export default function MyAuditTasks() {
             </Button>
           )}
           {record.status === 'completed' && (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => navigate(`/audit-projects/${record.project_id}`)}
-            >
-              查看详情
+            <Button type="link" size="small" onClick={() => goInspection(record)}>
+              查看/修改
             </Button>
           )}
         </Space>

@@ -424,16 +424,46 @@ async def get_task_records(
     for r in records:
         item = InspectionRecordResponse.model_validate(r).model_dump()
         if r.template_item is not None:
-            item["template_item"] = {
+            check_item = {
                 "id": str(r.template_item.id),
                 "title": r.template_item.title,
+                "description": r.template_item.description,
+                "check_method": r.template_item.check_method,
+                "legal_basis": r.template_item.legal_basis,
+                "standard_ref": r.template_item.standard_ref,
+                "clause_no": r.template_item.clause_no,
                 "template_id": str(r.template_item.template_id)
                 if r.template_item.template_id
                 else None,
                 "is_category": bool(r.template_item.is_category),
                 "result_type": r.template_item.result_type,
                 "check_type": r.template_item.check_type,
+                "result_options": r.template_item.result_options,
+                "is_required": r.template_item.is_required,
+                "attachment_required": bool(r.template_item.attachment_required),
+                "allow_attachment": bool(r.template_item.allow_attachment)
+                if r.template_item.allow_attachment is not None
+                else True,
+                "unit": r.template_item.unit,
+                "min_value": float(r.template_item.min_value)
+                if r.template_item.min_value is not None
+                else None,
+                "max_value": float(r.template_item.max_value)
+                if r.template_item.max_value is not None
+                else None,
+                "max_score": float(r.template_item.max_score)
+                if r.template_item.max_score is not None
+                else None,
+                "score_step": float(r.template_item.score_step)
+                if r.template_item.score_step is not None
+                else None,
+                "pass_score": float(r.template_item.pass_score)
+                if r.template_item.pass_score is not None
+                else None,
             }
+            item["template_item"] = check_item
+            # 兼容旧前端字段名 check_item
+            item["check_item"] = check_item
         payload.append(item)
 
     return make_response(data=payload)
@@ -537,15 +567,33 @@ async def get_task_summary(
         raise HTTPException(status_code=404, detail="Task not found")
 
     result = await db.execute(
-        select(InspectionRecord).where(InspectionRecord.task_id == task_id)
+        select(InspectionRecord)
+        .options(selectinload(InspectionRecord.template_item))
+        .where(InspectionRecord.task_id == task_id)
     )
     records = result.scalars().all()
 
-    total = len(records)
-    completed = sum(1 for r in records if r.result)
-    compliant = sum(1 for r in records if r.result == "compliant")
-    non_compliant = sum(1 for r in records if r.result == "non_compliant")
-    not_applicable = sum(1 for r in records if r.result == "not_applicable")
+    def _is_pass(result: Optional[str]) -> bool:
+        return result in {"compliant", "pass", "qualified", "1"}
+
+    def _is_fail(result: Optional[str]) -> bool:
+        return result in {"non_compliant", "fail", "unqualified", "3", "pending_rectification"}
+
+    def _is_na(result: Optional[str]) -> bool:
+        return result in {"not_applicable", "na", "n/a", "不适用"}
+
+    # 排除分类节点：仅统计挂了模板检查项且非分类的记录；无关联时仍计入兼容
+    countable = []
+    for r in records:
+        if r.template_item is not None and getattr(r.template_item, "is_category", False):
+            continue
+        countable.append(r)
+
+    total = len(countable)
+    completed = sum(1 for r in countable if r.result)
+    compliant = sum(1 for r in countable if _is_pass(r.result))
+    non_compliant = sum(1 for r in countable if _is_fail(r.result))
+    not_applicable = sum(1 for r in countable if _is_na(r.result))
 
     compliance_rate = (compliant / completed * 100) if completed > 0 else 0
 

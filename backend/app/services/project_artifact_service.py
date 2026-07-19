@@ -225,8 +225,20 @@ class ProjectArtifactService:
                 ncs = (await db.execute(select(Nonconformity).where(Nonconformity.project_id == project_id))).scalars().all()
                 generated.append(await self._store(db, project, "nc_summary", f"不符合项汇总_{project.project_no}.docx", self._nc_summary_docx(project, ncs), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
             elif artifact_type == "manifest":
-                content = json.dumps({"project": snapshot["project"], "quality_check": quality, "source_snapshot": snapshot}, ensure_ascii=False, indent=2).encode("utf-8")
-                generated.append(await self._store(db, project, "manifest", f"资料完整性检查_{project.project_no}.json", content, "application/json", snapshot, created_by))
+                # 面向交付用户：完整性检查用 Word，不再输出 JSON
+                content = self._quality_check_docx(project, quality, snapshot)
+                generated.append(
+                    await self._store(
+                        db,
+                        project,
+                        "manifest",
+                        f"资料完整性检查_{project.project_no}.docx",
+                        content,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        snapshot,
+                        created_by,
+                    )
+                )
         await self._update_report_snapshot(db, project_id, snapshot, quality)
         await db.commit()
         return generated
@@ -264,31 +276,45 @@ class ProjectArtifactService:
                     "sha256": hashlib.sha256(content).hexdigest(),
                 })
 
-            add_bytes("A组织信息/项目摘要.json", json.dumps(snapshot["project"], ensure_ascii=False, indent=2).encode("utf-8"))
-            add_bytes("I档案检查表/资料完整性检查.json", json.dumps(quality, ensure_ascii=False, indent=2).encode("utf-8"))
+            # 用户可读交付物统一为 Word（不再向用户暴露业务 JSON）
+            add_bytes(
+                "A组织信息/项目摘要.docx",
+                self._project_summary_docx(project, snapshot),
+            )
+            add_bytes(
+                "B审核计划/审核计划汇总.docx",
+                self._audit_plan_docx(project, snapshot),
+            )
+            add_bytes(
+                "I档案检查表/资料完整性检查.docx",
+                self._quality_check_docx(project, quality, snapshot),
+            )
             for document in documents:
                 path = Path(document.stored_path)
                 if path.is_file():
                     folder = "C管理手册和程序文件" if document.document_type in {"manual", "procedure"} else "D审核资料汇总"
                     add_bytes(f"{folder}/{_safe_name(document.original_filename)}", path.read_bytes())
-            folder_map = {"area_record": "E审核记录汇总", "audit_report": "F审核报告", "nc_summary": "G不符合项整改汇总", "manifest": "I档案检查表"}
+            folder_map = {
+                "area_record": "E审核记录汇总",
+                "audit_report": "F审核报告",
+                "nc_summary": "G不符合项整改汇总",
+                "manifest": "I档案检查表",
+            }
             for artifact in self._latest_artifacts(artifacts):
                 path = Path(artifact.path)
-                if path.is_file():
-                    add_bytes(f"{folder_map.get(artifact.artifact_type, 'H其他成果')}/{_safe_name(artifact.filename)}", path.read_bytes())
-            manifest = {
-                "manifest_version": "1.0",
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "project": snapshot["project"],
-                "quality_passed": quality["passed"],
-                "source_snapshot_sha256": hashlib.sha256(
-                    json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                ).hexdigest(),
-                "files": manifest_files,
-            }
-            archive.writestr(
-                "manifest.json",
-                json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+                if not path.is_file():
+                    continue
+                # 避免与上方固定路径的完整性 Word 重复塞两份
+                if artifact.artifact_type == "manifest":
+                    continue
+                add_bytes(
+                    f"{folder_map.get(artifact.artifact_type, 'H其他成果')}/{_safe_name(artifact.filename)}",
+                    path.read_bytes(),
+                )
+            # 文件清单也用 Word，便于客户核对
+            add_bytes(
+                "I档案检查表/资料包文件清单.docx",
+                self._package_file_list_docx(project, quality, manifest_files),
             )
         return await self._store(db, project, "package", f"完整审核资料包_{project.project_no}.zip", buffer.getvalue(), "application/zip", snapshot, created_by)
 
@@ -381,12 +407,17 @@ class ProjectArtifactService:
     def _latest_artifacts(
         artifacts: list[ProjectArtifact],
     ) -> list[ProjectArtifact]:
-        """Keep only the latest version of each deliverable in a ZIP package."""
-        latest: dict[str, ProjectArtifact] = {}
+        """Keep the latest version of each distinct deliverable file.
+
+        Area records share artifact_type but different filenames; keying only by
+        type would drop all but one region record from the ZIP package.
+        """
+        latest: dict[tuple[str, str], ProjectArtifact] = {}
         for artifact in artifacts:
-            current = latest.get(artifact.artifact_type)
+            key = (str(artifact.artifact_type or ""), str(artifact.filename or artifact.id))
+            current = latest.get(key)
             if current is None or int(artifact.version or 0) > int(current.version or 0):
-                latest[artifact.artifact_type] = artifact
+                latest[key] = artifact
         return list(latest.values())
 
     @staticmethod
@@ -404,10 +435,208 @@ class ProjectArtifactService:
         return "未命名区域"
 
     @staticmethod
+    def _docx_bytes(document: Document) -> bytes:
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _status_label(status: str | None) -> str:
+        return {
+            "pending": "待开始",
+            "in_progress": "进行中",
+            "completed": "已完成",
+            "submitted": "已提交",
+            "reviewed": "已复核",
+            "draft": "草稿",
+            "open": "已开立",
+            "closed": "已关闭",
+            "cancelled": "已取消",
+        }.get(str(status or ""), str(status or "—"))
+
+    @staticmethod
+    def _eval_label(value: Any) -> str:
+        return {"1": "符合", "2": "基本符合", "3": "不符合"}.get(str(value or ""), str(value or "—"))
+
+    @staticmethod
+    def _project_summary_docx(project: AuditProject, snapshot: dict[str, Any]) -> bytes:
+        document = Document()
+        document.add_heading("审核项目摘要", 0)
+        info = snapshot.get("project") or {}
+        systems = "、".join(info.get("certification_systems") or project.certification_systems or []) or "—"
+        rows = [
+            ("项目名称", project.title or info.get("title") or "—"),
+            ("项目编号", project.project_no or info.get("project_no") or "—"),
+            ("项目状态", ProjectArtifactService._status_label(project.status or info.get("status"))),
+            ("审核类型", project.audit_type or info.get("audit_type") or "—"),
+            ("认证体系", systems),
+            ("计划项数量", str(len(snapshot.get("plan_items") or []))),
+            ("区域记录数量", str(len(snapshot.get("area_records") or []))),
+            ("不符合项数量", str(len(snapshot.get("nonconformities") or []))),
+            ("项目资料数量", str(len(snapshot.get("documents") or []))),
+            ("生成时间", datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")),
+        ]
+        table = document.add_table(rows=1, cols=2)
+        table.style = "Table Grid"
+        table.rows[0].cells[0].text = "项目"
+        table.rows[0].cells[1].text = "内容"
+        for label, value in rows:
+            cells = table.add_row().cells
+            cells[0].text = label
+            cells[1].text = str(value)
+        document.add_paragraph("")
+        document.add_paragraph("说明：本文件为完整审核资料包中的项目概览，供客户与审核组查阅。")
+        return ProjectArtifactService._docx_bytes(document)
+
+    @staticmethod
+    def _audit_plan_docx(project: AuditProject, snapshot: dict[str, Any]) -> bytes:
+        document = Document()
+        document.add_heading("审核计划汇总", 0)
+        document.add_paragraph(f"项目：{project.title or ''}（{project.project_no or ''}）")
+        plan_items = snapshot.get("plan_items") or []
+        if not plan_items:
+            document.add_paragraph("尚未配置审核计划项。")
+        else:
+            table = document.add_table(rows=1, cols=4)
+            table.style = "Table Grid"
+            for cell, title in zip(table.rows[0].cells, ("区域/计划项", "状态", "条款数", "条款摘要")):
+                cell.text = title
+            for item in plan_items:
+                clauses = item.get("clauses") or []
+                clause_text = "、".join(str(c) for c in clauses[:12])
+                if len(clauses) > 12:
+                    clause_text += f" 等共 {len(clauses)} 项"
+                cells = table.add_row().cells
+                values = (
+                    item.get("area") or "—",
+                    ProjectArtifactService._status_label(item.get("status")),
+                    str(len(clauses)),
+                    clause_text or "—",
+                )
+                for cell, value in zip(cells, values):
+                    cell.text = str(value)
+        return ProjectArtifactService._docx_bytes(document)
+
+    @staticmethod
+    def _quality_check_docx(
+        project: AuditProject,
+        quality: dict[str, Any],
+        snapshot: dict[str, Any],
+    ) -> bytes:
+        document = Document()
+        document.add_heading("资料完整性检查报告", 0)
+        document.add_paragraph(f"项目：{project.title or ''}（{project.project_no or ''}）")
+        document.add_paragraph(
+            f"检查时间：{quality.get('checked_at') or datetime.now(timezone.utc).isoformat()}"
+        )
+        document.add_paragraph(
+            f"检查结果：{'通过' if quality.get('passed') else '未通过'}  "
+            f"完整度 {quality.get('completeness_score', quality.get('score', '—'))}%  "
+            f"一致度 {quality.get('consistency_score', '—')}%"
+        )
+
+        document.add_heading("检查项", level=1)
+        checks = quality.get("completeness") or {}
+        check_labels = {
+            "organization_materials": "组织资料已上传",
+            "audit_plan": "审核计划已配置",
+            "area_records": "区域记录已提交",
+            "ai_drafts": "AI 草稿已确认",
+            "nonconformities": "不符合项已确认",
+            "document_index": "资料解析正常",
+        }
+        table = document.add_table(rows=1, cols=2)
+        table.style = "Table Grid"
+        table.rows[0].cells[0].text = "检查项"
+        table.rows[0].cells[1].text = "结果"
+        for key, label in check_labels.items():
+            cells = table.add_row().cells
+            cells[0].text = label
+            cells[1].text = "通过" if checks.get(key) else "未通过"
+
+        blockers = quality.get("blockers") or []
+        document.add_heading("阻断项", level=1)
+        if not blockers:
+            document.add_paragraph("无阻断项。")
+        else:
+            for item in blockers:
+                document.add_paragraph(
+                    f"• {item.get('message') or item.get('code') or item}",
+                    style="List Bullet",
+                )
+
+        warnings = quality.get("warnings") or []
+        document.add_heading("提示项", level=1)
+        if not warnings:
+            document.add_paragraph("无提示项。")
+        else:
+            for item in warnings:
+                document.add_paragraph(
+                    f"• {item.get('message') or item.get('code') or item}",
+                    style="List Bullet",
+                )
+
+        consistency = quality.get("consistency") or {}
+        document.add_heading("数量统计", level=1)
+        stats = [
+            ("审核计划项", consistency.get("plan_count", len(snapshot.get("plan_items") or []))),
+            ("区域记录", consistency.get("record_count", len(snapshot.get("area_records") or []))),
+            ("已确认 AI 记录", consistency.get("confirmed_draft_count", 0)),
+            ("不符合项", consistency.get("nonconformity_count", len(snapshot.get("nonconformities") or []))),
+        ]
+        stat_table = document.add_table(rows=1, cols=2)
+        stat_table.style = "Table Grid"
+        stat_table.rows[0].cells[0].text = "指标"
+        stat_table.rows[0].cells[1].text = "数量"
+        for label, value in stats:
+            cells = stat_table.add_row().cells
+            cells[0].text = label
+            cells[1].text = str(value)
+        return ProjectArtifactService._docx_bytes(document)
+
+    @staticmethod
+    def _package_file_list_docx(
+        project: AuditProject,
+        quality: dict[str, Any],
+        files: list[dict[str, Any]],
+    ) -> bytes:
+        document = Document()
+        document.add_heading("资料包文件清单", 0)
+        document.add_paragraph(f"项目：{project.title or ''}（{project.project_no or ''}）")
+        document.add_paragraph(
+            f"生成时间：{datetime.now(timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M')}  "
+            f"质量门禁：{'通过' if quality.get('passed') else '未通过'}"
+        )
+        document.add_paragraph(f"文件总数：{len(files)}")
+        table = document.add_table(rows=1, cols=4)
+        table.style = "Table Grid"
+        for cell, title in zip(table.rows[0].cells, ("序号", "路径", "大小(字节)", "SHA-256")):
+            cell.text = title
+        for index, item in enumerate(files, start=1):
+            cells = table.add_row().cells
+            values = (
+                str(index),
+                item.get("path") or "",
+                str(item.get("size") or 0),
+                item.get("sha256") or "",
+            )
+            for cell, value in zip(cells, values):
+                cell.text = str(value)
+        document.add_paragraph("")
+        document.add_paragraph("说明：可用本清单核对资料包内文件是否齐全、是否被篡改。")
+        return ProjectArtifactService._docx_bytes(document)
+
+    @staticmethod
     def _area_record_docx(project: AuditProject, record: AuditAreaRecord) -> bytes:
         document = Document()
         document.add_heading("区域审核记录", 0)
-        for label, value in (("项目", project.title), ("项目编号", project.project_no), ("区域", ProjectArtifactService._area_name(record)), ("审核日期", record.audit_date), ("状态", record.status)):
+        for label, value in (
+            ("项目", project.title),
+            ("项目编号", project.project_no),
+            ("区域", ProjectArtifactService._area_name(record)),
+            ("审核日期", record.audit_date),
+            ("状态", ProjectArtifactService._status_label(record.status)),
+        ):
             document.add_paragraph(f"{label}：{value or ''}")
         document.add_heading("审核结论", level=1)
         document.add_paragraph(record.conclusion or "尚未填写")
@@ -425,29 +654,45 @@ class ProjectArtifactService:
             for item in record.items:
                 cells = table.add_row().cells
                 values = (
-                    item.clause_no_snapshot or "",
+                    item.clause_no_snapshot or item.item_title or "",
                     item.certification_system or "",
-                    {"1": "符合", "2": "基本符合", "3": "不符合"}.get(
-                        str(item.evaluation_3level), str(item.evaluation_3level or "")
-                    ),
+                    ProjectArtifactService._eval_label(item.evaluation_3level),
                     item.audit_evidence or "",
                     item.audit_findings or "",
                     item.ai_basis or "",
                 )
                 for cell, value in zip(cells, values):
                     cell.text = str(value)
-        buffer = io.BytesIO(); document.save(buffer); return buffer.getvalue()
+        return ProjectArtifactService._docx_bytes(document)
 
     @staticmethod
     def _nc_summary_docx(project: AuditProject, ncs: list[Nonconformity]) -> bytes:
-        document = Document(); document.add_heading("不符合项汇总", 0); document.add_paragraph(f"项目：{project.title}（{project.project_no}）")
-        table = document.add_table(rows=1, cols=6); table.style = "Table Grid"
-        for cell, title in zip(table.rows[0].cells, ("编号", "条款", "严重度", "描述", "状态", "整改要求")): cell.text = title
+        document = Document()
+        document.add_heading("不符合项汇总", 0)
+        document.add_paragraph(f"项目：{project.title}（{project.project_no}）")
+        if not ncs:
+            document.add_paragraph("本项目暂无不符合项。")
+            return ProjectArtifactService._docx_bytes(document)
+        table = document.add_table(rows=1, cols=6)
+        table.style = "Table Grid"
+        for cell, title in zip(
+            table.rows[0].cells,
+            ("编号", "条款", "严重度", "描述", "状态", "整改要求"),
+        ):
+            cell.text = title
         for nc in ncs:
             cells = table.add_row().cells
-            values = (nc.nc_no or "", nc.clause_no or "", nc.severity or "", nc.description or "", nc.status or "", nc.corrective_action_required or "")
-            for cell, value in zip(cells, values): cell.text = str(value)
-        buffer = io.BytesIO(); document.save(buffer); return buffer.getvalue()
+            values = (
+                nc.nc_no or "",
+                nc.clause_no or "",
+                nc.severity or "",
+                nc.description or "",
+                ProjectArtifactService._status_label(nc.status),
+                nc.corrective_action_required or "",
+            )
+            for cell, value in zip(cells, values):
+                cell.text = str(value)
+        return ProjectArtifactService._docx_bytes(document)
 
     @staticmethod
     async def _update_report_snapshot(

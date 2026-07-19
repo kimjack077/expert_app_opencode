@@ -89,7 +89,7 @@ export default function RecordsList({ projectId }: Props) {
             icon={record.status === 'completed' ? <EyeOutlined /> : <EditOutlined />}
             onClick={() => handleViewTask(record.inspection_task_id)}
           >
-            {record.status === 'completed' ? '查看检查' : '执行检查'}
+            {record.status === 'completed' ? '查看/修改检查' : '执行检查'}
           </Button>
           {record.status === 'completed' && (
             <Tag color="success" icon={<CheckCircleOutlined />}>已提交</Tag>

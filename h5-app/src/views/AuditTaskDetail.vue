@@ -29,7 +29,24 @@ onMounted(async () => {
     if (!projectId) throw new Error('审核计划项缺少项目归属')
 
     const sessions = unwrap(await listAuditSessions(projectId))
-    const existing = (Array.isArray(sessions) ? sessions : []).find(
+    const list = Array.isArray(sessions) ? sessions : []
+
+    // 已完成任务：进入只读结果页
+    if (planItem.status === 'completed') {
+      const completed = list
+        .filter((item) => item.context_snapshot?.plan_item_id === planItemId && item.status === 'completed')
+        .sort((a, b) => String(b.completed_at || b.created_at || '').localeCompare(String(a.completed_at || a.created_at || '')))[0]
+        || list.find((item) => item.context_snapshot?.plan_item_id === planItemId)
+      if (!completed?.id) throw new Error('未找到审核结果')
+      await router.replace({
+        name: 'AuditSessionResult',
+        params: { sessionId: completed.id },
+        query: { projectId, planItemId }
+      })
+      return
+    }
+
+    const existing = list.find(
       (item) => item.context_snapshot?.plan_item_id === planItemId && item.status === 'active'
     )
     const session = existing || unwrap(await createAuditSession(projectId, {

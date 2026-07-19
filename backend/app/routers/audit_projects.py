@@ -148,16 +148,15 @@ async def list_audit_projects(
 @router.get("/my-tasks")
 async def get_my_audit_tasks(
     status: Optional[str] = None,
-    today_only: bool = True,
+    today_only: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """获取我的审核任务列表（审核员视角）
 
-    P1-4 修复：默认仅返回今日任务（plan_date == today），
-    传 today_only=false 可查看全部历史任务。
+    默认返回全部分配给当前用户的计划项；传 today_only=true 仅返回今日任务。
+    响应补充 project_title / enterprise_name / inspection_task_id，供 Web「我的审核任务」展示。
     """
-    # 查询分配给当前用户的审核计划项
     query = select(AuditPlanItem).where(
         AuditPlanItem.assigned_member_ids.contains([current_user.id]),
         AuditPlanItem.is_deleted == False,  # noqa: E712
@@ -166,15 +165,54 @@ async def get_my_audit_tasks(
     if status:
         query = query.where(AuditPlanItem.status == status)
 
-    # P1-4 修复：默认仅返回今日任务，避免「今日审核」显示历史数据
     if today_only:
         from datetime import date
         today = date.today()
         query = query.where(AuditPlanItem.plan_date == today)
 
-    query = query.order_by(AuditPlanItem.plan_date, AuditPlanItem.time_start)
+    query = query.order_by(AuditPlanItem.plan_date.desc(), AuditPlanItem.time_start)
     result = await db.execute(query)
-    return make_response(result.scalars().all())
+    plan_items = result.scalars().all()
+
+    # 批量加载项目与企业，避免 N+1
+    project_ids = {item.project_id for item in plan_items if item.project_id}
+    projects_by_id = {}
+    enterprises_by_id = {}
+    if project_ids:
+        projects = (
+            await db.execute(select(AuditProject).where(AuditProject.id.in_(project_ids)))
+        ).scalars().all()
+        projects_by_id = {p.id: p for p in projects}
+        enterprise_ids = {p.enterprise_id for p in projects if p.enterprise_id}
+        if enterprise_ids:
+            enterprises = (
+                await db.execute(select(Enterprise).where(Enterprise.id.in_(enterprise_ids)))
+            ).scalars().all()
+            enterprises_by_id = {e.id: e for e in enterprises}
+
+    payload = []
+    for item in plan_items:
+        project = projects_by_id.get(item.project_id)
+        enterprise = (
+            enterprises_by_id.get(project.enterprise_id)
+            if project and project.enterprise_id
+            else None
+        )
+        row = jsonable_encoder(item)
+        row.update(
+            {
+                "project_id": str(item.project_id) if item.project_id else None,
+                "project_no": project.project_no if project else None,
+                "project_title": project.title if project else None,
+                "enterprise_name": enterprise.name if enterprise else None,
+                "inspection_task_id": (
+                    str(item.inspection_task_id) if item.inspection_task_id else None
+                ),
+            }
+        )
+        payload.append(row)
+
+    return make_response(payload)
 
 
 @router.get("/{project_id}")
@@ -410,11 +448,15 @@ async def create_plan_item(
     if plan_item.template_id:
         items_result = await db.execute(
             select(TemplateItem)
-            .where(TemplateItem.template_id == plan_item.template_id)
+            .where(
+                TemplateItem.template_id == plan_item.template_id,
+                TemplateItem.is_deleted == False,  # noqa: E712
+                TemplateItem.is_category.is_not(True),
+            )
             .order_by(TemplateItem.sort_order)
         )
         items = items_result.scalars().all()
-        
+
         for item in items:
             record = TaskItemRecord(
                 task_id=inspection_task.id,

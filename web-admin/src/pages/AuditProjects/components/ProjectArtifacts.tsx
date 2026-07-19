@@ -579,7 +579,7 @@ export default function ProjectArtifacts({ projectId }: Props) {
               type={blockerCount > 0 ? 'warning' : 'info'}
               showIcon
               message="完整资料包"
-                description={blockerCount > 0 ? '请先处理全部阻断项并重新运行质量检查，门禁通过后才能导出。' : '资料包会作为可重试的后台任务生成，完成后可下载已固化版本；内容包括项目资料、区域记录、审核报告、不符合项汇总、质量检查结果和 manifest。'}
+                description={blockerCount > 0 ? '请先处理全部阻断项并重新运行质量检查，门禁通过后才能导出。' : '资料包会作为可重试的后台任务生成，完成后可下载已固化版本；面向用户的交付物均为 Word 文档（项目摘要、审核计划、区域记录、审核报告、不符合项汇总、完整性检查与文件清单），并附项目上传的原始资料。'}
             />
           </Col>
           <Col>

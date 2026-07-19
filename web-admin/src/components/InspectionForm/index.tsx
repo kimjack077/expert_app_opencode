@@ -26,8 +26,8 @@ interface InspectionFormProps {
 /**
  * 统一的检查表单组件
  * 支持两种模式：
- * 1. 直接传入检查记录ID - 直接进行检查
- * 2. 传入任务ID - 自动创建检查记录后进行检查
+ * 1. 检查记录 ID：读写 /api/records（独立快速检查）
+ * 2. 任务 ID：读写 /api/tasks/{id}/records（任务检查，与审核计划共用）
  */
 export default function InspectionForm({ backPath = '/records', onComplete }: InspectionFormProps) {
   const navigate = useNavigate()
@@ -54,77 +54,143 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const [aiJudgmentResult, setAiJudgmentResult] = useState('')
   const [aiJudgmentResultType, setAiJudgmentResultType] = useState('')
 
-  // 实际的记录ID（可能从任务创建）
+  // record = 独立检查记录；task = 任务明细（task_item_records）
+  const [executionMode, setExecutionMode] = useState<'record' | 'task'>('record')
   const [actualRecordId, setActualRecordId] = useState<string | null>(null)
-  // 原始任务ID（如果是从任务创建的记录）
-  const [originalTaskId, setOriginalTaskId] = useState<string | null>(null)
+  const [taskId, setTaskId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
   }, [id])
 
+  const flattenItems = (list: any[], result: any[] = []): any[] => {
+    for (const item of list) {
+      if (!item.is_category) {
+        result.push(item)
+      }
+      if (item.children && item.children.length > 0) {
+        flattenItems(item.children, result)
+      }
+    }
+    return result
+  }
+
+  /** 将任务检查项映射为表单项（与 H5 task 模式一致） */
+  const mapTaskRecordsToFormItems = (taskRecords: any[]) => {
+    return (taskRecords || [])
+      .filter((tr) => {
+        const meta = tr.template_item || tr.check_item
+        return !meta?.is_category
+      })
+      .map((tr) => {
+        const meta = tr.template_item || tr.check_item || {}
+        const checkType = meta.check_type || meta.result_type || 'radio'
+        const result = tr.result || ''
+        return {
+          id: tr.id,
+          template_item_id: tr.template_item_id || meta.id,
+          title: meta.title || '未命名检查项',
+          description: meta.description,
+          check_method: meta.check_method,
+          legal_basis: meta.legal_basis,
+          result_type: meta.result_type || (checkType === 'radio' ? 'pass_fail' : checkType),
+          check_type: checkType,
+          result_options: meta.result_options,
+          is_required: meta.is_required !== false,
+          attachment_required: !!meta.attachment_required,
+          allow_attachment: meta.allow_attachment !== false,
+          unit: meta.unit,
+          min_value: meta.min_value,
+          max_value: meta.max_value,
+          max_score: meta.max_score,
+          score_step: meta.score_step,
+          pass_score: meta.pass_score,
+          // task_item_records 用 result 存判定；表单用 radio_value 展示
+          radio_value: result || '',
+          result,
+          numeric_value: tr.result_value ?? '',
+          score_value: tr.result_value ?? '',
+          text_value: tr.result_text || '',
+          inspector_note: tr.inspector_note || '',
+          photos: [],
+          llm_suggestion: tr.llm_suggestion,
+        }
+      })
+  }
+
+  const loadTaskMode = async (task: any) => {
+    setExecutionMode('task')
+    setTaskId(String(task.id))
+    setActualRecordId(null)
+
+    if (task.status === 'pending') {
+      try {
+        await taskApi.startTask(task.id)
+        task = { ...task, status: 'in_progress' }
+      } catch (e) {
+        console.warn('自动开始任务失败，继续加载', e)
+      }
+    }
+
+    const recordsRes: any = await taskApi.getTaskRecords(task.id)
+    const taskRecords = recordsRes.data || []
+    const formItems = mapTaskRecordsToFormItems(taskRecords)
+
+    setRecord({
+      id: task.id,
+      enterprise_name: task.target_name,
+      enterprise_address: task.target_address,
+      contact_person: task.target_contact,
+      contact_phone: task.target_phone,
+      remarks: task.remarks,
+      status: task.status === 'completed' ? 'submitted' : 'draft',
+      task_status: task.status,
+      template: { name: task.title || '检查任务' },
+      mode: 'task',
+    })
+    setItems(formItems)
+    setFlatItems(formItems)
+    if (task.remarks) {
+      setFinalJudgment((prev) => ({ ...prev, remarks: task.remarks }))
+    }
+  }
+
   const fetchData = async () => {
     if (!id) return
     setLoading(true)
     try {
-      // 首先尝试作为检查记录获取
+      // 1) 优先按独立检查记录加载
       try {
         const res: any = await recordApi.getRecord(id)
         if (res.code === 200 && res.data) {
+          setExecutionMode('record')
+          setTaskId(null)
           setActualRecordId(id)
           setRecord(res.data)
           const templateItems = res.data?.template?.items || []
           setItems(templateItems)
-          const flat = flattenItems(templateItems)
-          setFlatItems(flat)
-
-          // 加载已有的最终判定
+          setFlatItems(flattenItems(templateItems))
           if (res.data?.overall_result) {
-            setFinalJudgment(prev => ({ ...prev, result: res.data.overall_result }))
+            setFinalJudgment((prev) => ({ ...prev, result: res.data.overall_result }))
           }
           if (res.data?.remarks) {
-            setFinalJudgment(prev => ({ ...prev, remarks: res.data.remarks }))
+            setFinalJudgment((prev) => ({ ...prev, remarks: res.data.remarks }))
           }
           return
         }
-      } catch (e) {
-        // 不是检查记录，尝试作为任务处理
-        console.log('Not a record, trying as task...')
+      } catch {
+        // 不是检查记录，继续按任务处理
       }
 
-      // 如果不是检查记录，尝试作为任务获取并创建检查记录
+      // 2) 按任务加载：直接读写 task_item_records，禁止另建独立检查记录
       try {
         const taskRes: any = await taskApi.getTask(id)
         if (taskRes.code === 200 && taskRes.data) {
-          const task = taskRes.data
-          // 保存原始任务ID
-          setOriginalTaskId(id)
-          // 从任务创建检查记录
-          const createRes: any = await recordApi.createRecord({
-            template_id: task.template_id,
-            enterprise_name: task.target_name,
-            enterprise_address: task.target_address,
-            contact_person: task.target_contact,
-            contact_phone: task.target_phone,
-            remarks: task.remarks
-          })
-          if (createRes.code === 200 && createRes.data) {
-            const newRecordId = createRes.data.id
-            setActualRecordId(newRecordId)
-            // 获取新创建的检查记录
-            const res: any = await recordApi.getRecord(newRecordId)
-            if (res.code === 200 && res.data) {
-              setRecord(res.data)
-              const templateItems = res.data?.template?.items || []
-              setItems(templateItems)
-              const flat = flattenItems(templateItems)
-              setFlatItems(flat)
-              return
-            }
-          }
+          await loadTaskMode(taskRes.data)
+          return
         }
       } catch (e) {
-        console.error('Failed to create record from task:', e)
+        console.error('Failed to load task inspection:', e)
       }
 
       message.error('获取检查数据失败')
@@ -136,30 +202,74 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     }
   }
 
-  const flattenItems = (items: any[], result: any[] = []): any[] => {
-    for (const item of items) {
-      if (!item.is_category) {
-        result.push(item)
-      }
-      if (item.children && item.children.length > 0) {
-        flattenItems(item.children, result)
-      }
-    }
-    return result
-  }
-
   const currentItem = flatItems[currentIndex]
-  const recordId = actualRecordId || record?.id
+  const recordId = actualRecordId || (executionMode === 'record' ? record?.id : null)
+  const isTaskMode = executionMode === 'task'
+  const isCompleted = record?.status === 'submitted' || record?.task_status === 'completed'
 
-  const handleResultChange = async (field: string, value: any) => {
-    if (!currentItem || !recordId) return
-    setSaving(true)
-    try {
-      const valueToSend = (field === 'numeric_value' || field === 'score_value') && typeof value === 'number'
+  const buildTaskItemPayload = (item: any, field: string, value: any) => {
+    const valueToSend =
+      (field === 'numeric_value' || field === 'score_value') && typeof value === 'number'
         ? String(value)
         : value
+    const payload: any = {}
+    if (field === 'radio_value') {
+      payload.result = valueToSend
+    } else if (field === 'score_value' || field === 'numeric_value') {
+      payload.result_value = valueToSend == null ? null : String(valueToSend)
+      if (!item.radio_value && !item.result) payload.result = 'pass'
+    } else if (field === 'text_value') {
+      payload.result_text = valueToSend
+    } else if (field === 'inspector_note') {
+      payload.inspector_note = valueToSend
+    } else if (field === 'multi_value') {
+      payload.result_text = Array.isArray(valueToSend) ? valueToSend.join(',') : valueToSend
+    } else {
+      payload[field] = valueToSend
+    }
+    return { payload, valueToSend }
+  }
+
+  const handleResultChange = async (field: string, value: any) => {
+    if (!currentItem) return
+    setSaving(true)
+    try {
+      if (isTaskMode) {
+        if (!taskId) return
+        const { payload, valueToSend } = buildTaskItemPayload(currentItem, field, value)
+        let res: any
+        if (currentItem.id) {
+          res = await taskApi.updateRecord(currentItem.id, payload)
+        } else {
+          res = await taskApi.createRecord(taskId, {
+            template_item_id: currentItem.template_item_id,
+            ...payload,
+          })
+        }
+        const updatedItems = flatItems.map((item, idx) => {
+          if (idx !== currentIndex) return item
+          const next = {
+            ...item,
+            [field]: valueToSend,
+            id: res.data?.id || item.id,
+          }
+          if (field === 'radio_value') next.result = valueToSend
+          if (field === 'score_value' || field === 'numeric_value') next.result_value = valueToSend
+          if (field === 'text_value') next.result_text = valueToSend
+          return next
+        })
+        setFlatItems(updatedItems)
+        message.success('已保存')
+        return
+      }
+
+      if (!recordId) return
+      const valueToSend =
+        (field === 'numeric_value' || field === 'score_value') && typeof value === 'number'
+          ? String(value)
+          : value
       const res: any = await recordApi.createRecordItem(recordId, {
-        template_item_id: currentItem.template_item_id,
+        template_item_id: currentItem.template_item_id || currentItem.id,
         [field]: valueToSend,
       })
       const updatedItems = flatItems.map((item, idx) => {
@@ -178,8 +288,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   const handleLLMRequest = async () => {
-    if (!currentItem || !recordId) return
-    if (!currentItem.id || currentItem.id === currentItem.template_item_id) {
+    if (!currentItem) return
+    const llmTaskId = isTaskMode ? taskId : recordId
+    if (!llmTaskId || !currentItem.id || currentItem.id === currentItem.template_item_id) {
       setLlmContent('请先填写检查结果后再获取AI建议')
       setDrawerVisible(true)
       return
@@ -187,7 +298,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     setLlmLoading(true)
     setDrawerVisible(true)
     try {
-      const res: any = await llmApi.getSuggestion({ task_id: recordId, record_id: currentItem.id, use_cache: false })
+      const res: any = await llmApi.getSuggestion({
+        task_id: String(llmTaskId),
+        record_id: currentItem.id,
+        use_cache: false,
+      })
       setLlmContent(res.data?.content || '暂无内容')
     } catch (error) {
       setLlmContent('获取失败，请稍后重试')
@@ -198,9 +313,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   // 采纳AI建议 - 填入审核记录
   const handleAcceptAISuggestion = async () => {
-    if (!currentItem || !llmContent || !recordId) return
+    if (!currentItem || !llmContent) return
 
-    // 更新当前项的审核记录
     const updatedItems = flatItems.map((item, idx) => {
       if (idx === currentIndex) {
         return { ...item, inspector_note: llmContent }
@@ -209,26 +323,46 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     })
     setFlatItems(updatedItems)
 
-    // 保存到后端
     try {
-      await recordApi.createRecordItem(recordId, {
-        template_item_id: currentItem.template_item_id,
-        inspector_note: llmContent,
-      })
+      if (isTaskMode) {
+        if (currentItem.id) {
+          await taskApi.updateRecord(currentItem.id, { inspector_note: llmContent })
+        } else if (taskId) {
+          await taskApi.createRecord(taskId, {
+            template_item_id: currentItem.template_item_id,
+            inspector_note: llmContent,
+          })
+        }
+      } else if (recordId) {
+        await recordApi.createRecordItem(recordId, {
+          template_item_id: currentItem.template_item_id || currentItem.id,
+          inspector_note: llmContent,
+        })
+      }
       message.success('已采纳AI建议')
     } catch (error) {
       message.error('保存失败')
     }
 
-    // 关闭抽屉
     setDrawerVisible(false)
     setLlmContent(null)
   }
 
   // 保存最终判定
   const handleSaveFinalJudgment = async () => {
-    if (!recordId) return
     try {
+      if (isTaskMode && taskId) {
+        const remarkText = [
+          finalJudgment.result ? `最终判定:${finalJudgment.result}` : '',
+          finalJudgment.remarks || '',
+        ]
+          .filter(Boolean)
+          .join(' | ')
+        await taskApi.updateTask(taskId, { remarks: remarkText })
+        message.success('最终判定已保存')
+        return
+      }
+      if (!recordId) return
       await recordApi.updateRecord(recordId, {
         overall_result: finalJudgment.result,
         remarks: finalJudgment.remarks,
@@ -241,7 +375,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   // AI生成最终判定
   const handleGenerateAIJudgment = async () => {
-    if (!recordId || !token) return
+    if (!token) return
+    const streamId = isTaskMode ? taskId : recordId
+    if (!streamId) return
     setAiJudgmentLoading(true)
     setAiJudgmentThinking(true)
     setAiJudgmentThinkingContent('')
@@ -250,8 +386,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      const streamPath = isTaskMode
+        ? `/api/tasks/${streamId}/final-judgment-stream`
+        : `/api/records/${streamId}/final-judgment-stream`
 
-      const response = await fetch(`${API_URL}/api/records/${recordId}/final-judgment-stream`, {
+      const response = await fetch(`${API_URL}${streamPath}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Accept': 'text/event-stream',
@@ -328,7 +467,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   const handleSubmit = async () => {
-    if (!recordId) return
+    if (!isTaskMode && !recordId) return
+    if (isTaskMode && !taskId) return
 
     // 校验必填项和必传附件
     const incompleteItems: string[] = []
@@ -336,10 +476,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
     flatItems.forEach((item, index) => {
       if (item.is_required !== false) {
-        const hasResult = item.radio_value ||
-          item.numeric_value !== undefined ||
+        const hasResult =
+          item.radio_value ||
+          (item.numeric_value !== undefined && item.numeric_value !== '' && item.numeric_value !== null) ||
           item.text_value ||
-          item.score_value !== undefined
+          (item.score_value !== undefined && item.score_value !== '' && item.score_value !== null)
         if (!hasResult) {
           incompleteItems.push(`第${index + 1}项: ${item.title || '未命名'}`)
         }
@@ -355,7 +496,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
     if (incompleteItems.length > 0 || missingAttachments.length > 0) {
       Modal.error({
-        title: '提交失败',
+        title: isCompleted ? '保存失败' : '提交失败',
         width: 520,
         content: (
           <div>
@@ -391,8 +532,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       return
     }
 
-    // 校验最终判定
-    if (!finalJudgment.result) {
+    // 任务模式：最终判定可选（写入 remarks）；记录模式：首次提交必填
+    if (!isTaskMode && !finalJudgment.result) {
       Modal.error({
         title: '提交失败',
         content: '请先选择最终判定结果（合格/基本合格/不合格）',
@@ -400,9 +541,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       return
     }
 
-    // 显示确认对话框
+    const alreadyDone = isCompleted
     Modal.confirm({
-      title: '确认提交',
+      title: alreadyDone ? '确认保存修改' : '确认提交',
       width: 480,
       content: (
         <div>
@@ -410,41 +551,83 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
             <span>✅ 合格：{passCount} 项</span>
             {failCount > 0 && <span style={{ color: '#ff4d4f' }}>❌ 不合格：{failCount} 项</span>}
-            {pendingRectificationCount > 0 && <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>}
-            {notApplicableCount > 0 && <span style={{ color: '#999' }}>⚪ 未涉及：{notApplicableCount} 项</span>}
+            {pendingRectificationCount > 0 && (
+              <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>
+            )}
+            {notApplicableCount > 0 && (
+              <span style={{ color: '#999' }}>⚪ 未涉及：{notApplicableCount} 项</span>
+            )}
           </div>
-          <div style={{ marginBottom: 8 }}>
-            <strong>最终判定：</strong>
-            <Tag color={finalJudgment.result === 'pass' ? 'success' : finalJudgment.result === 'partial_pass' ? 'warning' : 'error'}>
-              {finalJudgment.result === 'pass' ? '合格' : finalJudgment.result === 'partial_pass' ? '基本合格' : '不合格'}
-            </Tag>
+          {finalJudgment.result && (
+            <div style={{ marginBottom: 8 }}>
+              <strong>最终判定：</strong>
+              <Tag
+                color={
+                  finalJudgment.result === 'pass'
+                    ? 'success'
+                    : finalJudgment.result === 'partial_pass'
+                      ? 'warning'
+                      : 'error'
+                }
+              >
+                {finalJudgment.result === 'pass'
+                  ? '合格'
+                  : finalJudgment.result === 'partial_pass'
+                    ? '基本合格'
+                    : '不合格'}
+              </Tag>
+            </div>
+          )}
+          <div style={{ color: '#999', fontSize: 12 }}>
+            {alreadyDone
+              ? '将保存您对检查结果的修改，可随时再次调整。'
+              : isTaskMode
+                ? '提交后任务将标记为已完成，之后仍可打开本页查看并修改结果。'
+                : '提交后将无法修改，确定要提交吗？'}
           </div>
-          <div style={{ color: '#999', fontSize: 12 }}>提交后将无法修改，确定要提交吗？</div>
         </div>
       ),
       onOk: async () => {
         try {
+          if (isTaskMode && taskId) {
+            const remarkText = [
+              finalJudgment.result ? `最终判定:${finalJudgment.result}` : '',
+              finalJudgment.remarks || '',
+            ]
+              .filter(Boolean)
+              .join(' | ')
+            if (remarkText) {
+              await taskApi.updateTask(taskId, { remarks: remarkText })
+            }
+            if (!alreadyDone) {
+              await taskApi.completeTask(taskId)
+            }
+            message.success(alreadyDone ? '检查结果已保存' : '检查任务已完成')
+            setRecord((prev: any) =>
+              prev
+                ? {
+                    ...prev,
+                    status: 'submitted',
+                    task_status: 'completed',
+                    remarks: remarkText || prev.remarks,
+                  }
+                : prev
+            )
+            if (onComplete) onComplete()
+            else if (!alreadyDone) navigate(backPath)
+            return
+          }
+
           await recordApi.updateRecord(recordId, {
             overall_result: finalJudgment.result,
             remarks: finalJudgment.remarks,
           })
           await recordApi.submitRecord(recordId)
-          // 如果是从任务创建的记录，同时完成原始任务
-          if (originalTaskId) {
-            try {
-              await taskApi.completeTask(originalTaskId)
-            } catch (e) {
-              console.error('Failed to complete original task:', e)
-            }
-          }
           message.success('检查记录已提交')
-          if (onComplete) {
-            onComplete()
-          } else {
-            navigate(backPath)
-          }
+          if (onComplete) onComplete()
+          else navigate(backPath)
         } catch (error) {
-          message.error('提交失败')
+          message.error(alreadyDone ? '保存失败' : '提交失败')
         }
       },
     })
@@ -452,9 +635,12 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   const handleUpload = async (uploadInfo: any) => {
     const file = uploadInfo.file as File
-    if (!recordId || !currentItem) return
+    if (!currentItem) return
     try {
-      const res: any = await mediaApi.upload(file, { record_id: recordId })
+      const uploadOpts = isTaskMode
+        ? { task_id: taskId || undefined, record_id: currentItem.id }
+        : { record_id: recordId || undefined }
+      const res: any = await mediaApi.upload(file, uploadOpts)
       const photoUrl = res.data?.file_path
       if (photoUrl) {
         const currentPhotos = currentItem.photos || []
@@ -466,10 +652,12 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           return item
         })
         setFlatItems(updatedItems)
-        await recordApi.createRecordItem(recordId, {
-          template_item_id: currentItem.template_item_id,
-          photos: updatedPhotos,
-        })
+        if (!isTaskMode && recordId) {
+          await recordApi.createRecordItem(recordId, {
+            template_item_id: currentItem.template_item_id || currentItem.id,
+            photos: updatedPhotos,
+          })
+        }
       }
       message.success('上传成功')
       if (uploadInfo.onSuccess) uploadInfo.onSuccess({}, uploadInfo.file)
@@ -480,21 +668,36 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   // 计算完成进度
-  const completedCount = flatItems.filter(item => {
-    const hasResult = item.radio_value || item.numeric_value || item.text_value || item.score_value
-    const hasRequiredAttachment = !item.attachment_required || (item.photos && item.photos.length > 0)
+  const completedCount = flatItems.filter((item) => {
+    const hasResult =
+      item.radio_value ||
+      (item.numeric_value !== undefined && item.numeric_value !== '' && item.numeric_value !== null) ||
+      item.text_value ||
+      (item.score_value !== undefined && item.score_value !== '' && item.score_value !== null)
+    const hasRequiredAttachment =
+      !item.attachment_required || (item.photos && item.photos.length > 0)
     return hasResult && hasRequiredAttachment
   }).length
   const progress = flatItems.length > 0 ? Math.round((completedCount / flatItems.length) * 100) : 0
 
   // 统计各项数量
-  const passCount = flatItems.filter(item => item.radio_value === 'pass').length
-  const failCount = flatItems.filter(item => item.radio_value === 'fail').length
-  const pendingRectificationCount = flatItems.filter(item => item.radio_value === 'pending_rectification').length
-  const notApplicableCount = flatItems.filter(item => item.radio_value === 'not_applicable').length
+  const passCount = flatItems.filter(
+    (item) => item.radio_value === 'pass' || item.radio_value === 'compliant'
+  ).length
+  const failCount = flatItems.filter(
+    (item) => item.radio_value === 'fail' || item.radio_value === 'non_compliant'
+  ).length
+  const pendingRectificationCount = flatItems.filter(
+    (item) => item.radio_value === 'pending_rectification'
+  ).length
+  const notApplicableCount = flatItems.filter(
+    (item) => item.radio_value === 'not_applicable' || item.radio_value === 'na'
+  ).length
 
-  // 是否可以提交
-  const canSubmit = progress === 100 && finalJudgment.result && record?.status === 'draft'
+  // 任务模式：完成进度满即可提交/保存；记录模式：草稿 + 最终判定
+  const canSubmit = isTaskMode
+    ? progress === 100
+    : progress === 100 && !!finalJudgment.result && record?.status === 'draft'
 
   const getResultTag = (item: any) => {
     if (item.radio_value) {
@@ -547,9 +750,10 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
             </Button>
             <span style={{ fontSize: 18, fontWeight: 600 }}>{record.enterprise_name}</span>
             <Tag color="blue">{record.template?.name}</Tag>
-            <Tag color={record.status === 'submitted' ? 'success' : 'warning'}>
-              {record.status === 'submitted' ? '已提交' : '草稿'}
+            <Tag color={isCompleted ? 'success' : 'warning'}>
+              {isCompleted ? (isTaskMode ? '已完成（可修改）' : '已提交') : isTaskMode ? '进行中' : '草稿'}
             </Tag>
+            {isTaskMode && <Tag color="processing">任务检查</Tag>}
           </Space>
           <Progress
             percent={progress}
@@ -629,7 +833,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 8, fontWeight: 500 }}>检查结果</div>
 
-              {(currentItem.result_type === 'pass_fail' || (currentItem.result_type === null && currentItem.check_type === 'radio')) && (
+              {(currentItem.result_type === 'pass_fail' ||
+                currentItem.check_type === 'radio' ||
+                (!currentItem.result_type && !currentItem.check_type)) && (
                 <Radio.Group
                   value={currentItem.radio_value}
                   onChange={(e) => handleResultChange('radio_value', e.target.value)}
@@ -641,7 +847,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
                     { value: 'fail', label: '不合格' },
                     { value: 'not_applicable', label: '未涉及' },
                   ]).map((opt: any) => (
-                    <Radio.Button key={opt.value} value={opt.value}>
+                    <Radio.Button key={opt.value || opt.label} value={opt.value}>
                       {opt.label}
                     </Radio.Button>
                   ))}
@@ -780,8 +986,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           </Card>
         )}
 
-        {/* 最终判定区域 - 当所有必填项完成后显示 */}
-        {progress === 100 && record.status === 'draft' && (
+        {/* 最终判定区域：记录草稿，或任务模式（含已完成可改） */}
+        {progress === 100 && (isTaskMode || record.status === 'draft') && (
           <Card
             style={{ marginTop: 16 }}
             title={
@@ -957,14 +1163,22 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
                 disabled={!canSubmit}
                 onClick={handleSubmit}
               >
-                提交检查结果
+                {isCompleted ? '保存修改' : isTaskMode ? '完成检查任务' : '提交检查结果'}
               </Button>
             </div>
 
-            {!finalJudgment.result && (
+            {!isTaskMode && !finalJudgment.result && (
               <Alert
                 type="info"
                 message="请选择最终判定结果（合格/基本合格/不合格）后才能提交"
+                style={{ marginTop: 16 }}
+                showIcon
+              />
+            )}
+            {isTaskMode && isCompleted && (
+              <Alert
+                type="success"
+                message="任务已完成，可直接修改各项检查结果后点击「保存修改」"
                 style={{ marginTop: 16 }}
                 showIcon
               />

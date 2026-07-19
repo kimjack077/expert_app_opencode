@@ -165,18 +165,62 @@ def test_area_record_word_contains_confirmed_clause_and_evidence():
 
 
 def test_package_uses_only_the_latest_artifact_version_per_type():
+    # 同类型不同文件名（多区域记录）都应保留；同名只保留最高版本
     artifacts = [
-        SimpleNamespace(artifact_type="area_record", version=1),
-        SimpleNamespace(artifact_type="area_record", version=2),
-        SimpleNamespace(artifact_type="audit_report", version=1),
+        SimpleNamespace(artifact_type="area_record", version=1, filename="区域A.docx", id="1"),
+        SimpleNamespace(artifact_type="area_record", version=2, filename="区域B.docx", id="2"),
+        SimpleNamespace(artifact_type="area_record", version=3, filename="区域A.docx", id="3"),
+        SimpleNamespace(artifact_type="audit_report", version=1, filename="报告.docx", id="4"),
     ]
 
     latest = ProjectArtifactService._latest_artifacts(artifacts)
 
-    assert {(item.artifact_type, item.version) for item in latest} == {
-        ("area_record", 2),
-        ("audit_report", 1),
+    assert {(item.filename, item.version) for item in latest} == {
+        ("区域A.docx", 3),
+        ("区域B.docx", 2),
+        ("报告.docx", 1),
     }
+
+
+def test_user_facing_deliverables_are_word_not_json():
+    project = SimpleNamespace(title="测试项目", project_no="AUDIT-1", status="completed", audit_type="initial", certification_systems=["Q"])
+    snapshot = {
+        "project": {"title": "测试项目", "project_no": "AUDIT-1", "status": "completed", "audit_type": "initial", "certification_systems": ["Q"]},
+        "plan_items": [{"area": "推磨车间", "status": "completed", "clauses": ["5.1", "7.1"]}],
+        "area_records": [],
+        "nonconformities": [],
+        "documents": [],
+        "drafts": [],
+    }
+    quality = {
+        "passed": True,
+        "completeness_score": 100,
+        "consistency_score": 100,
+        "checked_at": "2026-07-19T00:00:00+00:00",
+        "completeness": {
+            "organization_materials": True,
+            "audit_plan": True,
+            "area_records": True,
+            "ai_drafts": True,
+            "nonconformities": True,
+            "document_index": True,
+        },
+        "blockers": [],
+        "warnings": [],
+        "consistency": {"plan_count": 1, "record_count": 0, "confirmed_draft_count": 0, "nonconformity_count": 0},
+    }
+
+    for builder in (
+        lambda: ProjectArtifactService._project_summary_docx(project, snapshot),
+        lambda: ProjectArtifactService._audit_plan_docx(project, snapshot),
+        lambda: ProjectArtifactService._quality_check_docx(project, quality, snapshot),
+        lambda: ProjectArtifactService._package_file_list_docx(project, quality, [{"path": "a.docx", "size": 10, "sha256": "abc"}]),
+    ):
+        content = builder()
+        assert content[:2] == b"PK"  # docx is a zip container
+        document = Document(io.BytesIO(content))
+        text = "\n".join(p.text for p in document.paragraphs)
+        assert "测试项目" in text or "AUDIT-1" in text or "资料包" in text or "完整性" in text
 
 
 def test_package_generation_runs_as_a_retryable_background_job():

@@ -1,6 +1,6 @@
 <template>
   <main class="audit-session-page">
-    <van-nav-bar title="AI 现场审核" left-arrow fixed placeholder @click-left="router.push('/today-audit')" />
+    <van-nav-bar title="AI 现场审核" left-arrow fixed placeholder @click-left="goBack" />
 
     <section class="session-summary">
       <div>
@@ -8,13 +8,59 @@
         <h1>{{ statusText }}</h1>
         <p>{{ planItem ? `${planItem.plan_date} ${planItem.time_start || ''}-${planItem.time_end || ''}` : '正在加载审核任务' }}</p>
         <p v-if="analyzing" class="progress-hint">
-          <van-icon name="loading" spin /> AI 正在分析证据，请稍候...
+          <van-icon name="loading" spin /> {{ analyzeStepText }}
+        </p>
+        <p v-else-if="isCompleted" class="progress-hint success">
+          <van-icon name="checked" /> 本区域审核记录已提交，可返回继续其他任务
         </p>
         <p v-else-if="session.model_status === 'fallback'" class="progress-hint warning">
           <van-icon name="warning-o" /> {{ session.model_status_message || '部分草稿由保守回退生成，需人工复核' }}
         </p>
       </div>
-      <van-progress :percentage="progress" stroke-width="8" color="#0369A1" />
+      <van-progress :percentage="displayProgress" stroke-width="8" color="#0369A1" />
+      <p v-if="analyzing" class="progress-step-label">{{ analyzeStepText }}（{{ analyzeProgress }}%）</p>
+    </section>
+
+    <!-- 分析中的步骤条 -->
+    <section v-if="analyzing" class="work-card analyze-status-card" aria-live="polite">
+      <div class="section-title">
+        <div>
+          <p class="eyebrow">进行中</p>
+          <h2>AI 多条款分析</h2>
+        </div>
+        <van-tag type="primary">请稍候</van-tag>
+      </div>
+      <ol class="analyze-steps">
+        <li v-for="step in analyzeSteps" :key="step.key" :class="stepClass(step.key)">
+          <span class="step-dot">
+            <van-icon v-if="isStepDone(step.key)" name="success" />
+            <van-loading v-else-if="isStepActive(step.key)" size="14" />
+            <span v-else class="step-index">{{ step.index }}</span>
+          </span>
+          <div class="step-body">
+            <strong>{{ step.title }}</strong>
+            <p>{{ step.desc }}</p>
+          </div>
+        </li>
+      </ol>
+      <p class="analyze-tip">通常需要数秒到半分钟，请勿关闭页面。分析完成后请逐条人工复核再采纳。</p>
+    </section>
+
+    <!-- 提交成功引导 -->
+    <section v-if="isCompleted" class="work-card success-card">
+      <div class="success-hero">
+        <van-icon name="checked" size="36" color="#059669" />
+        <div>
+          <p class="eyebrow">已完成</p>
+          <h2>审核记录已提交</h2>
+          <p class="success-copy">区域结论与已确认条款已同步到任务进度。你可以返回继续其他区域，或留在本页查看已提交内容。</p>
+        </div>
+      </div>
+      <div class="review-actions">
+        <van-button block type="primary" @click="goTodayAudit">返回今日审核</van-button>
+        <van-button block plain type="primary" @click="goResultPage">查看完整结果</van-button>
+        <van-button block plain type="primary" @click="goAuditTasks">查看全部审核任务</van-button>
+      </div>
     </section>
 
     <section v-if="blockers.length" class="alert-card" role="alert">
@@ -39,10 +85,10 @@
       </article>
     </section>
 
-    <section class="work-card">
+    <section v-if="!isCompleted" class="work-card">
       <div class="section-title">
         <div><p class="eyebrow">证据采集</p><h2>现场证据</h2></div>
-        <button type="button" class="icon-button" aria-label="语音输入" :disabled="isCompleted" @click="toggleVoice">
+        <button type="button" class="icon-button" aria-label="语音输入" :disabled="isCompleted || analyzing" @click="toggleVoice">
           <van-icon :name="listening ? 'stop-circle-o' : 'volume-o'" size="22" />
         </button>
       </div>
@@ -54,25 +100,32 @@
         show-word-limit
         label="现场描述"
         placeholder="一次描述完整现场情况，Agent 会自动拆分并匹配多个条款"
+        :disabled="analyzing"
       />
-      <van-uploader v-model="photoFiles" multiple :max-count="5" :disabled="isCompleted" :after-read="uploadPhoto" />
-      <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted" @click="showAgent = true">
+      <van-uploader v-model="photoFiles" multiple :max-count="5" :disabled="isCompleted || analyzing" :after-read="uploadPhoto" />
+      <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted || analyzing" @click="showAgent = true">
         打开 AI 审核助手
       </van-button>
-      <van-button block type="primary" class="primary-action" :loading="analyzing" loading-text="AI 正在分析..." :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
-        {{ analyzing ? 'AI 正在分析...' : '生成多条款 AI 记录' }}
+      <van-button block type="primary" class="primary-action" :loading="analyzing" :loading-text="analyzeStepText" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
+        {{ analyzing ? analyzeStepText : '生成多条款 AI 记录' }}
       </van-button>
     </section>
 
     <section class="work-card">
       <div class="section-title">
-        <div><p class="eyebrow">人工复核</p><h2>待确认 AI 记录</h2></div>
+        <div>
+          <p class="eyebrow">人工复核</p>
+          <h2>待确认 AI 记录</h2>
+          <p v-if="confirmedDrafts.length || pendingDrafts.length" class="section-subhint">
+            按条款去重展示 · 已确认 {{ confirmedDrafts.length }} · 待确认 {{ pendingDrafts.length }}
+          </p>
+        </div>
         <van-tag v-if="pendingDrafts.length" type="warning">{{ pendingDrafts.length }} 条</van-tag>
       </div>
-      <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里。请逐条核对条款与判定后再采纳。" />
+      <van-empty v-if="!loading && pendingDrafts.length === 0" :description="isCompleted ? '本会话已无待确认记录' : '提交现场证据后，AI 草稿会显示在这里（同一条款多次生成只会保留最新一条）。请逐条核对后再采纳。'" />
       <van-checkbox-group v-else v-model="selectedDraftIds">
         <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
-          <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft)">
+          <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft) || isCompleted">
             <div class="draft-heading">
               <strong>{{ clauseText(draft) }}</strong>
               <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
@@ -111,7 +164,7 @@
           </van-button>
         </article>
       </van-checkbox-group>
-      <div v-if="pendingDrafts.length" class="review-actions">
+      <div v-if="pendingDrafts.length && !isCompleted" class="review-actions">
         <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted || safeDraftCount === 0" @click="confirmSafeDrafts">
           批量采纳安全项（排除回退/异常）
         </van-button>
@@ -140,7 +193,7 @@
       </article>
     </section>
 
-    <section class="work-card final-card">
+    <section v-if="!isCompleted" class="work-card final-card">
       <div class="section-title"><div><p class="eyebrow">提交</p><h2>最终结论与提交</h2></div></div>
       <van-field v-model="conclusion" type="textarea" rows="4" label="区域结论" :readonly="isCompleted" placeholder="根据已确认记录形成最终审核结论" />
       <div class="review-actions">
@@ -157,9 +210,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showConfirmDialog, showToast } from 'vant'
+import { showConfirmDialog, showDialog, showToast } from 'vant'
 import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
 import { citationSourceLabel } from '@/utils/display.js'
 
@@ -183,6 +236,8 @@ const session = ref({})
 const planItem = ref(null)
 const loading = ref(true)
 const analyzing = ref(false)
+const analyzeProgress = ref(0)
+const analyzeStepKey = ref('idle')
 const confirming = ref(false)
 const checking = ref(false)
 const submitting = ref(false)
@@ -196,6 +251,27 @@ const mediaFileIds = ref([])
 const selectedDraftIds = ref([])
 const qualityCheck = ref({ blockers: [], warnings: [] })
 let speechRecognition = null
+let analyzeTimer = null
+
+const analyzeSteps = [
+  { key: 'submit', index: 1, title: '提交现场证据', desc: '保存文字描述与附件' },
+  { key: 'match', index: 2, title: '匹配候选条款', desc: '从计划模板中筛选相关条款' },
+  { key: 'llm', index: 3, title: 'AI 多条款判定', desc: '模型分析证据并生成草稿' },
+  { key: 'done', index: 4, title: '整理待确认记录', desc: '生成结果并刷新列表' }
+]
+
+const stepOrder = analyzeSteps.map((s) => s.key)
+
+const analyzeStepText = computed(() => {
+  const current = analyzeSteps.find((s) => s.key === analyzeStepKey.value)
+  if (!current) return 'AI 正在分析...'
+  return current.title
+})
+
+const displayProgress = computed(() => {
+  if (analyzing.value) return Math.max(session.value.progress || 10, analyzeProgress.value)
+  return session.value.progress ?? (drafts.value.length ? Math.min(95, 20 + drafts.value.filter((item) => item.status === 'confirmed').length * 15) : 10)
+})
 
 const drafts = computed(() => session.value.drafts || [])
 const pendingDrafts = computed(() => drafts.value.filter((item) => item.status === 'draft'))
@@ -203,8 +279,11 @@ const confirmedDrafts = computed(() => drafts.value.filter((item) => item.status
 const savedSubmissions = computed(() => (session.value.submissions || []).filter((item) => item.status !== 'failed'))
 const isCompleted = computed(() => session.value.status === 'completed')
 const blockers = computed(() => qualityCheck.value.blockers || qualityCheck.value.blocking_items || [])
-const progress = computed(() => session.value.progress ?? (drafts.value.length ? Math.min(95, 20 + drafts.value.filter((item) => item.status === 'confirmed').length * 15) : 10))
-const statusText = computed(() => session.value.status === 'completed' ? '审核记录已提交' : 'Agent 正在协助整理现场证据')
+const statusText = computed(() => {
+  if (session.value.status === 'completed') return '审核记录已提交'
+  if (analyzing.value) return 'AI 正在生成多条款记录'
+  return 'Agent 正在协助整理现场证据'
+})
 const sortedDrafts = computed(() => [...pendingDrafts.value].sort((left, right) => Number(isAbnormal(right)) - Number(isAbnormal(left))))
 const agentContext = computed(() => ({
   projectId: projectId.value,
@@ -234,6 +313,54 @@ const confidenceLabel = (draft) => ({ high: '高', medium: '中', low: '低' }[c
 const confidenceTagType = (draft) => ({ high: 'success', medium: 'warning', low: 'danger' }[confidenceLevel(draft)] || 'default')
 const submissionTitle = (submission) => submission.title || `${submission.input_type === 'voice' ? '语音' : '现场'}证据`
 const formatSubmissionTime = (submission) => submission.submitted_at ? new Date(submission.submitted_at).toLocaleString('zh-CN', { hour12: false }) : '刚刚保存'
+
+const isStepDone = (key) => stepOrder.indexOf(key) < stepOrder.indexOf(analyzeStepKey.value)
+const isStepActive = (key) => analyzeStepKey.value === key
+const stepClass = (key) => ({
+  done: isStepDone(key),
+  active: isStepActive(key),
+  pending: !isStepDone(key) && !isStepActive(key)
+})
+
+const clearAnalyzeTimer = () => {
+  if (analyzeTimer) {
+    clearInterval(analyzeTimer)
+    analyzeTimer = null
+  }
+}
+
+const startAnalyzeProgress = () => {
+  clearAnalyzeTimer()
+  analyzeProgress.value = 8
+  analyzeStepKey.value = 'submit'
+  // 模拟阶段推进，真实接口返回后会跳到 done
+  const timeline = [
+    { at: 1200, key: 'match', progress: 28 },
+    { at: 2800, key: 'llm', progress: 48 },
+    { at: 8000, key: 'llm', progress: 72 },
+    { at: 18000, key: 'llm', progress: 88 }
+  ]
+  const started = Date.now()
+  analyzeTimer = setInterval(() => {
+    const elapsed = Date.now() - started
+    for (const point of timeline) {
+      if (elapsed >= point.at && analyzeProgress.value < point.progress) {
+        analyzeStepKey.value = point.key
+        analyzeProgress.value = point.progress
+      }
+    }
+    // 缓慢爬升，避免假进度卡住
+    if (analyzeStepKey.value === 'llm' && analyzeProgress.value < 92) {
+      analyzeProgress.value = Math.min(92, analyzeProgress.value + 0.4)
+    }
+  }, 400)
+}
+
+const finishAnalyzeProgress = () => {
+  clearAnalyzeTimer()
+  analyzeStepKey.value = 'done'
+  analyzeProgress.value = 100
+}
 
 const unwrap = (response) => response?.data || response || {}
 
@@ -281,7 +408,7 @@ const uploadPhoto = async (fileItem) => {
 }
 
 const toggleVoice = () => {
-  if (isCompleted.value) return
+  if (isCompleted.value || analyzing.value) return
   if (listening.value && speechRecognition) return speechRecognition.stop()
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
   if (!Recognition) return showToast('当前浏览器不支持语音识别，请使用文字输入')
@@ -303,23 +430,40 @@ const toggleVoice = () => {
 const analyzeEvidence = async () => {
   if (isCompleted.value || !evidenceText.value.trim()) return
   analyzing.value = true
+  startAnalyzeProgress()
   try {
-    await submitSessionEvidence(projectId.value, sessionId.value, {
+    analyzeStepKey.value = 'submit'
+    analyzeProgress.value = Math.max(analyzeProgress.value, 15)
+    const res = await submitSessionEvidence(projectId.value, sessionId.value, {
       content: evidenceText.value.trim(),
       evidence_type: mediaFileIds.value.length ? 'mixed' : (usedVoiceInput.value ? 'voice' : 'text'),
       media_file_ids: mediaFileIds.value,
       source_metadata: { plan_item_id: planItemId.value, area_name: planItem.value?.area_name }
     })
+    finishAnalyzeProgress()
+    const payload = unwrap(res)
+    const draftCount = Array.isArray(payload?.drafts) ? payload.drafts.length : 0
+    const fallbackCount = Number(payload?.fallback_count || 0)
     evidenceText.value = ''
     photoFiles.value = []
     mediaFileIds.value = []
     usedVoiceInput.value = false
-    showToast('AI 已生成待确认记录')
+    if (draftCount === 0) {
+      showToast(res?.message || '未生成待确认记录：请确认计划已绑定检查模板')
+    } else if (fallbackCount > 0) {
+      showToast(res?.message || `已生成 ${draftCount} 条记录（${fallbackCount} 条为保守回退，需人工复核）`)
+    } else {
+      showToast(res?.message || `AI 已生成 ${draftCount} 条待确认记录`)
+    }
     await loadSession()
   } catch (error) {
-    showToast(error?.message || 'AI 证据分析失败，请重试')
+    const detail = error?.response?.data?.detail || error?.message
+    showToast(typeof detail === 'string' ? detail : 'AI 证据分析失败，请重试')
   } finally {
+    clearAnalyzeTimer()
     analyzing.value = false
+    analyzeStepKey.value = 'idle'
+    analyzeProgress.value = 0
   }
 }
 
@@ -363,6 +507,23 @@ const runQualityCheck = async () => {
   }
 }
 
+const goBack = () => {
+  router.push('/today-audit')
+}
+const goTodayAudit = () => {
+  router.replace('/today-audit')
+}
+const goAuditTasks = () => {
+  router.replace('/audit-tasks')
+}
+const goResultPage = () => {
+  router.replace({
+    name: 'AuditSessionResult',
+    params: { sessionId: sessionId.value },
+    query: { projectId: projectId.value, planItemId: planItemId.value }
+  })
+}
+
 const submitSession = async () => {
   if (isCompleted.value) return showToast('审核记录已提交')
   await runQualityCheck()
@@ -374,8 +535,19 @@ const submitSession = async () => {
   submitting.value = true
   try {
     await submitAuditSession(projectId.value, sessionId.value, { conclusion: conclusion.value.trim() })
-    showToast('审核记录提交成功')
     await loadSession()
+    try {
+      await showDialog({
+        title: '提交成功',
+        message: '本区域审核记录已提交。可查看完整结果，或返回今日审核继续其他任务。',
+        confirmButtonText: '查看结果',
+        showCancelButton: true,
+        cancelButtonText: '返回今日审核'
+      })
+      goResultPage()
+    } catch {
+      goTodayAudit()
+    }
   } catch (error) {
     showToast(error?.message || '提交失败')
   } finally {
@@ -384,6 +556,7 @@ const submitSession = async () => {
 }
 
 onMounted(loadSession)
+onBeforeUnmount(clearAnalyzeTimer)
 </script>
 
 <style scoped>
@@ -391,9 +564,24 @@ onMounted(loadSession)
 .session-summary,.work-card,.alert-card{margin-bottom:14px;padding:18px;border:1px solid var(--border-light);border-radius:var(--radius-lg);background:#fff;box-shadow:var(--shadow-sm)}
 .session-summary{color:#fff;background:var(--primary-gradient-dark)}.session-summary h1{margin:3px 0 5px;font-size:20px}.session-summary p{margin:0 0 14px;color:rgba(255,255,255,.84)}
 .eyebrow{margin:0 0 3px;font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--primary-color)}.session-summary .eyebrow{color:rgba(255,255,255,.72)}
-.section-title,.card-title,.draft-heading,.draft-meta,.review-actions{display:flex;align-items:center}.section-title{justify-content:space-between;margin-bottom:12px}.section-title h2{margin:0;font-size:18px}.icon-button{width:44px;height:44px;border:0;border-radius:12px;color:var(--primary-color);background:var(--info-bg)}
+.section-title,.card-title,.draft-heading,.draft-meta,.review-actions{display:flex;align-items:center}.section-title{justify-content:space-between;margin-bottom:12px;align-items:flex-start}.section-title h2{margin:0;font-size:18px}.section-subhint{margin:4px 0 0;font-size:12px;color:var(--text-secondary);font-weight:400;letter-spacing:0}.icon-button{width:44px;height:44px;border:0;border-radius:12px;color:var(--primary-color);background:var(--info-bg)}
 .primary-action{min-height:48px;margin-top:14px}.alert-card{border-color:#fecaca;background:#fff7f7;color:#991b1b}.card-title{gap:8px;font-weight:700}.alert-card ul{margin:10px 0 0 20px}
-.draft-card,.saved-evidence-card{margin:10px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px}.draft-card.abnormal{border-color:#fca5a5;background:linear-gradient(90deg,var(--error-bg),#fff 45%)}.draft-card.fallback{border-color:#fbbf24;background:linear-gradient(90deg,#fef3c7,#fff 45%)}.draft-fallback-notice{margin:8px 0 6px;padding:6px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:12px;font-weight:600}.progress-hint{margin:6px 0 0;color:rgba(255,255,255,.92);font-size:13px;font-weight:500}.progress-hint.warning{color:#fde68a}.draft-heading{gap:8px;justify-content:space-between;min-width:220px}.draft-evidence,.reasoning{margin:10px 0;font-size:14px;line-height:1.6}.draft-meta{flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary)}.confidence-cell{display:inline-flex;align-items:center;gap:4px}.citation{padding:8px;border-radius:8px;background:var(--bg-light);font-size:12px}.review-actions{flex-direction:column;gap:10px;margin-top:14px}.final-card{margin-bottom:0}
+.draft-card,.saved-evidence-card{margin:10px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px}.draft-card.abnormal{border-color:#fca5a5;background:linear-gradient(90deg,var(--error-bg),#fff 45%)}.draft-card.fallback{border-color:#fbbf24;background:linear-gradient(90deg,#fef3c7,#fff 45%)}.draft-fallback-notice{margin:8px 0 6px;padding:6px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:12px;font-weight:600}.progress-hint{margin:6px 0 0;color:rgba(255,255,255,.92);font-size:13px;font-weight:500}.progress-hint.warning{color:#fde68a}.progress-hint.success{color:#bbf7d0}.progress-step-label{margin:8px 0 0!important;font-size:12px;color:rgba(255,255,255,.8)!important}.draft-heading{gap:8px;justify-content:space-between;min-width:220px}.draft-evidence,.reasoning{margin:10px 0;font-size:14px;line-height:1.6}.draft-meta{flex-wrap:wrap;gap:8px 14px;font-size:12px;color:var(--text-secondary)}.confidence-cell{display:inline-flex;align-items:center;gap:4px}.citation{padding:8px;border-radius:8px;background:var(--bg-light);font-size:12px}.review-actions{flex-direction:column;gap:10px;margin-top:14px}.final-card{margin-bottom:0}
 .agent-entry{min-height:44px;margin-top:10px}
+.analyze-status-card{border-color:#bae6fd;background:linear-gradient(180deg,#f0f9ff,#fff 55%)}
+.analyze-steps{margin:0;padding:0;list-style:none}
+.analyze-steps li{display:flex;gap:12px;padding:10px 0;border-bottom:1px dashed var(--border-light)}
+.analyze-steps li:last-child{border-bottom:0}
+.step-dot{flex:0 0 28px;width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--bg-light);color:var(--text-secondary);font-size:12px;font-weight:700}
+.analyze-steps li.active .step-dot{background:#e0f2fe;color:var(--primary-color)}
+.analyze-steps li.done .step-dot{background:#d1fae5;color:#059669}
+.step-body strong{display:block;font-size:14px;color:var(--text-primary)}
+.step-body p{margin:2px 0 0;font-size:12px;color:var(--text-secondary)}
+.analyze-steps li.pending{opacity:.55}
+.analyze-tip{margin:12px 0 0;padding:10px 12px;border-radius:10px;background:#eff6ff;color:#1e40af;font-size:12px;line-height:1.5}
+.success-card{border-color:#a7f3d0;background:linear-gradient(180deg,#ecfdf5,#fff 50%)}
+.success-hero{display:flex;gap:14px;align-items:flex-start}
+.success-hero h2{margin:0 0 6px;font-size:18px}
+.success-copy{margin:0;color:var(--text-secondary);font-size:13px;line-height:1.55}
 @media(min-width:700px){.audit-session-page{max-width:680px;margin:0 auto}}
 </style>

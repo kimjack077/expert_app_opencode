@@ -52,32 +52,99 @@ def draft_dict(item: AiDraftRecord) -> dict[str, Any]:
     return {"id": str(item.id), "session_id": str(item.session_id), "submission_id": str(item.submission_id) if item.submission_id else None, "area_record_id": str(item.area_record_id) if item.area_record_id else None, "plan_item_id": str(item.plan_item_id) if item.plan_item_id else None, "clause_refs": item.clause_refs or [], "primary_clause_no": item.primary_clause_no, "certification_system": item.certification_system, "evaluation": item.evaluation, "finding_text": item.finding_text, "record_payload": item.record_payload or {}, "quality": quality, "reasoning": item.reasoning, "confidence": float(item.confidence or 0), "citations": item.citations or [], "status": item.status, "model_status": quality.get("model_status") or "ok", "confirmed_record_item_id": str(item.confirmed_record_item_id) if item.confirmed_record_item_id else None, "created_at": item.created_at}
 
 
+def _draft_clause_key(draft: AiDraftRecord) -> str:
+    """Stable identity for one audit clause within a session (template item preferred)."""
+    payload = draft.record_payload or {}
+    template_item_id = str(payload.get("template_item_id") or "").strip()
+    if template_item_id:
+        return f"ti:{template_item_id}"
+    clause = str(draft.primary_clause_no or "").strip()
+    return f"cl:{clause}" if clause else f"id:{draft.id}"
+
+
+def _candidate_clause_key(candidate: EvidenceCandidate) -> str:
+    template_item_id = str(candidate.template_item_id or "").strip()
+    if template_item_id:
+        return f"ti:{template_item_id}"
+    clause = str(candidate.clause_no or "").strip()
+    return f"cl:{clause}" if clause else f"cand:{id(candidate)}"
+
+
+def _draft_keep_score(draft: AiDraftRecord) -> tuple:
+    """Prefer non-fallback, higher confidence, then newer when de-duplicating."""
+    quality = draft.quality or {}
+    is_fallback = 1 if quality.get("model_status") == "fallback" else 0
+    confidence = float(draft.confidence or 0)
+    created = draft.created_at.timestamp() if draft.created_at else 0.0
+    return (-is_fallback, confidence, created)
+
+
+def _supersede_draft(draft: AiDraftRecord, reason: str) -> None:
+    draft.status = "superseded"
+    draft.rejected_reason = reason
+
+
+def _dedupe_session_pending_drafts(session: AiAuditSession) -> int:
+    """Collapse historical duplicate pending drafts for the same clause.
+
+    Returns number of drafts marked superseded. Callers must commit if > 0.
+    """
+    drafts = list(session.drafts or [])
+    pending = [d for d in drafts if d.status == "draft"]
+    confirmed_keys = {_draft_clause_key(d) for d in drafts if d.status == "confirmed"}
+    superseded = 0
+
+    # Pending drafts for already-confirmed clauses are obsolete
+    for draft in pending:
+        key = _draft_clause_key(draft)
+        if key in confirmed_keys:
+            _supersede_draft(draft, "该条款已确认采纳，清除重复待确认草稿")
+            superseded += 1
+
+    pending = [d for d in drafts if d.status == "draft"]
+    by_key: dict[str, list[AiDraftRecord]] = {}
+    for draft in pending:
+        by_key.setdefault(_draft_clause_key(draft), []).append(draft)
+
+    for key, items in by_key.items():
+        if len(items) <= 1:
+            continue
+        ranked = sorted(items, key=_draft_keep_score, reverse=True)
+        for old in ranked[1:]:
+            _supersede_draft(old, "同条款存在重复待确认草稿，已保留更优/更新的一条")
+            superseded += 1
+    return superseded
+
+
 def session_dict(item: AiAuditSession, include_children: bool = False) -> dict[str, Any]:
     value = {"id": str(item.id), "project_id": str(item.project_id), "conversation_id": str(item.conversation_id) if item.conversation_id else None, "title": item.title, "status": item.status, "context_snapshot": item.context_snapshot or {}, "model_provider": item.model_provider, "model_name": item.model_name, "created_by": str(item.created_by), "started_at": item.started_at, "completed_at": item.completed_at, "created_at": item.created_at, "updated_at": item.updated_at}
     if include_children:
-        value["drafts"] = [draft_dict(draft) for draft in item.drafts]
+        # Only surface active review items; superseded/rejected stay in DB for audit trail
+        visible_drafts = [d for d in item.drafts if d.status in {"draft", "confirmed"}]
+        value["drafts"] = [draft_dict(draft) for draft in visible_drafts]
         value["submissions"] = [{"id": str(submission.id), "status": submission.status, "description": submission.description, "source_files": submission.source_files or [], "submitted_at": submission.submitted_at} for submission in item.submissions]
-        confirmed = sum(1 for draft in item.drafts if draft.status == "confirmed")
-        total = len(item.drafts)
-        # P0-8 修复：进度计算考虑草稿状态而非仅 confirmed 数
+        confirmed = sum(1 for draft in visible_drafts if draft.status == "confirmed")
+        pending = sum(1 for draft in visible_drafts if draft.status == "draft")
+        active_total = confirmed + pending
         # 阶段：分析中(10) → 草稿就绪(30+) → 部分确认(50+) → 全部确认(90) → 提交完成(100)
         if item.status == "completed":
             progress = 100
-        elif total == 0:
+        elif active_total == 0:
             progress = 10  # 已创建会话但还未提交证据
         else:
-            pending = sum(1 for draft in item.drafts if draft.status == "draft")
-            progress = min(90, 30 + (total - pending) * 60 // max(total, 1))
+            progress = min(90, 30 + confirmed * 60 // max(active_total, 1))
         value["progress"] = progress
-        # P0-1 修复：聚合模型状态，让前端显著提示
+        # 仅统计待确认中的 fallback，避免历史回退草稿继续吓人
         fallback_count = sum(
-            1 for draft in item.drafts
-            if (draft.quality or {}).get("model_status") == "fallback"
+            1 for draft in visible_drafts
+            if draft.status == "draft" and (draft.quality or {}).get("model_status") == "fallback"
         )
         value["model_status"] = "fallback" if fallback_count else "ok"
         value["fallback_draft_count"] = fallback_count
         if fallback_count:
             value["model_status_message"] = f"有 {fallback_count} 条草稿因 AI 模型异常为保守回退结果，需人工复核"
+        value["pending_clause_count"] = pending
+        value["confirmed_clause_count"] = confirmed
     return value
 
 
@@ -227,14 +294,29 @@ async def create_session(project_id: UUID, payload: AuditSessionCreateRequest, d
     await ensure_project_access(db, project_id, current_user)
     context: dict[str, Any] = {"focus": payload.focus}
     area_record_id = payload.area_record_id
+    reaudit = bool(payload.reaudit)
     if payload.plan_item_id:
         plan_item = await db.get(AuditPlanItem, payload.plan_item_id)
         if not plan_item or plan_item.project_id != project_id: raise HTTPException(status_code=404, detail="审核计划项不存在")
+        # 已完成任务发起重新审核：计划项回到进行中
+        if reaudit or plan_item.status == "completed":
+            reaudit = True
+            plan_item.status = "in_progress"
+            context["reaudit"] = True
+            context["reaudit_from_status"] = "completed"
         context.update({"plan_item_id": str(plan_item.id), "area_name": plan_item.area_name, "template_id": str(plan_item.template_id) if plan_item.template_id else None, "clauses": plan_item.clauses or [], "certification_systems": plan_item.certification_systems or []})
         if not area_record_id:
             # 修复 MultipleResultsFound：一个 plan_item 可能对应多条 area_record，取最新的 draft 记录
             existing = (await db.execute(select(AuditAreaRecord).where(AuditAreaRecord.project_id == project_id, AuditAreaRecord.plan_item_id == plan_item.id).order_by(AuditAreaRecord.created_at.desc()).limit(1))).scalars().first()
-            if existing: area_record_id = existing.id
+            if existing and not reaudit:
+                area_record_id = existing.id
+            elif existing and reaudit and existing.status not in {"submitted", "completed"}:
+                # 仍有未提交区域记录，复用
+                area_record_id = existing.id
+                if existing.status == "draft":
+                    pass
+                else:
+                    existing.status = "in_progress"
             else:
                 area = (await db.execute(select(AuditArea).where(AuditArea.project_id == project_id, AuditArea.area_name == plan_item.area_name))).scalar_one_or_none()
                 if not area:
@@ -248,21 +330,45 @@ async def create_session(project_id: UUID, payload: AuditSessionCreateRequest, d
                     )
                     db.add(area)
                     await db.flush()
-                elif area.status == "pending":
+                else:
                     area.status = "in_progress"
-                area_record = AuditAreaRecord(project_id=project_id, area_id=area.id, plan_item_id=plan_item.id, record_no=f"AR-{str(plan_item.id)[:8]}", template_id=plan_item.template_id, certification_systems=plan_item.certification_systems or [], recorded_by=current_user.id, audit_date=plan_item.plan_date, audit_time_start=plan_item.time_start, audit_time_end=plan_item.time_end, status="draft")
-                db.add(area_record); await db.flush(); area_record_id = area_record.id
-                plan_item.status = "in_progress"
+                # 重新审核时新建一轮区域记录，保留历史 submitted 记录
+                record_suffix = datetime.now(timezone.utc).strftime("%H%M%S") if reaudit else str(plan_item.id)[:8]
+                area_record = AuditAreaRecord(
+                    project_id=project_id,
+                    area_id=area.id,
+                    plan_item_id=plan_item.id,
+                    record_no=f"AR-{record_suffix}",
+                    template_id=plan_item.template_id,
+                    certification_systems=plan_item.certification_systems or [],
+                    recorded_by=current_user.id,
+                    audit_date=plan_item.plan_date,
+                    audit_time_start=plan_item.time_start,
+                    audit_time_end=plan_item.time_end,
+                    status="draft",
+                )
+                db.add(area_record)
+                await db.flush()
+                area_record_id = area_record.id
+                if not reaudit:
+                    plan_item.status = "in_progress"
+        elif plan_item.status in {"pending", "completed"}:
+            plan_item.status = "in_progress"
     if area_record_id:
         area_record = await db.get(AuditAreaRecord, area_record_id)
         if not area_record or area_record.project_id != project_id:
             raise HTTPException(status_code=404, detail="审核区域记录不存在")
         if payload.plan_item_id and area_record.plan_item_id != payload.plan_item_id:
             raise HTTPException(status_code=409, detail="区域记录与审核计划项不匹配")
+        if reaudit and area_record.status in {"submitted", "completed"}:
+            area_record.status = "in_progress"
         context["area_record_id"] = str(area_record_id)
-    session = AiAuditSession(project_id=project_id, title=payload.title or "AI 现场审核", status="active", context_snapshot=context, model_provider=settings.LLM_PROVIDER, model_name=settings.LLM_MODEL, prompt_version="project-agent-v2", created_by=current_user.id)
+    title = payload.title or "AI 现场审核"
+    if reaudit and title and "重新" not in title:
+        title = f"{title}（重新审核）"
+    session = AiAuditSession(project_id=project_id, title=title, status="active", context_snapshot=context, model_provider=settings.LLM_PROVIDER, model_name=settings.LLM_MODEL, prompt_version="project-agent-v2", created_by=current_user.id)
     db.add(session); await db.commit(); await db.refresh(session)
-    return response(session_dict(session), "审核会话已创建")
+    return response(session_dict(session), "重新审核会话已创建" if reaudit else "审核会话已创建")
 
 
 async def _load_session(db: AsyncSession, project_id: UUID, session_id: UUID, children: bool = False) -> AiAuditSession:
@@ -277,7 +383,12 @@ async def _load_session(db: AsyncSession, project_id: UUID, session_id: UUID, ch
 async def get_session(project_id: UUID, session_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user)
     item = await _load_session(db, project_id, session_id, True)
-    value = session_dict(item, True); value["quality_check"] = await _session_quality(item)
+    # 历史多次生成会堆积同条款草稿；打开会话时自动折叠
+    if _dedupe_session_pending_drafts(item):
+        await db.commit()
+        item = await _load_session(db, project_id, session_id, True)
+    value = session_dict(item, True)
+    value["quality_check"] = await _session_quality(item)
     return response(value)
 
 
@@ -326,12 +437,58 @@ async def upload_session_media(
 
 
 async def _candidates(db: AsyncSession, project_id: UUID, session: AiAuditSession, ids: list[UUID]) -> list[EvidenceCandidate]:
-    context = session.context_snapshot or {}; stmt = select(TemplateItem).where(TemplateItem.is_category.is_(False))
-    if ids: stmt = stmt.where(TemplateItem.id.in_(ids))
-    elif context.get("template_id"): stmt = stmt.where(TemplateItem.template_id == UUID(context["template_id"]))
-    else: return [EvidenceCandidate(None, None, str(clause), str(clause), certification_system=(context.get("certification_systems") or [None])[0]) for clause in context.get("clauses", [])]
+    """构建多条款候选。
+
+    优先使用 clause_no / standard_ref；若模板未填条款号，则用检查项标题兜底，
+    避免「有模板但生成 0 条草稿」的空结果。
+    """
+    context = session.context_snapshot or {}
+    stmt = select(TemplateItem).where(
+        TemplateItem.is_category.is_not(True),
+        TemplateItem.is_deleted == False,  # noqa: E712
+    )
+    if ids:
+        stmt = stmt.where(TemplateItem.id.in_(ids))
+    elif context.get("template_id"):
+        stmt = stmt.where(TemplateItem.template_id == UUID(context["template_id"]))
+    else:
+        return [
+            EvidenceCandidate(
+                None,
+                None,
+                str(clause),
+                str(clause),
+                certification_system=(context.get("certification_systems") or [None])[0],
+            )
+            for clause in context.get("clauses", [])
+        ]
     items = (await db.execute(stmt.order_by(TemplateItem.sort_order))).scalars().all()
-    return [EvidenceCandidate(str(item.id), str(item.id), item.clause_no or item.standard_ref or str(item.id), item.title, item.description or "", item.check_method or "", item.evidence_hint or "", item.risk_level or "medium", bool(item.attachment_required), (item.applicable_systems or [None])[0]) for item in items if item.clause_no or item.standard_ref]
+    candidates: list[EvidenceCandidate] = []
+    for item in items:
+        clause_key = (
+            (item.clause_no or "").strip()
+            or (item.standard_ref or "").strip()
+            or (item.title or "").strip()
+            or str(item.id)
+        )
+        if not clause_key:
+            continue
+        systems = item.applicable_systems or [None]
+        candidates.append(
+            EvidenceCandidate(
+                str(item.id),
+                str(item.id),
+                clause_key,
+                item.title or clause_key,
+                item.description or "",
+                item.check_method or "",
+                item.evidence_hint or "",
+                item.risk_level or "medium",
+                bool(item.attachment_required),
+                systems[0] if systems else None,
+            )
+        )
+    return candidates
 
 
 @router.post("/{project_id}/sessions/{session_id}/evidence")
@@ -362,18 +519,115 @@ async def submit_evidence(project_id: UUID, session_id: UUID, payload: EvidenceS
     citations = await project_knowledge_service.search_combined(
         db, project_id, payload.content, 8
     )
+    if not candidates:
+        raise HTTPException(
+            status_code=422,
+            detail="当前审核计划未绑定可用检查项（或模板无检查项），无法生成多条款 AI 记录。请在计划中绑定带检查项的模板。",
+        )
     results = await evidence_agent_service.analyze(payload.content, candidates, citations)
-    drafts = []
+
+    # Load existing drafts so re-generation supersedes same-clause history instead of stacking
+    existing_drafts = (
+        await db.execute(
+            select(AiDraftRecord).where(AiDraftRecord.session_id == session.id)
+        )
+    ).scalars().all()
+    confirmed_keys = {_draft_clause_key(d) for d in existing_drafts if d.status == "confirmed"}
+    pending_by_key: dict[str, list[AiDraftRecord]] = {}
+    for old in existing_drafts:
+        if old.status == "draft":
+            pending_by_key.setdefault(_draft_clause_key(old), []).append(old)
+
+    drafts: list[AiDraftRecord] = []
+    skipped_confirmed = 0
+    new_keys: set[str] = set()
     for result in results:
-        candidate = result["candidate"]; evaluation = result["evaluation_3level"]
-        draft = AiDraftRecord(project_id=project_id, session_id=session.id, submission_id=submission.id, area_record_id=area_record_id, plan_item_id=plan_item_id, evidence_item_ids=[evidence_item.id], clause_refs=[{"clause_no": candidate.clause_no, "title": candidate.title, "certification_system": candidate.certification_system, "rank": len(drafts) + 1}], primary_clause_no=candidate.clause_no, certification_system=candidate.certification_system, evaluation=evaluation, finding_text=result["audit_findings"] or payload.content, record_payload={"template_item_id": candidate.template_item_id, "audit_evidence": payload.content, "evaluation_3level": evaluation, "audit_findings": result["audit_findings"], "rectification_suggestion": result["rectification_suggestion"], "risk_level": candidate.risk_level, "attachment_required": candidate.attachment_required, "attachment_count": len(media_rows), "photo_paths": [media.file_path for media in media_rows]}, quality={"level": result["evidence_quality"], "risk_level": candidate.risk_level, "attachment_required": candidate.attachment_required, "attachment_missing": candidate.attachment_required and not media_rows, "model_status": result.get("model_status") or "ok"}, reasoning=result["reasoning"] or "需要人工确认", confidence=result["confidence"], citations=result["citations"], source_snapshot={"evidence": payload.content, "citations": result["citations"], "model_status": result.get("model_status") or "ok"}, status="draft", model_provider=settings.LLM_PROVIDER, model_name=settings.LLM_MODEL, prompt_version="evidence-multiclause-v2")
-        db.add(draft); drafts.append(draft)
-    submission.status = "completed"; submission.processed_at = datetime.now(timezone.utc); await db.commit()
-    fallback_count = sum(1 for r in results if r.get("model_status") == "fallback")
+        candidate = result["candidate"]
+        clause_key = _candidate_clause_key(candidate)
+        if clause_key in confirmed_keys:
+            skipped_confirmed += 1
+            continue
+        evaluation = result["evaluation_3level"]
+        draft = AiDraftRecord(
+            project_id=project_id,
+            session_id=session.id,
+            submission_id=submission.id,
+            area_record_id=area_record_id,
+            plan_item_id=plan_item_id,
+            evidence_item_ids=[evidence_item.id],
+            clause_refs=[{
+                "clause_no": candidate.clause_no,
+                "title": candidate.title,
+                "certification_system": candidate.certification_system,
+                "rank": len(drafts) + 1,
+            }],
+            primary_clause_no=candidate.clause_no,
+            certification_system=candidate.certification_system,
+            evaluation=evaluation,
+            finding_text=result["audit_findings"] or payload.content,
+            record_payload={
+                "template_item_id": candidate.template_item_id,
+                "audit_evidence": payload.content,
+                "evaluation_3level": evaluation,
+                "audit_findings": result["audit_findings"],
+                "rectification_suggestion": result["rectification_suggestion"],
+                "risk_level": candidate.risk_level,
+                "attachment_required": candidate.attachment_required,
+                "attachment_count": len(media_rows),
+                "photo_paths": [media.file_path for media in media_rows],
+            },
+            quality={
+                "level": result["evidence_quality"],
+                "risk_level": candidate.risk_level,
+                "attachment_required": candidate.attachment_required,
+                "attachment_missing": candidate.attachment_required and not media_rows,
+                "model_status": result.get("model_status") or "ok",
+            },
+            reasoning=result["reasoning"] or "需要人工确认",
+            confidence=result["confidence"],
+            citations=result["citations"],
+            source_snapshot={
+                "evidence": payload.content,
+                "citations": result["citations"],
+                "model_status": result.get("model_status") or "ok",
+            },
+            status="draft",
+            model_provider=settings.LLM_PROVIDER,
+            model_name=settings.LLM_MODEL,
+            prompt_version="evidence-multiclause-v2",
+        )
+        db.add(draft)
+        drafts.append(draft)
+        new_keys.add(clause_key)
+
+    superseded_count = 0
+    for key in new_keys:
+        for old in pending_by_key.get(key, []):
+            _supersede_draft(old, "已被新一轮 AI 分析结果替代")
+            superseded_count += 1
+
+    submission.status = "completed"
+    submission.processed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    fallback_count = sum(1 for r in drafts if (r.quality or {}).get("model_status") == "fallback")
     message = f"已生成 {len(drafts)} 条待确认记录"
+    if superseded_count:
+        message += f"（已替换 {superseded_count} 条同条款旧草稿）"
+    if skipped_confirmed:
+        message += f"（跳过 {skipped_confirmed} 条已确认条款）"
     if fallback_count:
         message += f"（其中 {fallback_count} 条因模型异常为保守回退结果，需人工复核）"
-    return response({"submission_id": str(submission.id), "drafts": [draft_dict(item) for item in drafts], "fallback_count": fallback_count}, message)
+    return response(
+        {
+            "submission_id": str(submission.id),
+            "drafts": [draft_dict(item) for item in drafts],
+            "fallback_count": fallback_count,
+            "superseded_count": superseded_count,
+            "skipped_confirmed": skipped_confirmed,
+        },
+        message,
+    )
 
 
 async def _session_quality(session: AiAuditSession) -> dict[str, Any]:

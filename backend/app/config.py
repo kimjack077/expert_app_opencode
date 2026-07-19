@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # DeepSeek V4 (via SenseNova): 1M context, up to 64K output, JSON Output / Tool Calls.
+    # Thinking mode is optional; structured JSON agents should disable thinking for speed.
     LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
     LLM_PROVIDER: str = "sensenova"
     LLM_MODEL: str = "deepseek-v4-flash"
@@ -43,6 +45,9 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 1.0
     LLM_TOP_P: float = 0.95
     LLM_TIMEOUT: int = 180
+    # When True, DeepSeek-compatible calls may use thinking mode (slower, reasoning_content).
+    # Evidence multi-clause agent always forces thinking off regardless of this flag.
+    LLM_ENABLE_THINKING: bool = False
 
     # Embedding model for RAG (NVIDIA API - backup)
     NVIDIA_API_KEY: str = "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"

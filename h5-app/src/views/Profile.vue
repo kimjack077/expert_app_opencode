@@ -245,9 +245,10 @@ onMounted(() => {
   background: var(--bg-light);
 }
 
+/* 与「检查记录」统一的紧凑横幅高度 */
 .page-header {
   position: relative;
-  padding: calc(env(safe-area-inset-top) + 18px) 16px 16px;
+  padding: 0 0 16px;
   overflow: hidden;
 }
 
@@ -280,21 +281,24 @@ onMounted(() => {
 .avatar-section {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 10px;
+  min-height: 44px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 10px;
+  margin-bottom: 0;
 }
 
 .avatar-ring {
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   padding: 2px;
   background: rgba(255, 255, 255, 0.3);
   border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 50%;
   display: flex;
@@ -305,40 +309,47 @@ onMounted(() => {
 }
 
 .avatar svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 .user-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
 }
 
 .username {
   font-size: 20px;
   font-weight: 700;
   color: var(--bg-white);
-  margin: 0 0 4px;
+  margin: 0;
   font-family: var(--font-primary);
   letter-spacing: -0.5px;
+  line-height: 1.25;
 }
 
 .user-badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .user-badge {
   min-height: 20px;
-  padding: 2px 8px;
+  padding: 1px 8px;
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  font-size: 12px;
+  font-size: 11px;
   color: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.25);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   font-weight: 500;
 }
 
@@ -353,6 +364,7 @@ onMounted(() => {
   justify-content: space-around;
   align-items: center;
   min-height: 44px;
+  margin: 0 16px;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);

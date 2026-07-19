@@ -16,6 +16,8 @@ class AuditSessionCreateRequest(BaseModel):
     plan_item_id: Optional[UUID] = None
     area_record_id: Optional[UUID] = None
     focus: Optional[str] = Field(None, max_length=2000)
+    # 已完成任务再次进入时开启新一轮现场审核
+    reaudit: bool = False
 
 
 class EvidenceSubmitRequest(BaseModel):

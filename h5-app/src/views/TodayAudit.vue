@@ -1,27 +1,39 @@
 <template>
   <main class="today-audit-page">
-    <van-nav-bar title="今日审核" fixed placeholder>
-      <template #right>
-        <button class="nav-action" type="button" aria-label="进入全部功能" @click="router.push('/home')">
-          <van-icon name="apps-o" size="22" />
-        </button>
-      </template>
-    </van-nav-bar>
-
-    <van-pull-refresh v-model="refreshing" @refresh="loadTasks">
-      <section class="summary-panel" aria-labelledby="today-summary-title">
-        <div>
-          <p class="eyebrow">现场工作台</p>
-          <h1 id="today-summary-title">先处理最重要的审核事项</h1>
-          <p class="summary-copy">Agent 会整理证据、匹配条款并把异常自动排到前面。</p>
+    <!-- 与「检查记录 / 检查任务」统一的紧凑横幅 -->
+    <div class="page-header">
+      <div class="header-bg"></div>
+      <div class="header-content">
+        <div class="header-top">
+          <div class="header-info">
+            <h1 class="page-title">今日审核</h1>
+            <p class="page-subtitle">现场工作台</p>
+          </div>
+          <button class="header-actions" type="button" aria-label="进入全部功能" @click="router.push('/home')">
+            <van-icon name="apps-o" size="20" />
+          </button>
         </div>
-        <div class="summary-metrics" aria-label="任务概览">
-          <div><strong>{{ activeCount }}</strong><span>进行中</span></div>
-          <div><strong>{{ pendingCount }}</strong><span>待开始</span></div>
-          <div><strong>{{ completedCount }}</strong><span>已完成</span></div>
+        <div class="stats-row" aria-label="任务概览">
+          <div class="stat-item">
+            <span class="stat-value">{{ activeCount }}</span>
+            <span class="stat-label">进行中</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-value">{{ pendingCount }}</span>
+            <span class="stat-label">待开始</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-value">{{ completedCount }}</span>
+            <span class="stat-label">已完成</span>
+          </div>
         </div>
-      </section>
+      </div>
+    </div>
 
+    <van-pull-refresh v-model="refreshing" @refresh="loadTasks" class="refresh-container">
+      <!-- 有未完成任务时：展示优先处理 -->
       <section v-if="priorityTask" class="priority-section" aria-labelledby="priority-title">
         <div class="section-heading">
           <div>
@@ -52,7 +64,36 @@
             :loading="openingTaskId === priorityTask.id"
             @click="openAgentSession(priorityTask)"
           >
-            {{ priorityTask.status === 'pending' ? '开始 AI 现场审核' : '继续 AI 现场审核' }}
+            {{ actionButtonText(priorityTask) }}
+          </van-button>
+        </article>
+      </section>
+
+      <!-- 今日任务全部完成：不再把已完成项当成「优先」 -->
+      <section
+        v-else-if="!loading && tasks.length > 0 && allTasksDone"
+        class="priority-section"
+        aria-labelledby="done-title"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">今日进度</p>
+            <h2 id="done-title">今日任务已全部完成</h2>
+          </div>
+          <van-tag type="success" size="medium">已完成 {{ completedCount }}</van-tag>
+        </div>
+        <article class="priority-card priority-card--done">
+          <div class="priority-card__top">
+            <div class="icon-tile icon-tile--success" aria-hidden="true">
+              <van-icon name="checked" size="24" />
+            </div>
+            <div class="priority-card__title">
+              <h3>可以休息一下，或复盘已提交结果</h3>
+              <p>下方已完成任务点进去可查看审核结果；需要时再在结果页发起重新审核。</p>
+            </div>
+          </div>
+          <van-button block plain type="primary" class="primary-action" @click="router.push('/audit-tasks')">
+            查看全部审核任务
           </van-button>
         </article>
       </section>
@@ -79,7 +120,7 @@
             type="button"
             class="task-row"
             :class="{ 'task-row--exception': task.exception_count > 0 }"
-            @click="openAgentSession(task)"
+            @click="openTask(task)"
           >
             <span class="task-row__status" :class="`status-${task.status}`" aria-hidden="true"></span>
             <span class="task-row__content">
@@ -88,7 +129,11 @@
               <span v-if="task.exception_count > 0" class="exception-label">
                 <van-icon name="warning-o" /> {{ task.exception_count }} 项异常待处理
               </span>
+              <span v-if="task.status === 'completed'" class="completed-label">
+                已完成 · 点击查看结果
+              </span>
             </span>
+            <span class="task-row__action">{{ actionButtonText(task) }}</span>
             <van-icon name="arrow" class="task-row__arrow" aria-hidden="true" />
           </button>
         </div>
@@ -122,10 +167,20 @@ const sortedTasks = computed(() => [...tasks.value].sort((left, right) => {
   const leftOrder = statusOrder[left.status] ?? 9
   const rightOrder = statusOrder[right.status] ?? 9
   if (leftOrder !== rightOrder) return leftOrder - rightOrder
+  // 有异常的优先
+  const leftEx = Number(left.exception_count || 0) > 0 ? 0 : 1
+  const rightEx = Number(right.exception_count || 0) > 0 ? 0 : 1
+  if (leftEx !== rightEx) return leftEx - rightEx
   return String(left.time_start || '').localeCompare(String(right.time_start || ''))
 }))
 
-const priorityTask = computed(() => sortedTasks.value.find((task) => task.status !== 'completed') || sortedTasks.value[0])
+// 仅从未完成任务中选优先项；全部完成后不再回退到已完成任务
+const priorityTask = computed(() =>
+  sortedTasks.value.find((task) => task.status === 'in_progress' || task.status === 'pending') || null
+)
+const allTasksDone = computed(
+  () => tasks.value.length > 0 && tasks.value.every((task) => task.status === 'completed' || task.status === 'cancelled')
+)
 const activeCount = computed(() => tasks.value.filter((task) => task.status === 'in_progress').length)
 const pendingCount = computed(() => tasks.value.filter((task) => task.status === 'pending').length)
 const completedCount = computed(() => tasks.value.filter((task) => task.status === 'completed').length)
@@ -144,6 +199,12 @@ const statusType = (status) => ({
   cancelled: 'default'
 }[status] || 'default')
 
+const actionButtonText = (task) => {
+  if (task?.status === 'pending') return '开始审核'
+  if (task?.status === 'completed') return '查看结果'
+  return '继续审核'
+}
+
 const systemText = (task) => {
   const systems = Array.isArray(task.certification_systems) ? task.certification_systems : []
   return systems.length ? systems.join(' / ') : '体系待确认'
@@ -158,7 +219,7 @@ const formatSchedule = (task) => {
 const loadTasks = async () => {
   if (!refreshing.value) loading.value = true
   try {
-    const response = await getMyAuditTasks()
+    const response = await getMyAuditTasks({ today_only: true })
     tasks.value = Array.isArray(response?.data) ? response.data : []
   } catch (error) {
     showToast(error?.message || '获取今日审核任务失败，请下拉重试')
@@ -168,18 +229,57 @@ const loadTasks = async () => {
   }
 }
 
-const openAgentSession = async (task) => {
-  if (!task?.project_id || openingTaskId.value) return
+const matchSessionForTask = (sessions, taskId, preferredStatuses) => {
+  const matched = sessions.filter((session) => {
+    const context = session.context_snapshot || session.context || {}
+    return String(context.plan_item_id || session.plan_item_id || '') === String(taskId)
+  })
+  for (const status of preferredStatuses) {
+    // 同状态可能有多条（历史会话），取最近
+    const hits = matched
+      .filter((session) => session.status === status)
+      .sort((a, b) => String(b.completed_at || b.updated_at || b.created_at || '')
+        .localeCompare(String(a.completed_at || a.updated_at || a.created_at || '')))
+    if (hits[0]) return hits[0]
+  }
+  return matched.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0] || null
+}
+
+const openCompletedResult = async (task) => {
   openingTaskId.value = task.id
   try {
     const sessionsResponse = await listAuditSessions(task.project_id)
     const sessions = Array.isArray(sessionsResponse?.data) ? sessionsResponse.data : []
-    const existing = sessions.find((session) => {
-      const context = session.context_snapshot || session.context || {}
-      return session.status === 'active' && String(context.plan_item_id || session.plan_item_id || '') === String(task.id)
+    const session = matchSessionForTask(sessions, task.id, ['completed', 'active'])
+    if (!session?.id) {
+      showToast('未找到该任务的审核结果')
+      return
+    }
+    router.push({
+      name: 'AuditSessionResult',
+      params: { sessionId: session.id },
+      query: { projectId: task.project_id, planItemId: task.id }
     })
+  } catch (error) {
+    showToast(error?.message || '打开审核结果失败')
+  } finally {
+    openingTaskId.value = ''
+  }
+}
 
-    let session = existing
+const openAgentSession = async (task) => {
+  if (!task?.project_id || openingTaskId.value) return
+  if (task.status === 'cancelled') {
+    showToast('该任务已取消')
+    return
+  }
+
+  openingTaskId.value = task.id
+  try {
+    const sessionsResponse = await listAuditSessions(task.project_id)
+    const sessions = Array.isArray(sessionsResponse?.data) ? sessionsResponse.data : []
+    let session = matchSessionForTask(sessions, task.id, ['active'])
+
     if (!session) {
       const created = await createAuditSession(task.project_id, {
         title: `${task.area_name || '现场'}审核`,
@@ -202,6 +302,11 @@ const openAgentSession = async (task) => {
   }
 }
 
+const openTask = (task) => {
+  if (task?.status === 'completed') return openCompletedResult(task)
+  return openAgentSession(task)
+}
+
 onMounted(loadTasks)
 </script>
 
@@ -212,29 +317,113 @@ onMounted(loadTasks)
   background: var(--bg-light);
 }
 
-.nav-action,
+/* —— 与检查记录页一致的紧凑 banner —— */
+.page-header {
+  position: relative;
+  padding: 0 0 16px;
+  overflow: hidden;
+}
+.header-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--primary-gradient-dark);
+}
+.header-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.15) 0%, transparent 40%);
+}
+.header-content { position: relative; z-index: 1; }
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 10px;
+}
+.header-info {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.page-title {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 700;
+  color: var(--bg-white);
+  font-family: var(--font-primary);
+  letter-spacing: -0.5px;
+  line-height: 1.25;
+}
+.page-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.header-actions {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  color: var(--bg-white);
+  background: rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+.stats-row {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  min-height: 44px;
+  margin: 0 16px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.stat-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+}
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--bg-white);
+  font-family: var(--font-primary);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.stat-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+}
+.stat-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.refresh-container { min-height: 40vh; }
+
 .text-action,
 .task-row {
   border: 0;
   font: inherit;
   cursor: pointer;
-}
-
-.nav-action {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  color: var(--primary-color);
-  background: transparent;
-}
-
-.summary-panel {
-  margin: 16px;
-  padding: 22px 20px;
-  color: #fff;
-  border-radius: var(--radius-lg);
-  background: var(--primary-gradient-dark);
 }
 
 .eyebrow {
@@ -245,24 +434,8 @@ onMounted(loadTasks)
   color: var(--primary-color);
 }
 
-.summary-panel .eyebrow { color: rgba(255, 255, 255, 0.76); }
-.summary-panel h1 { margin: 0; font-size: 22px; line-height: 1.35; }
-.summary-copy { margin: 8px 0 0; font-size: 14px; color: rgba(255, 255, 255, 0.86); }
-
-.summary-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.summary-metrics div { display: flex; flex-direction: column; align-items: center; }
-.summary-metrics strong { font-size: 24px; line-height: 1.2; }
-.summary-metrics span { margin-top: 3px; font-size: 12px; color: rgba(255, 255, 255, 0.78); }
-
 .priority-section,
-.task-list-section { padding: 4px 16px 20px; }
+.task-list-section { padding: 12px 16px 20px; }
 
 .section-heading {
   display: flex;
@@ -285,13 +458,15 @@ onMounted(loadTasks)
 }
 
 .priority-card { padding: 18px; }
+.priority-card--done { border-color: #a7f3d0; background: linear-gradient(180deg, #ecfdf5, #fff 55%); }
 .priority-card__top { display: flex; gap: 12px; align-items: center; }
 .icon-tile { width: 48px; height: 48px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 12px; color: var(--primary-color); background: var(--info-bg); }
+.icon-tile--success { color: #059669; background: #d1fae5; }
 .priority-card__title h3 { margin: 0; font-size: 17px; }
 .priority-card__title p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
 .task-details { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; font-size: 13px; color: var(--text-secondary); }
 .task-details span { display: inline-flex; align-items: center; gap: 5px; }
-.primary-action { min-height: 48px; }
+.primary-action { min-height: 48px; margin-top: 4px; }
 
 .loading-card { padding: 18px; }
 .task-row { width: 100%; min-height: 76px; display: flex; align-items: center; gap: 12px; padding: 14px 16px; text-align: left; color: inherit; background: #fff; border-bottom: 1px solid var(--border-light); }
@@ -304,8 +479,10 @@ onMounted(loadTasks)
 .task-row__content { min-width: 0; display: flex; flex: 1; flex-direction: column; }
 .task-row__content strong { font-size: 15px; }
 .task-row__content small { margin-top: 3px; color: var(--text-secondary); line-height: 1.45; }
+.task-row__action { flex: 0 0 auto; max-width: 5.5em; font-size: 12px; font-weight: 600; color: var(--primary-color); text-align: right; line-height: 1.3; }
 .task-row__arrow { color: var(--text-muted); }
 .exception-label { display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; font-size: 12px; color: var(--error-color); }
+.completed-label { margin-top: 6px; font-size: 12px; color: var(--success-color); }
 .task-row--exception { background: linear-gradient(90deg, var(--error-bg), #fff 40%); }
 
 @media (min-width: 700px) {

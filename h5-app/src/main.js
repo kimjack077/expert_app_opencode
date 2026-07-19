@@ -31,6 +31,7 @@ import AuditTasks from './views/AuditTasks.vue'
 import AuditTaskDetail from './views/AuditTaskDetail.vue'
 import TodayAudit from './views/TodayAudit.vue'
 import AiAuditSession from './views/AiAuditSession.vue'
+import AuditSessionResult from './views/AuditSessionResult.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -55,6 +56,8 @@ const routes = [
   { path: '/audit-tasks', component: AuditTasks },
   { path: '/audit-task/:id', component: AuditTaskDetail, name: 'AuditTaskDetail' },
   { path: '/audit-session/:sessionId', component: AiAuditSession, name: 'AiAuditSession' },
+  // 已完成审核：只读结果页（非现场录入界面）
+  { path: '/audit-result/:sessionId', component: AuditSessionResult, name: 'AuditSessionResult' },
 ]
 
 const router = createRouter({

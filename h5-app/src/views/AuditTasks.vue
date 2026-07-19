@@ -53,9 +53,10 @@
             <van-button
               type="primary"
               size="small"
+              :loading="openingId === task.id"
               @click="goToTask(task)"
             >
-              {{ task.status === 'pending' ? '开始审核' : '继续审核' }}
+              {{ actionButtonText(task) }}
             </van-button>
           </div>
         </van-cell-group>
@@ -75,6 +76,7 @@ const tasks = ref([])
 const loading = ref(false)
 const finished = ref(false)
 const refreshing = ref(false)
+const openingId = ref('')
 
 const getStatusType = (status) => {
   const typeMap = {
@@ -94,9 +96,15 @@ const getStatusText = (status) => {
   return textMap[status] || status
 }
 
+const actionButtonText = (task) => {
+  if (task?.status === 'pending') return '开始审核'
+  if (task?.status === 'completed') return '查看结果'
+  return '继续审核'
+}
+
 const fetchTasks = async () => {
   try {
-    const response = await getMyAuditTasks()
+    const response = await getMyAuditTasks({ today_only: false })
     tasks.value = response.data || []
     finished.value = true
   } catch (error) {
@@ -120,27 +128,61 @@ const onRefresh = () => {
   onLoad()
 }
 
+const matchSession = (sessions, taskId, preferredStatuses) => {
+  const matched = sessions.filter((session) => {
+    const context = session.context_snapshot || {}
+    return String(context.plan_item_id || '') === String(taskId)
+  })
+  for (const status of preferredStatuses) {
+    const hits = matched
+      .filter((s) => s.status === status)
+      .sort((a, b) => String(b.completed_at || b.updated_at || b.created_at || '')
+        .localeCompare(String(a.completed_at || a.updated_at || a.created_at || '')))
+    if (hits[0]) return hits[0]
+  }
+  return matched[0] || null
+}
+
 const goToTask = async (task) => {
+  if (openingId.value) return
+  openingId.value = task.id
   try {
     const response = await listAuditSessions(task.project_id)
     const sessions = Array.isArray(response?.data) ? response.data : []
-    const existing = sessions.find((session) => {
-      const context = session.context_snapshot || {}
-      return session.status === 'active' && String(context.plan_item_id || '') === String(task.id)
-    })
-    const sessionResponse = existing
-      ? { data: existing }
-      : await createAuditSession(task.project_id, {
-          title: `${task.area_name || '现场'}审核`,
-          plan_item_id: task.id
-        })
+
+    // 已完成：进入只读结果页，不进现场审核录入
+    if (task.status === 'completed') {
+      const session = matchSession(sessions, task.id, ['completed', 'active'])
+      if (!session?.id) {
+        showToast('未找到该任务的审核结果')
+        return
+      }
+      router.push({
+        name: 'AuditSessionResult',
+        params: { sessionId: session.id },
+        query: { projectId: task.project_id, planItemId: task.id }
+      })
+      return
+    }
+
+    let session = matchSession(sessions, task.id, ['active'])
+    if (!session) {
+      const created = await createAuditSession(task.project_id, {
+        title: `${task.area_name || '现场'}审核`,
+        plan_item_id: task.id
+      })
+      session = created?.data
+    }
+    if (!session?.id) throw new Error('未能创建审核会话')
     router.push({
       name: 'AiAuditSession',
-      params: { sessionId: sessionResponse.data.id },
+      params: { sessionId: session.id },
       query: { projectId: task.project_id, planItemId: task.id }
     })
   } catch (error) {
-    showToast(error.message || '进入 AI 现场审核失败')
+    showToast(error.message || '进入任务失败')
+  } finally {
+    openingId.value = ''
   }
 }
 

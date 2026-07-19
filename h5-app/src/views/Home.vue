@@ -326,9 +326,10 @@ onMounted(() => {
   background: var(--bg-light);
 }
 
+/* 与「检查记录」统一的紧凑横幅 */
 .page-header {
   position: relative;
-  padding: calc(env(safe-area-inset-top) + 18px) 16px 16px;
+  padding: 0 0 16px;
   overflow: hidden;
 }
 
@@ -362,7 +363,8 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  padding: calc(env(safe-area-inset-top) + 18px) 16px 10px;
+  margin-bottom: 0;
 }
 
 .user-greeting {
@@ -371,6 +373,7 @@ onMounted(() => {
   align-items: baseline;
   gap: 10px;
   min-width: 0;
+  padding: 0;
 }
 
 .greeting-text {
@@ -404,6 +407,7 @@ onMounted(() => {
   cursor: pointer;
   transition: all var(--transition-base);
   border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
 }
 
 .header-actions svg {
@@ -420,6 +424,7 @@ onMounted(() => {
   justify-content: space-around;
   align-items: center;
   min-height: 44px;
+  margin: 0 16px;
   padding: 8px 12px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(10px);
