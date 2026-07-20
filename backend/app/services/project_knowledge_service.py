@@ -21,7 +21,12 @@ class ProjectKnowledgeService:
         db: AsyncSession,
         document: ProjectDocument,
         content: bytes,
+        *,
+        expected_enterprise_name: str | None = None,
+        expected_industry_keywords: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
+        if bool(getattr(document, "is_deleted", False)):
+            raise ValueError("已删除的项目资料不能建立索引")
         document.status = "parsing"
         document.parse_error = None
         await db.flush()
@@ -32,6 +37,25 @@ class ProjectKnowledgeService:
                 **(document.document_metadata or {}),
                 **parsed.metadata,
             }
+            consistency = project_document_parser.analyze_consistency(
+                parsed.text,
+                expected_enterprise_name=expected_enterprise_name,
+                expected_industry_keywords=expected_industry_keywords,
+                filename=document.original_filename,
+            )
+            if consistency["recommended_quarantine"]:
+                document.document_metadata = {
+                    **document.document_metadata,
+                    "consistency": consistency,
+                    "quarantined": True,
+                    "searchable": False,
+                    "warning": "资料与项目企业或行业明显不一致，已隔离等待人工复核",
+                }
+            elif expected_enterprise_name or expected_industry_keywords:
+                document.document_metadata = {
+                    **document.document_metadata,
+                    "consistency": consistency,
+                }
             if document.document_type == "auto":
                 document.document_type = parsed.metadata.get("category", "other")
 
@@ -40,6 +64,26 @@ class ProjectKnowledgeService:
                     ProjectKnowledgeChunk.document_id == document.id
                 )
             )
+            if not self._document_is_searchable(document):
+                from sqlalchemy.sql import func
+
+                document.status = "ready"
+                document.parsed_at = func.now()
+                await db.commit()
+                return {
+                    "document_id": str(document.id),
+                    "chunk_count": 0,
+                    "status": document.status,
+                    "archive_only": bool(
+                        (document.document_metadata or {}).get("archive_only")
+                    ),
+                    "quarantined": self._is_quarantined_metadata(
+                        document.document_metadata
+                    ),
+                    "warning": (document.document_metadata or {}).get("warning"),
+                    "embedding_errors": [],
+                }
+
             chunks = project_document_parser.chunk_text(parsed.text)
             errors: list[str] = []
             for index, chunk_text in enumerate(chunks):
@@ -86,10 +130,19 @@ class ProjectKnowledgeService:
     ) -> list[dict[str, Any]]:
         result = await db.execute(
             select(ProjectKnowledgeChunk)
-            .where(ProjectKnowledgeChunk.project_id == project_id)
+            .join(ProjectKnowledgeChunk.document)
+            .where(
+                ProjectKnowledgeChunk.project_id == project_id,
+                ProjectDocument.is_deleted.is_(False),
+                ProjectDocument.status == "ready",
+            )
             .options(selectinload(ProjectKnowledgeChunk.document))
         )
-        chunks = result.scalars().all()
+        chunks = [
+            chunk
+            for chunk in result.scalars().all()
+            if chunk.document and self._document_is_searchable(chunk.document)
+        ]
         if not chunks:
             return []
 
@@ -189,6 +242,30 @@ class ProjectKnowledgeService:
     @staticmethod
     def _tokens(text: str) -> set[str]:
         return set(re.findall(r"\d+(?:\.\d+)+|[A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}", text.lower()))
+
+    @classmethod
+    def _document_is_searchable(cls, document: ProjectDocument) -> bool:
+        metadata = getattr(document, "document_metadata", None) or {}
+        return (
+            not bool(getattr(document, "is_deleted", False))
+            and not bool(metadata.get("archive_only"))
+            and metadata.get("searchable", True) is not False
+            and not cls._is_quarantined_metadata(metadata)
+        )
+
+    @staticmethod
+    def _is_quarantined_metadata(metadata: dict[str, Any] | None) -> bool:
+        metadata = metadata or {}
+        if metadata.get("quarantined") is True:
+            return True
+        consistency = metadata.get("consistency") or metadata.get(
+            "consistency_risk"
+        ) or {}
+        return bool(
+            isinstance(consistency, dict)
+            and consistency.get("risk_level") == "high"
+            and consistency.get("recommended_quarantine", True)
+        )
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:

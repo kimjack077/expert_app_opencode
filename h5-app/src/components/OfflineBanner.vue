@@ -1,7 +1,7 @@
 <template>
   <div v-if="!online" class="offline-banner" role="status">
     <van-icon name="warning-o" />
-    <span>网络已断开，结果将暂存本地，恢复后请手动同步</span>
+    <span>网络已断开，未提交的文字草稿会保存在本机；照片上传和正式保存需恢复网络</span>
   </div>
 </template>
 

@@ -124,6 +124,15 @@ export function submitSessionEvidence(projectId, sessionId, data) {
   })
 }
 
+// 保存审核员手工填写的正式现场记录
+export function createManualSessionRecord(projectId, sessionId, data) {
+  return request({
+    url: `/audit-projects/${projectId}/sessions/${sessionId}/records/manual`,
+    method: 'post',
+    data
+  })
+}
+
 export function confirmAuditDrafts(projectId, sessionId, data) {
   return request({
     url: `/audit-projects/${projectId}/sessions/${sessionId}/drafts/confirm`,

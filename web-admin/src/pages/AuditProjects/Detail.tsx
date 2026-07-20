@@ -4,21 +4,21 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { 
   EditOutlined, 
   ArrowLeftOutlined, 
-  DownloadOutlined, 
   FileWordOutlined, 
-  FilePdfOutlined,
   RobotOutlined,
   BulbOutlined,
   DatabaseOutlined,
   FileDoneOutlined,
+  ScheduleOutlined,
 } from '@ant-design/icons'
-import { auditProjectApi, auditReportApi, auditAIApi } from '@/services/auditProjectApi'
+import { auditProjectApi, auditAIApi } from '@/services/auditProjectApi'
 import TeamManagement from './components/TeamManagement'
 import PlanManagement from './components/PlanManagement'
 import RecordsList from './components/RecordsList'
 import NonconformitiesList from './components/NonconformitiesList'
 import ProjectDocuments from './components/ProjectDocuments'
 import ProjectArtifacts from './components/ProjectArtifacts'
+import MeetingManagement from './components/MeetingManagement'
 
 const auditTypeMap: Record<string, string> = {
   initial: '初审',
@@ -211,34 +211,9 @@ export default function AuditProjectDetail() {
             >
               编辑项目
             </Button>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'word',
-                    label: '导出 Word',
-                    icon: <FileWordOutlined />,
-                    onClick: () => {
-                      auditReportApi.exportWord(id!)
-                      message.success('正在生成 Word 报告...')
-                    },
-                  },
-                  {
-                    key: 'pdf',
-                    label: '导出 PDF',
-                    icon: <FilePdfOutlined />,
-                    onClick: () => {
-                      auditReportApi.exportPdf(id!)
-                      message.success('正在生成 PDF 报告...')
-                    },
-                  },
-                ],
-              }}
-            >
-              <Button icon={<DownloadOutlined />}>
-                导出报告
-              </Button>
-            </Dropdown>
+            <Button icon={<FileDoneOutlined />} onClick={() => setActiveTab('artifacts')}>
+              报告与资料包
+            </Button>
             <Dropdown
               menu={{
                 items: [
@@ -310,7 +285,7 @@ export default function AuditProjectDetail() {
             style={{ marginTop: 16 }}
             extra={
               <span style={{ fontSize: 12, color: '#64748b' }}>
-                建议顺序：组员 → 计划 → 现场记录 → 不符合项 → 交付
+                建议顺序：组员 → 计划 → 现场记录 → 会议 → 不符合项 → 交付
               </span>
             }
           >
@@ -359,6 +334,7 @@ export default function AuditProjectDetail() {
                 </Button>
                 <Button onClick={() => setActiveTab('documents')}>上传项目资料</Button>
                 <Button onClick={() => setActiveTab('records')}>查看现场记录</Button>
+                <Button onClick={() => setActiveTab('meetings')}>记录会议 / 签到</Button>
                 <Button onClick={() => setActiveTab('nonconformities')}>
                   处理不符合项
                   {(progress?.nonconformities?.total || 0) > 0
@@ -399,6 +375,16 @@ export default function AuditProjectDetail() {
                 key: 'records',
                 label: '现场记录',
                 children: <RecordsList projectId={id!} />,
+              },
+              {
+                key: 'meetings',
+                label: (
+                  <Space size={6}>
+                    <ScheduleOutlined />
+                    会议与沟通
+                  </Space>
+                ),
+                children: <MeetingManagement projectId={id!} />,
               },
               {
                 key: 'nonconformities',

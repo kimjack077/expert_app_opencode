@@ -169,7 +169,11 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
-import { getTask, updateTask } from '../api/tasks.js'
+import {
+  completeTask as completeTaskApi,
+  getTask,
+  startTask as startTaskApi,
+} from '../api/tasks.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -259,7 +263,7 @@ const startTask = async () => {
       title: '确认开始',
       message: '确定要开始这个任务吗？',
     })
-    const res = await updateTask(task.value.id, { status: 'in_progress' })
+    const res = await startTaskApi(task.value.id)
     console.log('开始任务响应:', res)
     if (res.code === 200) {
       showToast({ type: 'success', message: '任务已开始' })
@@ -282,7 +286,7 @@ const completeTask = async () => {
       title: '确认完成',
       message: '确定要完成这个任务吗？',
     })
-    const res = await updateTask(task.value.id, { status: 'completed' })
+    const res = await completeTaskApi(task.value.id)
     console.log('完成任务响应:', res)
     if (res.code === 200) {
       showToast({ type: 'success', message: '任务已完成' })

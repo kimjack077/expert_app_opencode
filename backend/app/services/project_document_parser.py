@@ -14,7 +14,9 @@ from app.config import settings
 
 SUPPORTED_PROJECT_EXTENSIONS = {
     ".pdf",
+    ".doc",
     ".docx",
+    ".xls",
     ".xlsx",
     ".txt",
     ".md",
@@ -22,8 +24,33 @@ SUPPORTED_PROJECT_EXTENSIONS = {
     ".json",
     ".zip",
 }
+ARCHIVE_ONLY_PROJECT_EXTENSIONS = {".doc", ".xls"}
 MAX_ARCHIVE_FILES = 100
 MAX_ARCHIVE_EXPANDED_BYTES = settings.MAX_FILE_SIZE * 10
+
+INDUSTRY_KEYWORD_GROUPS = {
+    "coking": (
+        "焦化",
+        "焦炭",
+        "焦炉",
+        "煤焦油",
+        "粗苯",
+        "炼焦",
+        "化产车间",
+        "煤焦车间",
+    ),
+    "electronics_assembly": (
+        "pcba",
+        "贴片",
+        "回流焊",
+        "波峰焊",
+        "电能表",
+        "故障指示器",
+        "智能断路器",
+        "线路板",
+        "老化室",
+    ),
+}
 
 
 @dataclass
@@ -39,6 +66,19 @@ class ProjectDocumentParser:
             raise ValueError(f"不支持的项目资料格式: {extension or '未知'}")
         if len(content) > settings.MAX_FILE_SIZE:
             raise ValueError("项目资料超过允许的文件大小")
+
+        # The server has no trustworthy legacy Office parser. Keep originals
+        # in the archive without pretending that their contents are searchable.
+        if extension in ARCHIVE_ONLY_PROJECT_EXTENSIONS:
+            metadata = self.extract_metadata("", filename)
+            metadata.update(
+                {
+                    "archive_only": True,
+                    "searchable": False,
+                    "warning": "旧格式仅归档，需转换后才能检索",
+                }
+            )
+            return ParsedProjectDocument(text="", metadata=metadata)
 
         if extension in {".txt", ".md"}:
             text = self._decode_text(content)
@@ -58,10 +98,9 @@ class ProjectDocumentParser:
         text = self._normalize_text(text)
         if not text:
             raise ValueError("未能从项目资料中提取有效文本")
-        return ParsedProjectDocument(
-            text=text,
-            metadata=self.extract_metadata(text, filename),
-        )
+        metadata = self.extract_metadata(text, filename)
+        metadata.update({"archive_only": False, "searchable": True})
+        return ParsedProjectDocument(text=text, metadata=metadata)
 
     @staticmethod
     def _decode_text(content: bytes) -> str:
@@ -152,13 +191,19 @@ class ProjectDocumentParser:
     @staticmethod
     def extract_metadata(text: str, filename: str) -> dict[str, Any]:
         lowered = f"{filename}\n{text[:5000]}".lower()
+        section_match = re.match(r"^\s*([ABCDEFGIZ])(?:\s+|[-_])", filename, re.IGNORECASE)
+        archive_section = section_match.group(1).upper() if section_match else None
         category = "other"
         category_rules = (
-            ("standard", ("标准", "gb/t", "iso ", "规范")),
-            ("procedure", ("程序文件", "管理程序", "控制程序")),
             ("manual", ("管理手册", "质量手册", "体系手册")),
-            ("record", ("记录", "台账", "清单")),
-            ("previous_audit", ("审核报告", "不符合项", "审核发现")),
+            ("procedure", ("程序文件", "管理程序", "控制程序")),
+            ("audit_plan", ("审核计划", "审核任务书", "审核策划", "审核方案")),
+            ("audit_report", ("审核报告", "再认证报告")),
+            ("meeting", ("首次会议", "末次会议", "会议签到", "沟通会议")),
+            ("nonconformity", ("不符合项", "整改汇总", "审定意见")),
+            ("organization", ("认证申请书", "营业执照", "组织架构", "资质文件")),
+            ("record", ("现场审核记录", "审核记录", "台账", "清单")),
+            ("standard", ("产品执行标准", "gb/t", "iso ", "规范")),
         )
         for candidate, keywords in category_rules:
             if any(keyword in lowered for keyword in keywords):
@@ -195,13 +240,136 @@ class ProjectDocumentParser:
         dates = sorted(
             set(re.findall(r"(?:20\d{2})[-/.年](?:0?[1-9]|1[0-2])[-/.月](?:0?[1-9]|[12]\d|3[01])日?", text))
         )[:20]
+        company_names = sorted(
+            set(
+                re.findall(
+                    r"(?<![\u4e00-\u9fffA-Za-z0-9])"
+                    r"([\u4e00-\u9fffA-Za-z0-9（）()·]{2,50}?"
+                    r"(?:有限责任公司|股份有限公司|有限公司|集团公司|集团))"
+                    r"(?![\u4e00-\u9fffA-Za-z0-9])",
+                    f"{filename}\n{text[:20000]}",
+                )
+            )
+        )[:20]
+        industry_keywords = sorted(
+            {
+                keyword
+                for keywords in INDUSTRY_KEYWORD_GROUPS.values()
+                for keyword in keywords
+                if keyword in lowered
+            }
+        )
+        industry_profiles = sorted(
+            profile
+            for profile, keywords in INDUSTRY_KEYWORD_GROUPS.items()
+            if any(keyword in lowered for keyword in keywords)
+        )
         return {
             "category": category,
             "standards": standards,
             "systems": systems,
             "departments": departments,
             "dates": dates,
+            "company_names": company_names,
+            "industry_keywords": industry_keywords,
+            "industry_profiles": industry_profiles,
+            "archive_section": archive_section,
         }
+
+    @classmethod
+    def analyze_consistency(
+        cls,
+        text: str,
+        *,
+        expected_enterprise_name: str | None = None,
+        expected_industry_keywords: list[str] | tuple[str, ...] | None = None,
+        filename: str = "",
+    ) -> dict[str, Any]:
+        """Return a side-effect-free project contamination assessment.
+
+        Upload routes can persist this result in ``ProjectDocument.metadata``
+        and set ``quarantined`` when ``recommended_quarantine`` is true.
+        A missing enterprise name is deliberately not a finding by itself.
+        """
+
+        metadata = cls.extract_metadata(text, filename)
+        detected_names = metadata["company_names"]
+        expected_name = cls._normalize_company_name(expected_enterprise_name or "")
+        detected_normalized = {
+            cls._normalize_company_name(name): name for name in detected_names
+        }
+        expected_name_present = bool(
+            expected_name
+            and any(
+                expected_name in detected or detected in expected_name
+                for detected in detected_normalized
+            )
+        )
+        other_names = [
+            original
+            for detected, original in detected_normalized.items()
+            if expected_name
+            and expected_name not in detected
+            and detected not in expected_name
+        ]
+
+        reasons: list[dict[str, Any]] = []
+        if other_names and not expected_name_present:
+            reasons.append(
+                {
+                    "code": "OTHER_ENTERPRISE_NAME",
+                    "message": f"资料出现其他企业名称：{'、'.join(other_names)}",
+                    "matches": other_names,
+                }
+            )
+
+        expected_text = " ".join(
+            [expected_enterprise_name or "", *(expected_industry_keywords or [])]
+        ).lower()
+        expected_profiles = {
+            profile
+            for profile, keywords in INDUSTRY_KEYWORD_GROUPS.items()
+            if any(keyword in expected_text for keyword in keywords)
+        }
+        if "焦化" in expected_text:
+            expected_profiles.add("coking")
+        observed_profiles = set(metadata["industry_profiles"])
+        conflicting_profiles = {
+            ("coking", "electronics_assembly"),
+            ("electronics_assembly", "coking"),
+        }
+        for expected_profile, observed_profile in conflicting_profiles:
+            if expected_profile in expected_profiles and observed_profile in observed_profiles:
+                matches = [
+                    keyword
+                    for keyword in INDUSTRY_KEYWORD_GROUPS[observed_profile]
+                    if keyword in f"{filename}\n{text}".lower()
+                ]
+                # Require more than a stray word before quarantining by industry.
+                if len(set(matches)) >= 2:
+                    reasons.append(
+                        {
+                            "code": "INDUSTRY_MISMATCH",
+                            "message": "资料行业特征与项目行业明显不一致",
+                            "expected_profile": expected_profile,
+                            "observed_profile": observed_profile,
+                            "matches": sorted(set(matches)),
+                        }
+                    )
+
+        high_risk = bool(reasons)
+        return {
+            "risk_level": "high" if high_risk else "low",
+            "recommended_quarantine": high_risk,
+            "expected_enterprise_name": expected_enterprise_name,
+            "detected_company_names": detected_names,
+            "industry_keywords": metadata["industry_keywords"],
+            "reasons": reasons,
+        }
+
+    @staticmethod
+    def _normalize_company_name(value: str) -> str:
+        return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", value).lower()
 
     @staticmethod
     def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> list[str]:

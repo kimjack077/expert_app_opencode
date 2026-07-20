@@ -99,7 +99,15 @@ export default function AuditRecordEdit() {
         if (recordRes.data.template_id) {
           const templateRes = await templateApi.getTemplate(recordRes.data.template_id)
           setTemplate(templateRes.data)
-          flattenTemplateItems(templateRes.data.items || [])
+          // 把已保存的记录项数据合并到模板项中
+          const recordItems = recordRes.data.items || []
+          const recordItemsByTemplateId: Record<string, any> = {}
+          for (const ri of recordItems) {
+            if (ri.template_item_id) {
+              recordItemsByTemplateId[ri.template_item_id] = ri
+            }
+          }
+          flattenTemplateItems(templateRes.data.items || [], [], recordItemsByTemplateId)
         }
       }
     } catch (error: any) {
@@ -109,11 +117,22 @@ export default function AuditRecordEdit() {
     }
   }
 
-  const flattenTemplateItems = (items: any[], result: RecordItem[] = []): RecordItem[] => {
+  const flattenTemplateItems = (items: any[], result: RecordItem[] = [], recordItemsMap: Record<string, any> = {}): RecordItem[] => {
     for (const item of items) {
-      result.push(item)
+      // 合并已保存的记录项数据
+      const recordItem = item.id ? recordItemsMap[item.id] : null
+      const mergedItem = recordItem
+        ? {
+            ...item,
+            ...recordItem,
+            title: item.title, // 保留模板项标题
+            id: recordItem.id || item.id, // 使用记录项 ID
+            template_item_id: item.id, // 保留模板项 ID 作为关联
+          }
+        : item
+      result.push(mergedItem)
       if (item.children && item.children.length > 0) {
-        flattenTemplateItems(item.children, result)
+        flattenTemplateItems(item.children, result, recordItemsMap)
       }
     }
     setFlatItems(result.filter(i => !i.is_category))
@@ -239,7 +258,10 @@ export default function AuditRecordEdit() {
 
   // 计算完成进度
   const completedCount = flatItems.filter(item =>
-    item.radio_value || item.score_value !== undefined || item.numeric_value !== undefined || item.text_value
+    item.radio_value ||
+    (item.score_value !== undefined && item.score_value !== null) ||
+    (item.numeric_value !== undefined && item.numeric_value !== null) ||
+    item.text_value
   ).length
   const progress = flatItems.length > 0 ? Math.round((completedCount / flatItems.length) * 100) : 0
 
@@ -271,10 +293,10 @@ export default function AuditRecordEdit() {
           const info = valueMap[item.radio_value] || { color: 'default', text: item.radio_value }
           return <Tag color={info.color}>{info.text}</Tag>
         }
-        if (item.score_value !== undefined) {
+        if (item.score_value !== undefined && item.score_value !== null) {
           return <Tag color="processing">{item.score_value} 分</Tag>
         }
-        if (item.numeric_value !== undefined) {
+        if (item.numeric_value !== undefined && item.numeric_value !== null) {
           return <Tag color="processing">{item.numeric_value}</Tag>
         }
         if (item.text_value) {

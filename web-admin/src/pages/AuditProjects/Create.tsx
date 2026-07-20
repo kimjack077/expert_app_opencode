@@ -70,11 +70,13 @@ export default function CreateAuditProject() {
       if (isEdit) {
         await auditProjectApi.update(id!, data)
         message.success('更新审核项目成功')
+        navigate(`/audit-projects/${id}`)
       } else {
-        await auditProjectApi.create(data)
-        message.success('创建审核项目成功')
+        const response = await auditProjectApi.create(data)
+        const projectId = response?.data?.id
+        message.success('项目已创建，请继续配置审核组、计划和项目资料')
+        navigate(projectId ? `/audit-projects/${projectId}` : '/audit-projects')
       }
-      navigate('/audit-projects')
     } catch (error: any) {
       message.error(error.response?.data?.message || (isEdit ? '更新失败' : '创建失败'))
     } finally {
@@ -226,7 +228,7 @@ export default function CreateAuditProject() {
             <Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={loading}>
-                  {isEdit ? '保存修改' : '创建项目'}
+                  {isEdit ? '保存修改' : '创建并继续配置'}
                 </Button>
                 <Button onClick={() => navigate('/audit-projects')}>取消</Button>
               </Space>

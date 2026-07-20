@@ -126,8 +126,9 @@ def test_session_quality_blocks_pending_safe_and_abnormal_drafts():
     result = asyncio.run(_session_quality(session))
 
     assert result["passed"] is False
-    assert result["blocking_count"] == 2
+    assert result["blocking_count"] == 3
     assert {item["code"] for item in result["blockers"]} == {
+        "NO_CONFIRMED_RECORDS",
         "DRAFT_PENDING",
         "NC_UNCONFIRMED",
     }

@@ -141,6 +141,13 @@ class AuditReportGenerator:
             select(Nonconformity).where(Nonconformity.project_id == project_id)
         )
         nonconformities = nc_result.scalars().all()
+
+        report_result = await self.db.execute(
+            select(AuditReport)
+            .where(AuditReport.project_id == project_id)
+            .order_by(AuditReport.version.desc(), AuditReport.created_at.desc())
+        )
+        report = report_result.scalars().first()
         
         # 统计数据
         total_records = len(records)
@@ -157,6 +164,7 @@ class AuditReportGenerator:
             'team_members': team_members,
             'records': records,
             'nonconformities': nonconformities,
+            'report': report,
             'statistics': {
                 'total_records': total_records,
                 'completed_records': completed_records,
@@ -272,21 +280,11 @@ class AuditReportGenerator:
         """添加第三章：审核结论"""
         doc.add_heading('三、审核结论', 1)
         
-        stats = data['statistics']
-        project = data['project']
-        
         # 3.1 综合评价
         doc.add_heading('3.1 综合评价', 2)
         p = doc.add_paragraph()
-        
-        if stats['major_nc'] == 0 and stats['minor_nc'] <= 3:
-            conclusion = "经审核，受审核方的管理体系运行有效，符合认证要求，建议推荐认证。"
-        elif stats['major_nc'] > 0:
-            conclusion = "经审核，受审核方存在严重不符合项，需要整改后重新审核。"
-        else:
-            conclusion = "经审核，受审核方存在一般不符合项，需要整改验证后方可推荐认证。"
-        
-        p.add_run(conclusion)
+
+        p.add_run(self._conclusion_text(data))
         
         # 3.2 审核组长签字
         doc.add_paragraph()
@@ -352,21 +350,45 @@ class AuditReportGenerator:
         story.append(Paragraph('三、审核结论', styles['Heading1']))
         story.append(Spacer(1, 0.2 * inch))
         
-        stats = data['statistics']
-        
-        if stats['major_nc'] == 0 and stats['minor_nc'] <= 3:
-            conclusion = "经审核，受审核方的管理体系运行有效，符合认证要求，建议推荐认证。"
-        elif stats['major_nc'] > 0:
-            conclusion = "经审核，受审核方存在严重不符合项，需要整改后重新审核。"
-        else:
-            conclusion = "经审核，受审核方存在一般不符合项，需要整改验证后方可推荐认证。"
-        
-        story.append(Paragraph(conclusion, styles['Normal']))
+        story.append(Paragraph(self._conclusion_text(data), styles['Normal']))
         story.append(Spacer(1, 0.5 * inch))
         
         # 签字栏
         signature_text = "审核组长签字：________________    日期：________________"
         story.append(Paragraph(signature_text, styles['Normal']))
+
+    @staticmethod
+    def _conclusion_text(data: Dict[str, Any]) -> str:
+        """Only render a certification opinion explicitly confirmed in a report.
+
+        Counts of findings are not a certification decision.  An unfinished NC
+        always takes precedence over a previously selected recommendation.
+        """
+        nonconformities = data.get('nonconformities') or []
+        open_ncs = [
+            item for item in nonconformities
+            if getattr(item, 'severity', None) != 'observation'
+            and getattr(item, 'status', None) not in {'verified', 'closed', 'rejected'}
+        ]
+        if open_ncs:
+            return (
+                f"本项目仍有 {len(open_ncs)} 条不符合项未完成整改验证和关闭，"
+                "当前不得形成推荐认证结论。"
+            )
+
+        report = data.get('report')
+        conclusion_code = getattr(report, 'conclusion', None) if report else None
+        conclusion_map = {
+            'recommend': '经审核组长确认，建议推荐认证。',
+            'conditional': '经审核组长确认，整改验证完成后可有条件推荐认证。',
+            'not_recommend': '经审核组长确认，本次不建议推荐认证。',
+        }
+        conclusion = conclusion_map.get(
+            conclusion_code,
+            '审核结论尚未由审核组长确认。本文件为审核记录汇总草稿，不构成认证推荐意见。',
+        )
+        notes = str(getattr(report, 'conclusion_notes', '') or '').strip() if report else ''
+        return f"{conclusion}\n结论说明：{notes}" if notes else conclusion
 
 
 async def generate_audit_report_word(db: AsyncSession, project_id: UUID) -> BytesIO:

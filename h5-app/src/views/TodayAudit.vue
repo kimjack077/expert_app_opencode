@@ -49,6 +49,7 @@
           <div class="priority-card__top">
             <div class="icon-tile" aria-hidden="true"><van-icon name="todo-list-o" size="24" /></div>
             <div class="priority-card__title">
+              <p class="task-context">{{ taskContextText(priorityTask) }}</p>
               <h3>{{ priorityTask.area_name || '审核任务' }}</h3>
               <p>{{ formatSchedule(priorityTask) }}</p>
             </div>
@@ -56,7 +57,16 @@
           <div class="task-details">
             <span><van-icon name="friends-o" /> {{ priorityTask.group_no || '审核组待确认' }}</span>
             <span><van-icon name="records-o" /> {{ systemText(priorityTask) }}</span>
+            <span><van-icon name="completed" /> {{ taskProgressText(priorityTask) }}</span>
+            <span v-if="hasTaskException(priorityTask)" class="task-details__exception">
+              <van-icon name="warning-o" /> {{ taskExceptionText(priorityTask) }}
+            </span>
           </div>
+          <div class="task-progress" aria-label="条款完成进度">
+            <span>完成度</span>
+            <strong>{{ taskCompletionRate(priorityTask) }}%</strong>
+          </div>
+          <van-progress :percentage="taskCompletionRate(priorityTask)" stroke-width="7" color="#0369A1" />
           <van-button
             block
             type="primary"
@@ -119,15 +129,19 @@
             :key="task.id"
             type="button"
             class="task-row"
-            :class="{ 'task-row--exception': task.exception_count > 0 }"
+            :class="{ 'task-row--exception': hasTaskException(task) }"
             @click="openTask(task)"
           >
             <span class="task-row__status" :class="`status-${task.status}`" aria-hidden="true"></span>
             <span class="task-row__content">
+              <span class="task-row__context">{{ taskContextText(task) }}</span>
               <strong>{{ task.area_name || '审核任务' }}</strong>
               <small>{{ formatSchedule(task) }} · {{ systemText(task) }}</small>
-              <span v-if="task.exception_count > 0" class="exception-label">
-                <van-icon name="warning-o" /> {{ task.exception_count }} 项异常待处理
+              <span class="record-progress-label">
+                {{ taskProgressText(task) }} · {{ taskCompletionRate(task) }}%
+              </span>
+              <span v-if="hasTaskException(task)" class="exception-label">
+                <van-icon name="warning-o" /> {{ taskExceptionText(task) }}
               </span>
               <span v-if="task.status === 'completed'" class="completed-label">
                 已完成 · 点击查看结果
@@ -168,8 +182,8 @@ const sortedTasks = computed(() => [...tasks.value].sort((left, right) => {
   const rightOrder = statusOrder[right.status] ?? 9
   if (leftOrder !== rightOrder) return leftOrder - rightOrder
   // 有异常的优先
-  const leftEx = Number(left.exception_count || 0) > 0 ? 0 : 1
-  const rightEx = Number(right.exception_count || 0) > 0 ? 0 : 1
+  const leftEx = hasTaskException(left) ? 0 : 1
+  const rightEx = hasTaskException(right) ? 0 : 1
   if (leftEx !== rightEx) return leftEx - rightEx
   return String(left.time_start || '').localeCompare(String(right.time_start || ''))
 }))
@@ -208,6 +222,35 @@ const actionButtonText = (task) => {
 const systemText = (task) => {
   const systems = Array.isArray(task.certification_systems) ? task.certification_systems : []
   return systems.length ? systems.join(' / ') : '体系待确认'
+}
+
+const taskContextText = (task) => {
+  const enterprise = task?.enterprise_name || '企业待确认'
+  const project = task?.project_title || task?.project_no || '项目待确认'
+  return `${enterprise} · ${project}`
+}
+
+const taskCompletionRate = (task) => {
+  const provided = Number(task?.completion_rate)
+  if (Number.isFinite(provided)) return Math.max(0, Math.min(100, Math.round(provided)))
+  const confirmed = Number(task?.confirmed_record_count || 0)
+  const total = Number(task?.total_clause_count || 0)
+  return total > 0 ? Math.max(0, Math.min(100, Math.round(confirmed / total * 100))) : 0
+}
+
+const taskProgressText = (task) => {
+  const confirmed = Number(task?.confirmed_record_count || 0)
+  const total = Number(task?.total_clause_count || 0)
+  return `已确认 ${confirmed}/${total} 条款`
+}
+
+const hasTaskException = (task) => Boolean(task?.has_nc || Number(task?.exception_count || 0) > 0)
+
+const taskExceptionText = (task) => {
+  const count = Number(task?.exception_count || 0)
+  if (count > 0 && task?.has_nc) return `${count} 项异常，存在不符合项`
+  if (count > 0) return `${count} 项异常待处理`
+  return '存在不符合项'
 }
 
 const formatSchedule = (task) => {
@@ -462,10 +505,15 @@ onMounted(loadTasks)
 .priority-card__top { display: flex; gap: 12px; align-items: center; }
 .icon-tile { width: 48px; height: 48px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 12px; color: var(--primary-color); background: var(--info-bg); }
 .icon-tile--success { color: #059669; background: #d1fae5; }
+.priority-card__title { min-width: 0; }
 .priority-card__title h3 { margin: 0; font-size: 17px; }
 .priority-card__title p { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
+.priority-card__title .task-context { margin: 0 0 4px; overflow-wrap: anywhere; color: var(--text-muted); font-size: 12px; }
 .task-details { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 16px 0; font-size: 13px; color: var(--text-secondary); }
 .task-details span { display: inline-flex; align-items: center; gap: 5px; }
+.task-details .task-details__exception { color: var(--error-color); }
+.task-progress { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; }
+.task-progress strong { color: var(--primary-color); font-size: 13px; }
 .primary-action { min-height: 48px; margin-top: 4px; }
 
 .loading-card { padding: 18px; }
@@ -477,8 +525,10 @@ onMounted(loadTasks)
 .status-pending { background: var(--warning-color); }
 .status-completed { background: var(--success-color); }
 .task-row__content { min-width: 0; display: flex; flex: 1; flex-direction: column; }
+.task-row__context { margin-bottom: 3px; overflow-wrap: anywhere; color: var(--text-muted); font-size: 11px; line-height: 1.35; }
 .task-row__content strong { font-size: 15px; }
 .task-row__content small { margin-top: 3px; color: var(--text-secondary); line-height: 1.45; }
+.record-progress-label { margin-top: 6px; color: var(--primary-color); font-size: 12px; }
 .task-row__action { flex: 0 0 auto; max-width: 5.5em; font-size: 12px; font-weight: 600; color: var(--primary-color); text-align: right; line-height: 1.3; }
 .task-row__arrow { color: var(--text-muted); }
 .exception-label { display: inline-flex; align-items: center; gap: 4px; margin-top: 7px; font-size: 12px; color: var(--error-color); }

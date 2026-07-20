@@ -3,7 +3,7 @@
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ProjectKnowledgeSearchRequest(BaseModel):
@@ -26,6 +26,50 @@ class EvidenceSubmitRequest(BaseModel):
     media_file_ids: list[UUID] = Field(default_factory=list)
     candidate_item_ids: list[UUID] = Field(default_factory=list)
     source_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ManualRecordCreateRequest(BaseModel):
+    """A human-authored formal audit record within an active audit session."""
+
+    item_title: str = Field(..., min_length=1, max_length=500)
+    clause_nos: list[str] = Field(default_factory=list)
+    clause_no: Optional[str] = Field(None, max_length=50)
+    certification_system: Literal["Q", "E", "S", "En"]
+    evaluation_3level: Literal["1", "2", "3"]
+    audit_evidence: str = Field(..., min_length=1, max_length=30000)
+    audit_findings: Optional[str] = Field(None, max_length=30000)
+    rectification_suggestion: Optional[str] = Field(None, max_length=10000)
+    template_item_id: Optional[UUID] = None
+    media_file_ids: list[UUID] = Field(default_factory=list)
+
+    @field_validator("clause_nos", mode="before")
+    @classmethod
+    def normalize_clause_input(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return list(value)
+
+    def resolve_clause_nos(self) -> list[str]:
+        resolved: list[str] = []
+        for value in [*(self.clause_nos or []), self.clause_no]:
+            clause = str(value or "").strip()
+            if clause and clause not in resolved:
+                resolved.append(clause)
+        return resolved
+
+    @model_validator(mode="after")
+    def validate_clauses(self):
+        clauses = self.resolve_clause_nos()
+        if not clauses:
+            raise ValueError("clause_nos 或 clause_no 至少填写一项")
+        if len(" / ".join(clauses)) > 50:
+            raise ValueError("条款号合并后不能超过 50 个字符")
+        self.item_title = self.item_title.strip()
+        self.audit_evidence = self.audit_evidence.strip()
+        self.clause_nos = clauses
+        return self
 
 
 class DraftOverride(BaseModel):

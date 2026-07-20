@@ -1,6 +1,6 @@
 <template>
   <main class="audit-session-page">
-    <van-nav-bar title="AI 现场审核" left-arrow fixed placeholder @click-left="goBack" />
+    <van-nav-bar title="现场审核" left-arrow fixed placeholder @click-left="goBack" />
 
     <section class="session-summary">
       <div>
@@ -68,109 +68,230 @@
       <ul><li v-for="item in blockers" :key="item.code || item.message">{{ item.message || item.title }}</li></ul>
     </section>
 
-    <section v-if="!loading && savedSubmissions.length" class="work-card">
-      <div class="section-title">
-        <div><p class="eyebrow">已保存</p><h2>现场证据</h2></div>
-        <van-tag type="primary">{{ savedSubmissions.length }} 条</van-tag>
-      </div>
-      <article v-for="submission in savedSubmissions" :key="submission.id" class="saved-evidence-card">
-        <div class="draft-heading">
-          <strong>{{ submissionTitle(submission) }}</strong>
-          <van-tag :type="submission.status === 'completed' ? 'success' : 'warning'">
-            {{ submission.status === 'completed' ? '已处理' : '处理中' }}
-          </van-tag>
-        </div>
-        <p class="draft-evidence">{{ submission.description || '已保存现场证据' }}</p>
-        <p class="draft-meta">{{ submission.source_files?.length || 0 }} 个附件 · {{ formatSubmissionTime(submission) }}</p>
-      </article>
-    </section>
-
-    <section v-if="!isCompleted" class="work-card">
-      <div class="section-title">
-        <div><p class="eyebrow">证据采集</p><h2>现场证据</h2></div>
-        <button type="button" class="icon-button" aria-label="语音输入" :disabled="isCompleted || analyzing" @click="toggleVoice">
-          <van-icon :name="listening ? 'stop-circle-o' : 'volume-o'" size="22" />
+    <section v-if="!isCompleted" class="mode-card" aria-label="记录方式">
+      <div class="mode-switch" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="entryMode === 'manual'"
+          :class="{ active: entryMode === 'manual' }"
+          @click="entryMode = 'manual'"
+        >
+          手工记录
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="entryMode === 'ai'"
+          :class="{ active: entryMode === 'ai' }"
+          @click="entryMode = 'ai'"
+        >
+          AI 辅助
         </button>
       </div>
+    </section>
+
+    <section v-if="!isCompleted && entryMode === 'manual'" class="work-card">
+      <div class="section-title">
+        <div>
+          <p class="eyebrow">审核员记录</p>
+          <h2>新增正式现场记录</h2>
+          <p class="section-subhint">文字会自动保存在本机，保存后直接进入正式审核记录。</p>
+        </div>
+        <van-tag type="success">默认</van-tag>
+      </div>
+      <van-field v-model="manualForm.item_title" label="检查项" maxlength="300" placeholder="例如：受控文件管理" />
       <van-field
-        v-model="evidenceText"
+        v-model="manualForm.clause_text"
+        label="条款"
+        maxlength="1000"
+        placeholder="例如：7.5, 8.1（可填写多个）"
+      />
+      <van-field label="认证体系">
+        <template #input>
+          <van-radio-group v-model="manualForm.certification_system" direction="horizontal" class="inline-radios">
+            <van-radio v-for="system in certificationSystemOptions" :key="system.value" :name="system.value">
+              {{ system.label }}
+            </van-radio>
+          </van-radio-group>
+        </template>
+      </van-field>
+      <van-field label="审核评价">
+        <template #input>
+          <van-radio-group v-model="manualForm.evaluation_3level" direction="horizontal" class="inline-radios evaluation-radios">
+            <van-radio name="1">1 符合</van-radio>
+            <van-radio name="2">2 基本符合</van-radio>
+            <van-radio name="3">3 不符合</van-radio>
+          </van-radio-group>
+        </template>
+      </van-field>
+      <van-field
+        v-model="manualForm.audit_evidence"
         type="textarea"
         rows="5"
         maxlength="30000"
         show-word-limit
-        label="现场描述"
-        placeholder="一次描述完整现场情况，Agent 会自动拆分并匹配多个条款"
-        :disabled="analyzing"
+        label="现场记录"
+        placeholder="记录抽样对象、文件编号、时间、人员和观察到的客观事实"
       />
-      <van-uploader v-model="photoFiles" multiple :max-count="5" :disabled="isCompleted || analyzing" :after-read="uploadPhoto" />
-      <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted || analyzing" @click="showAgent = true">
-        打开 AI 审核助手
+      <van-field
+        v-if="manualForm.evaluation_3level !== '1'"
+        v-model="manualForm.audit_findings"
+        type="textarea"
+        rows="3"
+        maxlength="10000"
+        label="审核发现"
+        :placeholder="manualForm.evaluation_3level === '3' ? '请描述不符合事实' : '请描述需要关注或改进的事项'"
+      />
+      <van-field
+        v-if="manualForm.evaluation_3level === '3'"
+        v-model="manualForm.rectification_suggestion"
+        type="textarea"
+        rows="2"
+        maxlength="5000"
+        label="整改建议"
+        placeholder="填写整改要求或建议"
+      />
+      <div class="photo-field">
+        <div class="photo-field__label">现场照片</div>
+        <van-uploader
+          v-model="manualPhotoFiles"
+          multiple
+          :max-count="5"
+          :disabled="manualSubmitting"
+          :after-read="uploadManualPhoto"
+        />
+        <p class="field-hint">
+          照片会立即上传，需保持联网<span v-if="manualMediaFileIds.length">；已上传 {{ manualMediaFileIds.length }} 张</span>
+        </p>
+      </div>
+      <van-button
+        block
+        type="primary"
+        class="primary-action"
+        :loading="manualSubmitting"
+        @click="saveManualRecord"
+      >
+        保存正式记录
       </van-button>
-      <van-button block type="primary" class="primary-action" :loading="analyzing" :loading-text="analyzeStepText" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
-        {{ analyzing ? analyzeStepText : '生成多条款 AI 记录' }}
-      </van-button>
+      <div v-if="manualRecords.length" class="saved-manual-list">
+        <van-divider>已保存手工记录（{{ manualRecords.length }}）</van-divider>
+        <article v-for="recordItem in manualRecords" :key="recordItem.id || recordItem.submission_id" class="saved-evidence-card">
+          <div class="draft-heading">
+            <strong>{{ recordItem.item_title || '现场记录' }}</strong>
+            <van-tag :type="evaluationType({ evaluation: recordItem.evaluation_3level })">
+              {{ evaluationText({ evaluation: recordItem.evaluation_3level }) }}
+            </van-tag>
+          </div>
+          <p class="draft-meta">{{ recordItem.certification_system || '-' }} · {{ recordItem.clause_no || recordItem.clause_nos?.join(' / ') || '未填条款' }}</p>
+          <p class="draft-evidence">{{ recordItem.audit_evidence }}</p>
+        </article>
+      </div>
     </section>
 
-    <section class="work-card">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">人工复核</p>
-          <h2>待确认 AI 记录</h2>
-          <p v-if="confirmedDrafts.length || pendingDrafts.length" class="section-subhint">
-            按条款去重展示 · 已确认 {{ confirmedDrafts.length }} · 待确认 {{ pendingDrafts.length }}
-          </p>
+    <template v-if="!isCompleted && entryMode === 'ai'">
+      <section v-if="!loading && savedSubmissions.length" class="work-card">
+        <div class="section-title">
+          <div><p class="eyebrow">已保存</p><h2>AI 证据提交</h2></div>
+          <van-tag type="primary">{{ savedSubmissions.length }} 条</van-tag>
         </div>
-        <van-tag v-if="pendingDrafts.length" type="warning">{{ pendingDrafts.length }} 条</van-tag>
-      </div>
-      <van-empty v-if="!loading && pendingDrafts.length === 0" :description="isCompleted ? '本会话已无待确认记录' : '提交现场证据后，AI 草稿会显示在这里（同一条款多次生成只会保留最新一条）。请逐条核对后再采纳。'" />
-      <van-checkbox-group v-else v-model="selectedDraftIds">
-        <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
-          <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft) || isCompleted">
-            <div class="draft-heading">
-              <strong>{{ clauseText(draft) }}</strong>
-              <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
-            </div>
-          </van-checkbox>
-          <p v-if="isFallback(draft)" class="draft-fallback-notice">
-            <van-icon name="warning-o" /> 模型异常：此为保守回退结果，不可批量采纳，请逐条打开人工复核
-          </p>
-          <p class="draft-evidence">{{ draft.finding_text || draft.record_payload?.audit_evidence || '未提供证据摘要' }}</p>
-          <div class="draft-meta">
-            <span>证据：{{ qualityText(draft) }}</span>
-            <span class="confidence-cell">
-              置信度：
-              <van-tag size="mini" :type="confidenceTagType(draft)">{{ confidenceText(draft) }} · {{ confidenceLabel(draft) }}</van-tag>
-            </span>
-            <van-tag v-if="isFallback(draft)" size="mini" type="danger">需人工复核</van-tag>
+        <article v-for="submission in savedSubmissions" :key="submission.id" class="saved-evidence-card">
+          <div class="draft-heading">
+            <strong>{{ submissionTitle(submission) }}</strong>
+            <van-tag :type="submission.status === 'completed' ? 'success' : 'warning'">
+              {{ submission.status === 'completed' ? '已处理' : '处理中' }}
+            </van-tag>
           </div>
-          <p class="reasoning">{{ draft.reasoning }}</p>
-          <details v-if="draft.citations?.length">
-            <summary>查看 {{ draft.citations.length }} 条引用（请核对来源）</summary>
-            <p v-for="(citation, index) in draft.citations" :key="index" class="citation">
-              <van-tag size="mini" plain>{{ citationSourceLabel(citation) }}</van-tag>
-              {{ citation.document_title || citation.file_name || '资料' }}：{{ citation.content }}
-            </p>
-          </details>
-          <van-button
-            v-if="isFallback(draft) && !isCompleted"
-            size="small"
-            type="warning"
-            block
-            style="margin-top: 8px"
-            :loading="confirming"
-            @click="confirmSingleDraft(draft.id)"
-          >
-            人工复核并采纳此项
-          </van-button>
+          <p class="draft-evidence">{{ submission.description || '已保存现场证据' }}</p>
+          <p class="draft-meta">{{ submission.source_files?.length || 0 }} 个附件 · {{ formatSubmissionTime(submission) }}</p>
         </article>
-      </van-checkbox-group>
-      <div v-if="pendingDrafts.length && !isCompleted" class="review-actions">
-        <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted || safeDraftCount === 0" @click="confirmSafeDrafts">
-          批量采纳安全项（排除回退/异常）
+      </section>
+
+      <section class="work-card">
+        <div class="section-title">
+          <div><p class="eyebrow">可选辅助</p><h2>AI 多条款分析</h2></div>
+          <button type="button" class="icon-button" aria-label="语音输入" :disabled="isCompleted || analyzing" @click="toggleVoice">
+            <van-icon :name="listening ? 'stop-circle-o' : 'volume-o'" size="22" />
+          </button>
+        </div>
+        <van-field
+          v-model="evidenceText"
+          type="textarea"
+          rows="5"
+          maxlength="30000"
+          show-word-limit
+          label="现场描述"
+          placeholder="一次描述完整现场情况，AI 会拆分并匹配多个条款"
+          :disabled="analyzing"
+        />
+        <van-uploader v-model="photoFiles" multiple :max-count="5" :disabled="isCompleted || analyzing" :after-read="uploadPhoto" />
+        <p class="field-hint">文字会自动保存在本机；照片需联网后立即上传。</p>
+        <van-button block plain type="primary" icon="service-o" class="agent-entry" :disabled="isCompleted || analyzing" @click="showAgent = true">
+          打开 AI 审核助手
         </van-button>
-        <van-button block type="primary" :loading="confirming" :disabled="isCompleted || selectedDraftIds.length === 0" @click="confirmSelected">采纳已选择记录</van-button>
-      </div>
-    </section>
+        <van-button block type="primary" class="primary-action" :loading="analyzing" :loading-text="analyzeStepText" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
+          {{ analyzing ? analyzeStepText : '生成多条款 AI 记录' }}
+        </van-button>
+      </section>
+
+      <section class="work-card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">人工复核</p>
+            <h2>待确认 AI 记录</h2>
+            <p v-if="confirmedDrafts.length || pendingDrafts.length" class="section-subhint">
+              按条款去重展示 · 已确认 {{ confirmedDrafts.length }} · 待确认 {{ pendingDrafts.length }}
+            </p>
+          </div>
+          <van-tag v-if="pendingDrafts.length" type="warning">{{ pendingDrafts.length }} 条</van-tag>
+        </div>
+        <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里。请逐条核对、编辑或拒绝。" />
+        <van-checkbox-group v-else v-model="selectedDraftIds">
+          <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
+            <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft) || isCompleted">
+              <div class="draft-heading">
+                <strong>{{ clauseText(draft) }}</strong>
+                <van-tag :type="evaluationType(draft)">{{ evaluationText(draft) }}</van-tag>
+              </div>
+            </van-checkbox>
+            <p v-if="isFallback(draft)" class="draft-fallback-notice">
+              <van-icon name="warning-o" /> 模型异常：此为保守回退结果，不可批量采纳，必须逐条编辑复核
+            </p>
+            <p class="draft-evidence">{{ draft.finding_text || draft.record_payload?.audit_evidence || '未提供证据摘要' }}</p>
+            <div class="draft-meta">
+              <span>证据：{{ qualityText(draft) }}</span>
+              <span class="confidence-cell">
+                置信度：
+                <van-tag size="mini" :type="confidenceTagType(draft)">{{ confidenceText(draft) }} · {{ confidenceLabel(draft) }}</van-tag>
+              </span>
+              <van-tag v-if="isFallback(draft)" size="mini" type="danger">需人工复核</van-tag>
+            </div>
+            <p class="reasoning">{{ draft.reasoning }}</p>
+            <details v-if="draft.citations?.length">
+              <summary>查看 {{ draft.citations.length }} 条引用（请核对来源）</summary>
+              <p v-for="(citation, index) in draft.citations" :key="index" class="citation">
+                <van-tag size="mini" plain>{{ citationSourceLabel(citation) }}</van-tag>
+                {{ citation.document_title || citation.file_name || '资料' }}：{{ citation.content }}
+              </p>
+            </details>
+            <div class="draft-actions">
+              <van-button size="small" plain type="primary" icon="edit" :disabled="confirming" @click.stop="openDraftEditor(draft)">
+                编辑并采纳
+              </van-button>
+              <van-button size="small" plain type="danger" icon="delete-o" :disabled="confirming" @click.stop="rejectDraft(draft)">
+                拒绝草稿
+              </van-button>
+            </div>
+          </article>
+        </van-checkbox-group>
+        <div v-if="pendingDrafts.length && !isCompleted" class="review-actions">
+          <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted || safeDraftCount === 0" @click="confirmSafeDrafts">
+            批量采纳安全项（排除回退/异常）
+          </van-button>
+          <van-button block type="primary" :loading="confirming" :disabled="isCompleted || selectedDraftIds.length === 0" @click="confirmSelected">采纳已选择记录</van-button>
+        </div>
+      </section>
+    </template>
 
     <section v-if="confirmedDrafts.length" class="work-card">
       <div class="section-title">
@@ -201,6 +322,56 @@
         <van-button block type="primary" :loading="submitting" :disabled="isCompleted" @click="submitSession">提交审核记录</van-button>
       </div>
     </section>
+
+    <van-popup v-model:show="editDraftVisible" position="bottom" round :style="{ height: '82%' }">
+      <div class="edit-sheet">
+        <div class="edit-sheet__header">
+          <button type="button" @click="editDraftVisible = false">取消</button>
+          <strong>编辑并采纳 AI 草稿</strong>
+          <button type="button" :disabled="savingDraft" @click="saveEditedDraft">保存</button>
+        </div>
+        <div class="edit-sheet__body">
+          <p class="edit-sheet__clause">{{ editingDraft ? clauseText(editingDraft) : '条款' }}</p>
+          <van-field label="审核评价">
+            <template #input>
+              <van-radio-group v-model="editDraftForm.evaluation_3level" direction="horizontal" class="inline-radios evaluation-radios">
+                <van-radio name="1">1 符合</van-radio>
+                <van-radio name="2">2 基本符合</van-radio>
+                <van-radio name="3">3 不符合</van-radio>
+              </van-radio-group>
+            </template>
+          </van-field>
+          <van-field
+            v-model="editDraftForm.audit_evidence"
+            type="textarea"
+            rows="5"
+            maxlength="30000"
+            show-word-limit
+            label="客观证据"
+            placeholder="核对并修正客观证据"
+          />
+          <van-field
+            v-model="editDraftForm.audit_findings"
+            type="textarea"
+            rows="4"
+            maxlength="10000"
+            label="审核发现"
+            placeholder="核对并修正审核发现"
+          />
+          <van-field
+            v-model="editDraftForm.rectification_suggestion"
+            type="textarea"
+            rows="3"
+            maxlength="5000"
+            label="整改建议"
+            placeholder="不符合时填写整改要求或建议"
+          />
+          <van-button block type="primary" class="primary-action" :loading="savingDraft" @click="saveEditedDraft">
+            保存并采纳
+          </van-button>
+        </div>
+      </div>
+    </van-popup>
     <AgentChatPanel
       v-model:show="showAgent"
       :context="agentContext"
@@ -210,7 +381,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showDialog, showToast } from 'vant'
 import AgentChatPanel from '@/components/agent/AgentChatPanel.vue'
@@ -219,6 +390,7 @@ import { citationSourceLabel } from '@/utils/display.js'
 import {
   checkAuditQuality,
   confirmAuditDrafts,
+  createManualSessionRecord,
   getAuditPlanItem,
   getAuditSession,
   submitAuditSession,
@@ -234,6 +406,7 @@ const planItemId = computed(() => String(route.query.planItemId || ''))
 
 const session = ref({})
 const planItem = ref(null)
+const entryMode = ref('manual')
 const loading = ref(true)
 const analyzing = ref(false)
 const analyzeProgress = ref(0)
@@ -248,8 +421,40 @@ const evidenceText = ref('')
 const conclusion = ref('')
 const photoFiles = ref([])
 const mediaFileIds = ref([])
+const manualSubmitting = ref(false)
+const manualPhotoFiles = ref([])
+const manualMediaFileIds = ref([])
 const selectedDraftIds = ref([])
 const qualityCheck = ref({ blockers: [], warnings: [] })
+const editDraftVisible = ref(false)
+const editingDraft = ref(null)
+const savingDraft = ref(false)
+
+const certificationSystemOptions = [
+  { label: 'Q', value: 'Q' },
+  { label: 'E', value: 'E' },
+  { label: 'S', value: 'S' },
+  { label: 'En', value: 'En' }
+]
+
+const emptyManualForm = () => ({
+  item_title: '',
+  clause_text: '',
+  certification_system: '',
+  evaluation_3level: '1',
+  audit_evidence: '',
+  audit_findings: '',
+  rectification_suggestion: '',
+  template_item_id: ''
+})
+
+const manualForm = ref(emptyManualForm())
+const editDraftForm = ref({
+  evaluation_3level: '2',
+  audit_evidence: '',
+  audit_findings: '',
+  rectification_suggestion: ''
+})
 let speechRecognition = null
 let analyzeTimer = null
 
@@ -276,13 +481,14 @@ const displayProgress = computed(() => {
 const drafts = computed(() => session.value.drafts || [])
 const pendingDrafts = computed(() => drafts.value.filter((item) => item.status === 'draft'))
 const confirmedDrafts = computed(() => drafts.value.filter((item) => item.status === 'confirmed'))
+const manualRecords = computed(() => session.value.manual_records || [])
 const savedSubmissions = computed(() => (session.value.submissions || []).filter((item) => item.status !== 'failed'))
 const isCompleted = computed(() => session.value.status === 'completed')
 const blockers = computed(() => qualityCheck.value.blockers || qualityCheck.value.blocking_items || [])
 const statusText = computed(() => {
   if (session.value.status === 'completed') return '审核记录已提交'
   if (analyzing.value) return 'AI 正在生成多条款记录'
-  return 'Agent 正在协助整理现场证据'
+  return '现场审核记录'
 })
 const sortedDrafts = computed(() => [...pendingDrafts.value].sort((left, right) => Number(isAbnormal(right)) - Number(isAbnormal(left))))
 const agentContext = computed(() => ({
@@ -364,6 +570,61 @@ const finishAnalyzeProgress = () => {
 
 const unwrap = (response) => response?.data || response || {}
 
+const localDraftKey = computed(() => `efis:audit-session-draft:${sessionId.value}`)
+
+const persistSessionDraft = () => {
+  if (!sessionId.value || isCompleted.value) return
+  try {
+    window.localStorage.setItem(localDraftKey.value, JSON.stringify({
+      evidence_text: evidenceText.value,
+      conclusion: conclusion.value,
+      manual_form: manualForm.value,
+      manual_media_file_ids: manualMediaFileIds.value,
+      ai_media_file_ids: mediaFileIds.value,
+      saved_at: new Date().toISOString()
+    }))
+  } catch {
+    // Storage may be unavailable in private browsing; online saving remains usable.
+  }
+}
+
+const restoreSessionDraft = () => {
+  if (!sessionId.value) return false
+  try {
+    const raw = window.localStorage.getItem(localDraftKey.value)
+    if (!raw) return false
+    const saved = JSON.parse(raw)
+    evidenceText.value = typeof saved.evidence_text === 'string' ? saved.evidence_text : ''
+    conclusion.value = typeof saved.conclusion === 'string' ? saved.conclusion : ''
+    manualForm.value = { ...emptyManualForm(), ...(saved.manual_form || {}) }
+    manualMediaFileIds.value = Array.isArray(saved.manual_media_file_ids) ? saved.manual_media_file_ids : []
+    mediaFileIds.value = Array.isArray(saved.ai_media_file_ids) ? saved.ai_media_file_ids : []
+    return Boolean(
+      evidenceText.value ||
+      conclusion.value ||
+      manualForm.value.item_title ||
+      manualForm.value.audit_evidence
+    )
+  } catch {
+    window.localStorage.removeItem(localDraftKey.value)
+    return false
+  }
+}
+
+const clearSessionDraft = () => {
+  try {
+    window.localStorage.removeItem(localDraftKey.value)
+  } catch {
+    // No action is needed when storage is unavailable.
+  }
+}
+
+watch(
+  [evidenceText, conclusion, manualForm, manualMediaFileIds, mediaFileIds],
+  persistSessionDraft,
+  { deep: true }
+)
+
 const loadSession = async () => {
   loading.value = true
   try {
@@ -374,7 +635,15 @@ const loadSession = async () => {
     session.value = unwrap(sessionResponse)
     planItem.value = planResponse ? unwrap(planResponse) : null
     qualityCheck.value = session.value.quality_check || qualityCheck.value
-    conclusion.value = session.value.conclusion || session.value.context_snapshot?.conclusion || ''
+    const savedConclusion = session.value.conclusion || session.value.context_snapshot?.conclusion
+    if (savedConclusion) conclusion.value = savedConclusion
+    if (!manualForm.value.certification_system) {
+      manualForm.value.certification_system = planItem.value?.certification_systems?.[0] || ''
+    }
+    if (!manualForm.value.clause_text && Array.isArray(planItem.value?.clauses)) {
+      manualForm.value.clause_text = planItem.value.clauses.join(', ')
+    }
+    if (session.value.status === 'completed') clearSessionDraft()
   } catch (error) {
     showToast(error?.message || '加载审核会话失败')
   } finally {
@@ -382,7 +651,7 @@ const loadSession = async () => {
   }
 }
 
-const uploadPhoto = async (fileItem) => {
+const uploadSessionPhotos = async (fileItem, targetIds) => {
   const items = Array.isArray(fileItem) ? fileItem : [fileItem]
   for (const item of items) {
     if (!item.file) {
@@ -398,12 +667,70 @@ const uploadPhoto = async (fileItem) => {
         item.file
       )
       const uploaded = unwrap(response)
-      if (uploaded.id) mediaFileIds.value.push(uploaded.id)
+      if (uploaded.id && !targetIds.value.includes(uploaded.id)) targetIds.value.push(uploaded.id)
       item.status = 'done'
     } catch (error) {
       item.status = 'failed'
       item.message = error?.message || '上传失败'
     }
+  }
+}
+
+const uploadPhoto = (fileItem) => uploadSessionPhotos(fileItem, mediaFileIds)
+const uploadManualPhoto = (fileItem) => uploadSessionPhotos(fileItem, manualMediaFileIds)
+
+const parseClauseNumbers = (value) => [...new Set(
+  String(value || '')
+    .split(/[,，;；、\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+)]
+
+const requestErrorMessage = (error, fallback) => {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (detail?.message) return detail.message
+  return error?.message || fallback
+}
+
+const resetManualForm = () => {
+  manualForm.value = emptyManualForm()
+  manualPhotoFiles.value = []
+  manualMediaFileIds.value = []
+}
+
+const saveManualRecord = async () => {
+  const values = manualForm.value
+  const clauseNos = parseClauseNumbers(values.clause_text)
+  if (!values.item_title.trim()) return showToast('请填写检查项')
+  if (!clauseNos.length) return showToast('请至少填写一个条款号')
+  if (!values.certification_system) return showToast('请选择认证体系')
+  if (!values.audit_evidence.trim()) return showToast('请填写现场记录')
+  if (values.evaluation_3level === '3' && !values.audit_findings.trim()) {
+    return showToast('不符合项必须填写审核发现')
+  }
+
+  manualSubmitting.value = true
+  try {
+    await createManualSessionRecord(projectId.value, sessionId.value, {
+      item_title: values.item_title.trim(),
+      clause_nos: clauseNos,
+      certification_system: values.certification_system,
+      evaluation_3level: values.evaluation_3level,
+      audit_evidence: values.audit_evidence.trim(),
+      audit_findings: values.audit_findings.trim() || undefined,
+      rectification_suggestion: values.rectification_suggestion.trim() || undefined,
+      template_item_id: values.template_item_id || undefined,
+      media_file_ids: manualMediaFileIds.value
+    })
+    await loadSession()
+    resetManualForm()
+    persistSessionDraft()
+    showToast('正式现场记录已保存')
+  } catch (error) {
+    showToast(requestErrorMessage(error, '保存正式现场记录失败'))
+  } finally {
+    manualSubmitting.value = false
   }
 }
 
@@ -467,6 +794,81 @@ const analyzeEvidence = async () => {
   }
 }
 
+const openDraftEditor = (draft) => {
+  const payload = draft.record_payload || {}
+  editingDraft.value = draft
+  editDraftForm.value = {
+    evaluation_3level: String(payload.evaluation_3level || draft.evaluation || '2'),
+    audit_evidence: payload.audit_evidence || draft.finding_text || '',
+    audit_findings: payload.audit_findings || draft.finding_text || '',
+    rectification_suggestion: payload.rectification_suggestion || ''
+  }
+  editDraftVisible.value = true
+}
+
+const saveEditedDraft = async () => {
+  const draftId = editingDraft.value?.id
+  if (!draftId) return
+  const values = editDraftForm.value
+  if (!values.audit_evidence.trim()) return showToast('请填写客观证据')
+  if (values.evaluation_3level === '3' && !values.audit_findings.trim()) {
+    return showToast('不符合项必须填写审核发现')
+  }
+
+  savingDraft.value = true
+  try {
+    await confirmAuditDrafts(projectId.value, sessionId.value, {
+      draft_ids: [draftId],
+      action: 'confirm',
+      safe_only: false,
+      overrides: [{
+        draft_id: draftId,
+        evaluation_3level: values.evaluation_3level,
+        audit_evidence: values.audit_evidence.trim(),
+        audit_findings: values.audit_findings.trim() || undefined,
+        rectification_suggestion: values.rectification_suggestion.trim() || undefined
+      }]
+    })
+    selectedDraftIds.value = selectedDraftIds.value.filter((id) => id !== draftId)
+    editDraftVisible.value = false
+    editingDraft.value = null
+    showToast('草稿已按审核员修改内容采纳')
+    await loadSession()
+  } catch (error) {
+    showToast(requestErrorMessage(error, '编辑采纳失败'))
+  } finally {
+    savingDraft.value = false
+  }
+}
+
+const rejectDraft = async (draft) => {
+  try {
+    await showConfirmDialog({
+      title: '拒绝 AI 草稿',
+      message: `确认拒绝条款 ${clauseText(draft)} 的本条 AI 草稿吗？拒绝后不会写入正式记录。`
+    })
+  } catch {
+    return
+  }
+
+  confirming.value = true
+  try {
+    await confirmAuditDrafts(projectId.value, sessionId.value, {
+      draft_ids: [draft.id],
+      action: 'reject',
+      safe_only: false,
+      overrides: []
+    })
+    selectedDraftIds.value = selectedDraftIds.value.filter((id) => id !== draft.id)
+    showToast('AI 草稿已拒绝')
+    await loadSession()
+  } catch (error) {
+    showToast(requestErrorMessage(error, '拒绝草稿失败'))
+  } finally {
+    confirming.value = false
+  }
+}
+
 const doConfirm = async (draftIds, safeOnly = false) => {
   if (isCompleted.value) return
   confirming.value = true
@@ -488,14 +890,13 @@ const confirmSelected = () => {
     .filter(Boolean)
   const fallbackIds = selected.filter((d) => isFallback(d)).map((d) => d.id)
   if (fallbackIds.length) {
-    showToast('回退结果不可批量采纳，请使用「人工复核并采纳此项」')
+    showToast('回退结果不可批量采纳，请逐条编辑并采纳')
     selectedDraftIds.value = selectedDraftIds.value.filter((id) => !fallbackIds.includes(id))
     return
   }
   return doConfirm(selectedDraftIds.value)
 }
 const confirmSafeDrafts = () => doConfirm([], true)
-const confirmSingleDraft = (draftId) => doConfirm([draftId], false)
 
 const runQualityCheck = async () => {
   checking.value = true
@@ -535,6 +936,7 @@ const submitSession = async () => {
   submitting.value = true
   try {
     await submitAuditSession(projectId.value, sessionId.value, { conclusion: conclusion.value.trim() })
+    clearSessionDraft()
     await loadSession()
     try {
       await showDialog({
@@ -555,8 +957,16 @@ const submitSession = async () => {
   }
 }
 
-onMounted(loadSession)
-onBeforeUnmount(clearAnalyzeTimer)
+onMounted(async () => {
+  const restored = restoreSessionDraft()
+  await loadSession()
+  if (restored && !isCompleted.value) showToast('已恢复本机保存的文字草稿')
+})
+onBeforeUnmount(() => {
+  clearAnalyzeTimer()
+  if (speechRecognition && listening.value) speechRecognition.stop()
+  if (!isCompleted.value) persistSessionDraft()
+})
 </script>
 
 <style scoped>
@@ -583,5 +993,23 @@ onBeforeUnmount(clearAnalyzeTimer)
 .success-hero{display:flex;gap:14px;align-items:flex-start}
 .success-hero h2{margin:0 0 6px;font-size:18px}
 .success-copy{margin:0;color:var(--text-secondary);font-size:13px;line-height:1.55}
+.mode-card{margin-bottom:14px;padding:4px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:#fff;box-shadow:var(--shadow-sm)}
+.mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.mode-switch button{min-height:42px;border:0;border-radius:calc(var(--radius-md) - 3px);color:var(--text-secondary);background:transparent;font:inherit;font-size:14px;font-weight:600}
+.mode-switch button.active{color:#fff;background:var(--primary-color)}
+.inline-radios{display:flex;flex-wrap:wrap;gap:10px 14px;padding:4px 0}
+.evaluation-radios{gap:10px 12px}
+.photo-field{padding:14px 16px;border-top:1px solid var(--border-light)}
+.photo-field__label{margin-bottom:10px;color:var(--text-primary);font-size:14px}
+.field-hint{margin:7px 0 0;color:var(--text-secondary);font-size:12px;line-height:1.5}
+.saved-manual-list{margin-top:18px}
+.draft-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.edit-sheet{height:100%;display:flex;flex-direction:column;background:var(--bg-light)}
+.edit-sheet__header{min-height:54px;display:grid;grid-template-columns:64px 1fr 64px;align-items:center;border-bottom:1px solid var(--border-light);background:#fff;text-align:center}
+.edit-sheet__header button{height:44px;border:0;color:var(--primary-color);background:transparent;font:inherit}
+.edit-sheet__header button:disabled{color:var(--text-light)}
+.edit-sheet__header strong{font-size:16px}
+.edit-sheet__body{flex:1;overflow-y:auto;padding:12px 12px calc(24px + env(safe-area-inset-bottom))}
+.edit-sheet__clause{margin:0 0 10px;padding:10px 16px;border-radius:var(--radius-sm);color:var(--text-primary);background:#fff;font-size:14px;font-weight:600}
 @media(min-width:700px){.audit-session-page{max-width:680px;margin:0 auto}}
 </style>

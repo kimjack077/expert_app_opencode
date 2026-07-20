@@ -14,16 +14,25 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.database import AsyncSessionLocal, get_db
-from app.models.audit_project import AuditArea, AuditAreaRecord, AuditPlanItem, Nonconformity
+from app.models.audit_project import AuditArea, AuditAreaRecord, AuditPlanItem, AuditProject, Nonconformity
+from app.models.enterprise import Enterprise
 from app.models.evidence_agent import AiAuditSession, AiDraftRecord, EvidenceItem, EvidenceSubmission
+from app.models.industry import Industry
 from app.models.media import MediaFile
 from app.models.project_artifact import ProjectArtifact
 from app.models.project_knowledge import ProjectDocument
 from app.models.record import InspectionRecordItem
+from app.models.task import InspectionTask
 from app.models.template import TemplateItem
 from app.models.user import User
 from app.routers.auth import get_current_user
-from app.schemas.project_agent import ArtifactGenerateRequest, AuditSessionCreateRequest, DraftConfirmRequest, EvidenceSubmitRequest
+from app.schemas.project_agent import (
+    ArtifactGenerateRequest,
+    AuditSessionCreateRequest,
+    DraftConfirmRequest,
+    EvidenceSubmitRequest,
+    ManualRecordCreateRequest,
+)
 from app.services.evidence_agent_service import EvidenceCandidate, evidence_agent_service
 from app.services.project_access_service import ensure_project_access
 from app.services.project_artifact_service import project_artifact_service
@@ -43,6 +52,38 @@ def response(data: Any = None, message: str = "success") -> dict[str, Any]:
     }
 
 
+async def _document_project_context(
+    db: AsyncSession,
+    project_id: UUID,
+) -> tuple[str | None, list[str]]:
+    """Return the authoritative enterprise and industry hints for isolation."""
+
+    project = await db.get(AuditProject, project_id)
+    if not project:
+        return None, []
+    enterprise = (
+        await db.get(Enterprise, project.enterprise_id)
+        if project.enterprise_id
+        else None
+    )
+    industry = (
+        await db.get(Industry, enterprise.industry_id)
+        if enterprise and enterprise.industry_id
+        else None
+    )
+    keywords = [
+        project.title,
+        str(project.audit_scope or ""),
+        enterprise.name if enterprise else None,
+        industry.name if industry else None,
+        industry.description if industry else None,
+    ]
+    return (
+        enterprise.name if enterprise else None,
+        [str(value) for value in keywords if value],
+    )
+
+
 def document_dict(item: ProjectDocument) -> dict[str, Any]:
     return {"id": str(item.id), "project_id": str(item.project_id), "title": item.title, "file_name": item.original_filename, "filename": item.original_filename, "category": item.document_type, "status": item.status, "parse_status": item.status, "file_size": item.file_size, "size": item.file_size, "metadata": item.document_metadata or {}, "parse_error": item.parse_error, "parsed_at": item.parsed_at, "created_at": item.created_at, "chunk_count": len(item.chunks) if "chunks" in item.__dict__ else None}
 
@@ -50,6 +91,43 @@ def document_dict(item: ProjectDocument) -> dict[str, Any]:
 def draft_dict(item: AiDraftRecord) -> dict[str, Any]:
     quality = item.quality or {}
     return {"id": str(item.id), "session_id": str(item.session_id), "submission_id": str(item.submission_id) if item.submission_id else None, "area_record_id": str(item.area_record_id) if item.area_record_id else None, "plan_item_id": str(item.plan_item_id) if item.plan_item_id else None, "clause_refs": item.clause_refs or [], "primary_clause_no": item.primary_clause_no, "certification_system": item.certification_system, "evaluation": item.evaluation, "finding_text": item.finding_text, "record_payload": item.record_payload or {}, "quality": quality, "reasoning": item.reasoning, "confidence": float(item.confidence or 0), "citations": item.citations or [], "status": item.status, "model_status": quality.get("model_status") or "ok", "confirmed_record_item_id": str(item.confirmed_record_item_id) if item.confirmed_record_item_id else None, "created_at": item.created_at}
+
+
+def _manual_records_from_session(session: AiAuditSession) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for submission in getattr(session, "submissions", []) or []:
+        snapshot = getattr(submission, "source_snapshot", None) or {}
+        manual_record = snapshot.get("manual_record")
+        if not isinstance(manual_record, dict):
+            continue
+        value = {**manual_record}
+        value.setdefault("submission_id", str(submission.id))
+        records.append(value)
+    return records
+
+
+async def _sync_inspection_task_status(
+    db: AsyncSession,
+    plan_item: AuditPlanItem | None,
+    status: str,
+    at: datetime | None = None,
+) -> InspectionTask | None:
+    """Keep the legacy task projection aligned with the formal plan item."""
+
+    if not plan_item or not plan_item.inspection_task_id:
+        return None
+    task = await db.get(InspectionTask, plan_item.inspection_task_id)
+    if not task:
+        return None
+    changed_at = at or datetime.now(timezone.utc)
+    task.status = status
+    if status == "in_progress":
+        task.started_at = task.started_at or changed_at
+        task.completed_at = None
+    elif status == "completed":
+        task.started_at = task.started_at or changed_at
+        task.completed_at = changed_at
+    return task
 
 
 def _draft_clause_key(draft: AiDraftRecord) -> str:
@@ -117,15 +195,18 @@ def _dedupe_session_pending_drafts(session: AiAuditSession) -> int:
 
 
 def session_dict(item: AiAuditSession, include_children: bool = False) -> dict[str, Any]:
-    value = {"id": str(item.id), "project_id": str(item.project_id), "conversation_id": str(item.conversation_id) if item.conversation_id else None, "title": item.title, "status": item.status, "context_snapshot": item.context_snapshot or {}, "model_provider": item.model_provider, "model_name": item.model_name, "created_by": str(item.created_by), "started_at": item.started_at, "completed_at": item.completed_at, "created_at": item.created_at, "updated_at": item.updated_at}
+    context = item.context_snapshot or {}
+    value = {"id": str(item.id), "project_id": str(item.project_id), "conversation_id": str(item.conversation_id) if item.conversation_id else None, "title": item.title, "status": item.status, "context_snapshot": context, "model_provider": item.model_provider, "model_name": item.model_name, "created_by": str(item.created_by), "started_at": item.started_at, "completed_at": item.completed_at, "created_at": item.created_at, "updated_at": item.updated_at, "manual_record_count": int(context.get("manual_record_count") or 0)}
     if include_children:
         # Only surface active review items; superseded/rejected stay in DB for audit trail
         visible_drafts = [d for d in item.drafts if d.status in {"draft", "confirmed"}]
+        manual_records = _manual_records_from_session(item)
         value["drafts"] = [draft_dict(draft) for draft in visible_drafts]
         value["submissions"] = [{"id": str(submission.id), "status": submission.status, "description": submission.description, "source_files": submission.source_files or [], "submitted_at": submission.submitted_at} for submission in item.submissions]
         confirmed = sum(1 for draft in visible_drafts if draft.status == "confirmed")
         pending = sum(1 for draft in visible_drafts if draft.status == "draft")
-        active_total = confirmed + pending
+        manual_count = len(manual_records)
+        active_total = confirmed + manual_count + pending
         # 阶段：分析中(10) → 草稿就绪(30+) → 部分确认(50+) → 全部确认(90) → 提交完成(100)
         if item.status == "completed":
             progress = 100
@@ -145,6 +226,9 @@ def session_dict(item: AiAuditSession, include_children: bool = False) -> dict[s
             value["model_status_message"] = f"有 {fallback_count} 条草稿因 AI 模型异常为保守回退结果，需人工复核"
         value["pending_clause_count"] = pending
         value["confirmed_clause_count"] = confirmed
+        value["manual_records"] = manual_records
+        value["manual_record_count"] = manual_count
+        value["confirmed_record_count"] = confirmed + manual_count
     return value
 
 
@@ -225,7 +309,7 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="上传文件为空")
-    if len(content) > settings.MAX_FILE_SIZE:
+    if len(content) > settings.PROJECT_DOCUMENT_MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="文件超过允许大小")
     filename = Path(file.filename or "project-document").name
     directory = Path(settings.UPLOAD_DIR) / "audit_projects" / str(project_id) / "documents"
@@ -236,7 +320,16 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
     document = ProjectDocument(project_id=project_id, title=Path(filename).stem, document_type=category or "auto", original_filename=filename, stored_path=str(stored_path.resolve()), mime_type=file.content_type, file_size=len(content), checksum_sha256=hashlib.sha256(content).hexdigest(), status="uploaded", created_by=current_user.id)
     db.add(document); await db.commit(); await db.refresh(document)
     try:
-        stats = await project_knowledge_service.index_document(db, document, content)
+        enterprise_name, industry_keywords = await _document_project_context(
+            db, project_id
+        )
+        stats = await project_knowledge_service.index_document(
+            db,
+            document,
+            content,
+            expected_enterprise_name=enterprise_name,
+            expected_industry_keywords=industry_keywords,
+        )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"资料已保存但解析失败: {exc}") from exc
     await db.refresh(document)
@@ -266,7 +359,19 @@ async def reindex_document(project_id: UUID, document_id: UUID, db: AsyncSession
     if not document or document.project_id != project_id or document.is_deleted: raise HTTPException(status_code=404, detail="项目资料不存在")
     path = Path(document.stored_path)
     if not path.is_file(): raise HTTPException(status_code=404, detail="原始文件不存在")
-    return response(await project_knowledge_service.index_document(db, document, path.read_bytes()), "索引已重建")
+    enterprise_name, industry_keywords = await _document_project_context(
+        db, project_id
+    )
+    return response(
+        await project_knowledge_service.index_document(
+            db,
+            document,
+            path.read_bytes(),
+            expected_enterprise_name=enterprise_name,
+            expected_industry_keywords=industry_keywords,
+        ),
+        "索引已重建",
+    )
 
 
 @router.post("/{project_id}/knowledge/search")
@@ -295,6 +400,7 @@ async def create_session(project_id: UUID, payload: AuditSessionCreateRequest, d
     context: dict[str, Any] = {"focus": payload.focus}
     area_record_id = payload.area_record_id
     reaudit = bool(payload.reaudit)
+    plan_item: AuditPlanItem | None = None
     if payload.plan_item_id:
         plan_item = await db.get(AuditPlanItem, payload.plan_item_id)
         if not plan_item or plan_item.project_id != project_id: raise HTTPException(status_code=404, detail="审核计划项不存在")
@@ -363,6 +469,17 @@ async def create_session(project_id: UUID, payload: AuditSessionCreateRequest, d
         if reaudit and area_record.status in {"submitted", "completed"}:
             area_record.status = "in_progress"
         context["area_record_id"] = str(area_record_id)
+        if not plan_item and area_record.plan_item_id:
+            plan_item = await db.get(AuditPlanItem, area_record.plan_item_id)
+            if plan_item:
+                context.update({
+                    "plan_item_id": str(plan_item.id),
+                    "area_name": plan_item.area_name,
+                    "template_id": str(plan_item.template_id) if plan_item.template_id else None,
+                    "clauses": plan_item.clauses or [],
+                    "certification_systems": plan_item.certification_systems or [],
+                })
+    await _sync_inspection_task_status(db, plan_item, "in_progress")
     title = payload.title or "AI 现场审核"
     if reaudit and title and "重新" not in title:
         title = f"{title}（重新审核）"
@@ -630,8 +747,206 @@ async def submit_evidence(project_id: UUID, session_id: UUID, payload: EvidenceS
     )
 
 
+@router.post("/{project_id}/sessions/{session_id}/records/manual")
+async def create_manual_record(
+    project_id: UUID,
+    session_id: UUID,
+    payload: ManualRecordCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Persist a human-authored record without invoking the LLM."""
+
+    await ensure_project_access(db, project_id, current_user)
+    session = await _load_session(db, project_id, session_id)
+    if session.status == "completed":
+        raise HTTPException(status_code=409, detail="审核会话已提交，不能新增手工记录")
+
+    context = session.context_snapshot or {}
+    area_record_id = UUID(context["area_record_id"]) if context.get("area_record_id") else None
+    plan_item_id = UUID(context["plan_item_id"]) if context.get("plan_item_id") else None
+    if not area_record_id or not plan_item_id:
+        raise HTTPException(status_code=409, detail="手工审核记录必须关联审核计划项和区域记录")
+
+    area_record = await db.get(AuditAreaRecord, area_record_id)
+    plan_item = await db.get(AuditPlanItem, plan_item_id)
+    if not area_record or area_record.project_id != project_id:
+        raise HTTPException(status_code=409, detail="审核区域记录不存在或不属于当前项目")
+    if not plan_item or plan_item.project_id != project_id or area_record.plan_item_id != plan_item.id:
+        raise HTTPException(status_code=409, detail="审核计划项与区域记录不匹配")
+
+    template_item = None
+    if payload.template_item_id:
+        template_item = await db.get(TemplateItem, payload.template_item_id)
+        if not template_item or template_item.is_deleted:
+            raise HTTPException(status_code=404, detail="检查模板项目不存在")
+        if plan_item.template_id and template_item.template_id != plan_item.template_id:
+            raise HTTPException(status_code=400, detail="检查模板项目不属于当前审核计划模板")
+
+    media_rows: list[MediaFile] = []
+    if payload.media_file_ids:
+        media_rows = (
+            await db.execute(
+                select(MediaFile).where(
+                    MediaFile.id.in_(payload.media_file_ids),
+                    MediaFile.uploaded_by == current_user.id,
+                    MediaFile.project_id == project_id,
+                    MediaFile.audit_session_id == session.id,
+                    MediaFile.is_deleted == False,  # noqa: E712
+                )
+            )
+        ).scalars().all()
+        if len(media_rows) != len(set(payload.media_file_ids)):
+            raise HTTPException(status_code=400, detail="包含不属于当前项目会话的证据文件")
+
+    clauses = payload.resolve_clause_nos()
+    clause_text = " / ".join(clauses)
+    photo_paths = [media.file_path for media in media_rows]
+    now = datetime.now(timezone.utc)
+    submission = EvidenceSubmission(
+        project_id=project_id,
+        session_id=session.id,
+        area_record_id=area_record_id,
+        plan_item_id=plan_item_id,
+        submitted_by=current_user.id,
+        input_type="mixed" if media_rows else "text",
+        title=payload.item_title,
+        description=payload.audit_evidence,
+        source_files=[
+            {
+                "id": str(media.id),
+                "name": media.original_name,
+                "path": media.file_path,
+                "mime_type": media.mime_type,
+            }
+            for media in media_rows
+        ],
+        source_snapshot={},
+        status="completed",
+        processed_at=now,
+    )
+    db.add(submission)
+    await db.flush()
+
+    evidence_item = EvidenceItem(
+        project_id=project_id,
+        submission_id=submission.id,
+        sequence_no=0,
+        evidence_type="text",
+        content=payload.audit_evidence,
+        item_metadata={
+            "manual_record": True,
+            "item_title": payload.item_title,
+            "clause_nos": clauses,
+            "certification_system": payload.certification_system,
+            "evaluation_3level": payload.evaluation_3level,
+        },
+    )
+    db.add(evidence_item)
+    for index, media in enumerate(media_rows, start=1):
+        db.add(
+            EvidenceItem(
+                project_id=project_id,
+                submission_id=submission.id,
+                sequence_no=index,
+                evidence_type="photo",
+                content=media.original_name or "现场照片",
+                file_path=media.file_path,
+                filename=media.original_name,
+                mime_type=media.mime_type,
+                item_metadata={"media_file_id": str(media.id), "manual_record": True},
+            )
+        )
+
+    record_item = InspectionRecordItem(
+        audit_area_record_id=area_record_id,
+        template_item_id=template_item.id if template_item else None,
+        result="fail" if payload.evaluation_3level == "3" else "pass",
+        result_text=payload.audit_findings or payload.audit_evidence,
+        problem_description=payload.audit_findings,
+        rectification_suggestion=payload.rectification_suggestion,
+        audit_evidence=payload.audit_evidence,
+        evaluation_3level=payload.evaluation_3level,
+        audit_findings=payload.audit_findings,
+        certification_system=payload.certification_system,
+        clause_no_snapshot=clause_text,
+        ai_generated=False,
+        photos=photo_paths,
+        item_title=payload.item_title,
+        item_description=template_item.description if template_item else None,
+        item_check_method=template_item.check_method if template_item else None,
+        item_legal_basis=template_item.legal_basis if template_item else None,
+        item_standard_ref=template_item.standard_ref if template_item else None,
+        item_risk_level=template_item.risk_level if template_item else None,
+        item_check_type="audit_3level",
+        item_result_options=template_item.result_options if template_item else None,
+        item_allow_attachment=template_item.allow_attachment if template_item else bool(media_rows),
+        item_attachment_required=template_item.attachment_required if template_item else False,
+        item_use_ai=False,
+    )
+    db.add(record_item)
+    await db.flush()
+
+    nc = None
+    if payload.evaluation_3level == "3":
+        nc = Nonconformity(
+            project_id=project_id,
+            plan_item_id=plan_item_id,
+            area_record_id=area_record_id,
+            record_item_id=record_item.id,
+            nc_no=f"MAN-{str(record_item.id)[:8].upper()}",
+            severity="minor",
+            certification_system=payload.certification_system,
+            clause_no=clause_text,
+            description=payload.audit_findings or payload.audit_evidence,
+            evidence=payload.audit_evidence,
+            corrective_action_required=payload.rectification_suggestion or "请分析原因并完成整改",
+            status="draft",
+            created_by=current_user.id,
+        )
+        db.add(nc)
+        await db.flush()
+
+    manual_record = {
+        "id": str(record_item.id),
+        "session_id": str(session.id),
+        "submission_id": str(submission.id),
+        "area_record_id": str(area_record_id),
+        "plan_item_id": str(plan_item_id),
+        "item_title": payload.item_title,
+        "clause_nos": clauses,
+        "clause_no": clause_text,
+        "certification_system": payload.certification_system,
+        "evaluation_3level": payload.evaluation_3level,
+        "audit_evidence": payload.audit_evidence,
+        "audit_findings": payload.audit_findings,
+        "rectification_suggestion": payload.rectification_suggestion,
+        "template_item_id": str(template_item.id) if template_item else None,
+        "media_file_ids": [str(media.id) for media in media_rows],
+        "photos": photo_paths,
+        "ai_generated": False,
+        "nc_id": str(nc.id) if nc else None,
+        "created_at": now.isoformat(),
+    }
+    submission.source_snapshot = {"manual_record": manual_record}
+    session.context_snapshot = {
+        **context,
+        "manual_record_count": int(context.get("manual_record_count") or 0) + 1,
+    }
+    if area_record.status == "draft":
+        area_record.status = "in_progress"
+    plan_item.status = "in_progress"
+    await _sync_inspection_task_status(db, plan_item, "in_progress", now)
+    await db.commit()
+    return response(manual_record, "手工审核记录已保存")
+
+
 async def _session_quality(session: AiAuditSession) -> dict[str, Any]:
     blockers=[]; warnings=[]
+    confirmed_ai_count = sum(1 for draft in session.drafts if draft.status == "confirmed")
+    manual_record_count = len(_manual_records_from_session(session))
+    if confirmed_ai_count + manual_record_count == 0:
+        blockers.append({"code": "NO_CONFIRMED_RECORDS", "message": "尚未形成已确认 AI 记录或手工审核记录"})
     for draft in session.drafts:
         if draft.status != "draft": continue
         risk = str((draft.quality or {}).get("risk_level", "")).lower(); missing = bool((draft.quality or {}).get("attachment_missing")); insufficient = (draft.quality or {}).get("level") == "insufficient"
@@ -639,7 +954,7 @@ async def _session_quality(session: AiAuditSession) -> dict[str, Any]:
         elif missing: blockers.append({"code": "ATTACHMENT_REQUIRED", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 缺少必传附件"})
         elif str(draft.evaluation) == "3": blockers.append({"code": "NC_UNCONFIRMED", "draft_id": str(draft.id), "message": f"不符合条款 {draft.primary_clause_no} 尚未确认"})
         else: blockers.append({"code": "DRAFT_PENDING", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 尚未确认"})
-    return {"passed": not blockers, "blockers": blockers, "warnings": warnings, "blocking_count": len(blockers), "warning_count": len(warnings)}
+    return {"passed": not blockers, "blockers": blockers, "warnings": warnings, "blocking_count": len(blockers), "warning_count": len(warnings), "confirmed_ai_count": confirmed_ai_count, "manual_record_count": manual_record_count, "confirmed_record_count": confirmed_ai_count + manual_record_count}
 
 
 @router.post("/{project_id}/sessions/{session_id}/drafts/confirm")
@@ -678,7 +993,8 @@ async def submit_session(project_id: UUID, session_id: UUID, payload: dict[str, 
     conclusion=str(payload.get("conclusion") or "").strip()
     if not conclusion: raise HTTPException(status_code=422, detail="请填写最终审核结论")
     try:
-        context={**(session.context_snapshot or {}),"conclusion":conclusion}; session.context_snapshot=context; session.status="completed"; session.completed_at=datetime.now(timezone.utc)
+        completed_at = datetime.now(timezone.utc)
+        context={**(session.context_snapshot or {}),"conclusion":conclusion}; session.context_snapshot=context; session.status="completed"; session.completed_at=completed_at
         # P0-7 修复：添加 None 检查，避免 area_record_id 不存在时 record=None 导致 500
         if context.get("area_record_id"):
             record=await db.get(AuditAreaRecord, UUID(context["area_record_id"]))
@@ -691,6 +1007,7 @@ async def submit_session(project_id: UUID, session_id: UUID, payload: dict[str, 
             plan=await db.get(AuditPlanItem, UUID(context["plan_item_id"]))
             if plan:
                 plan.status="completed"
+                await _sync_inspection_task_status(db, plan, "completed", completed_at)
             else:
                 print(f"[submit_session] plan_item {context['plan_item_id']} not found, skipping")
         # 先 commit 让数据持久化，避免序列化关系时触发 lazy load 绿let 错误

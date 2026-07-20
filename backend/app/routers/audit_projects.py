@@ -3,7 +3,7 @@
 Audit Projects API Routes
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
+from app.services.project_access_service import ensure_project_access
+from app.services.project_artifact_service import project_artifact_service
 from app.services.report_generator import generate_audit_report_word, generate_audit_report_pdf
 from app.models.audit_project import (
     AuditProject,
@@ -86,6 +88,75 @@ def area_record_response(record: AuditAreaRecord) -> dict:
         else None
     )
     return value
+
+
+def _task_progress_fields(
+    plan_item: AuditPlanItem,
+    record: AuditAreaRecord | None = None,
+    nonconformities: list[Nonconformity] | None = None,
+    template_item_count: int = 0,
+) -> dict[str, Any]:
+    """Build auditor-facing progress from the latest formal area record."""
+
+    clause_keys: set[str] = set()
+    for raw_clause in plan_item.clauses or []:
+        if isinstance(raw_clause, dict):
+            raw_clause = raw_clause.get("clause_no") or raw_clause.get("clause") or raw_clause.get("id")
+        clause = str(raw_clause or "").strip()
+        if clause:
+            clause_keys.add(clause)
+    total_clause_count = len(clause_keys) or int(template_item_count or 0)
+
+    record_items = list(getattr(record, "items", None) or [])
+    confirmed_record_count = len(record_items)
+    completion_rate = (
+        round(min(100, confirmed_record_count / total_clause_count * 100), 2)
+        if total_clause_count
+        else 0
+    )
+
+    formal_ncs = [
+        nc for nc in (nonconformities or [])
+        if str(getattr(nc, "status", "") or "") != "rejected"
+    ]
+    unresolved_ncs = [
+        nc for nc in formal_ncs
+        if str(getattr(nc, "status", "") or "") != "closed"
+    ]
+    record_exceptions = sum(
+        1 for item in record_items
+        if str(getattr(item, "evaluation_3level", "") or "") == "3"
+    )
+    return {
+        "total_clause_count": total_clause_count,
+        "confirmed_record_count": confirmed_record_count,
+        "completion_rate": completion_rate,
+        "exception_count": max(len(unresolved_ncs), record_exceptions),
+        "has_nc": bool(formal_ncs),
+        "record_status": getattr(record, "status", None) if record else None,
+    }
+
+
+def _validate_nonconformity_transition(
+    nc: Nonconformity,
+    update_data: dict[str, Any],
+) -> None:
+    next_status = str(update_data.get("status", nc.status) or "")
+    corrective_action = update_data.get("corrective_action", nc.corrective_action)
+    verification_result = update_data.get("verification_result", nc.verification_result)
+
+    if next_status in {"corrected", "pending_verification", "verified", "closed"}:
+        if not str(corrective_action or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="不符合项进入已整改或后续状态前必须填写整改措施",
+            )
+    if next_status in {"verified", "closed"}:
+        if not str(verification_result or "").strip():
+            raise HTTPException(
+                status_code=422,
+                detail="不符合项验证或关闭前必须填写验证结果",
+            )
 
 
 # ==================== AuditProject Routes ====================
@@ -190,6 +261,48 @@ async def get_my_audit_tasks(
             ).scalars().all()
             enterprises_by_id = {e.id: e for e in enterprises}
 
+    plan_item_ids = {item.id for item in plan_items}
+    latest_records_by_plan: dict[UUID, AuditAreaRecord] = {}
+    nonconformities_by_plan: dict[UUID, list[Nonconformity]] = {}
+    template_item_counts: dict[UUID, int] = {}
+    if plan_item_ids:
+        records = (
+            await db.execute(
+                select(AuditAreaRecord)
+                .where(AuditAreaRecord.plan_item_id.in_(plan_item_ids))
+                .options(selectinload(AuditAreaRecord.items))
+                .order_by(AuditAreaRecord.created_at.desc())
+            )
+        ).scalars().unique().all()
+        for record in records:
+            if record.plan_item_id:
+                latest_records_by_plan.setdefault(record.plan_item_id, record)
+
+        nonconformities = (
+            await db.execute(
+                select(Nonconformity).where(Nonconformity.plan_item_id.in_(plan_item_ids))
+            )
+        ).scalars().all()
+        for nc in nonconformities:
+            if nc.plan_item_id:
+                nonconformities_by_plan.setdefault(nc.plan_item_id, []).append(nc)
+
+        template_ids = {item.template_id for item in plan_items if item.template_id}
+        if template_ids:
+            template_items = (
+                await db.execute(
+                    select(TemplateItem).where(
+                        TemplateItem.template_id.in_(template_ids),
+                        TemplateItem.is_deleted == False,  # noqa: E712
+                        TemplateItem.is_category.is_not(True),
+                    )
+                )
+            ).scalars().all()
+            for template_item in template_items:
+                template_item_counts[template_item.template_id] = (
+                    template_item_counts.get(template_item.template_id, 0) + 1
+                )
+
     payload = []
     for item in plan_items:
         project = projects_by_id.get(item.project_id)
@@ -208,6 +321,12 @@ async def get_my_audit_tasks(
                 "inspection_task_id": (
                     str(item.inspection_task_id) if item.inspection_task_id else None
                 ),
+                **_task_progress_fields(
+                    item,
+                    latest_records_by_plan.get(item.id),
+                    nonconformities_by_plan.get(item.id, []),
+                    template_item_counts.get(item.template_id, 0) if item.template_id else 0,
+                ),
             }
         )
         payload.append(row)
@@ -222,6 +341,7 @@ async def get_audit_project(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核项目详情"""
+    await ensure_project_access(db, project_id, current_user)
     result = await db.execute(
         select(AuditProject).where(
             AuditProject.id == project_id,
@@ -242,6 +362,7 @@ async def update_audit_project(
     current_user: User = Depends(get_current_user),
 ):
     """更新审核项目"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     result = await db.execute(
         select(AuditProject).where(
             AuditProject.id == project_id,
@@ -268,6 +389,7 @@ async def delete_audit_project(
     current_user: User = Depends(get_current_user),
 ):
     """删除审核项目（软删除）"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     result = await db.execute(
         select(AuditProject).where(AuditProject.id == project_id)
     )
@@ -293,6 +415,7 @@ async def add_team_member(
     current_user: User = Depends(get_current_user),
 ):
     """添加审核组成员"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     # 验证项目存在
     result = await db.execute(
         select(AuditProject).where(AuditProject.id == project_id)
@@ -327,6 +450,7 @@ async def list_team_members(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核组成员列表"""
+    await ensure_project_access(db, project_id, current_user)
     result = await db.execute(
         select(AuditTeamMember)
         .where(
@@ -375,6 +499,7 @@ async def update_team_member(
     member = result.scalar_one_or_none()
     if not member:
         raise HTTPException(status_code=404, detail="审核组成员不存在")
+    await ensure_project_access(db, member.project_id, current_user, require_manage=True)
 
     for field, value in member_update.model_dump(exclude_unset=True).items():
         setattr(member, field, value)
@@ -400,6 +525,7 @@ async def remove_team_member(
     member = result.scalar_one_or_none()
     if not member:
         raise HTTPException(status_code=404, detail="审核组成员不存在")
+    await ensure_project_access(db, member.project_id, current_user, require_manage=True)
 
     from app.utils.soft_delete import soft_delete
 
@@ -418,6 +544,7 @@ async def create_plan_item(
     current_user: User = Depends(get_current_user),
 ):
     """创建审核计划项，同时自动创建检查任务下达给审核员"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     project = await db.get(AuditProject, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="审核项目不存在")
@@ -485,6 +612,7 @@ async def list_plan_items(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核计划项列表"""
+    await ensure_project_access(db, project_id, current_user)
     query = select(AuditPlanItem).where(
         AuditPlanItem.project_id == project_id,
         AuditPlanItem.is_deleted == False,  # noqa: E712
@@ -516,6 +644,7 @@ async def get_plan_item(
     plan_item = result.scalar_one_or_none()
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
+    await ensure_project_access(db, plan_item.project_id, current_user)
     return make_response(plan_item)
 
 
@@ -536,6 +665,7 @@ async def update_plan_item(
     plan_item = result.scalar_one_or_none()
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
+    await ensure_project_access(db, plan_item.project_id, current_user, require_manage=True)
 
     # 更新审核计划项字段
     for field, value in plan_item_update.model_dump(exclude_unset=True).items():
@@ -595,6 +725,7 @@ async def delete_plan_item(
     plan_item = result.scalar_one_or_none()
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
+    await ensure_project_access(db, plan_item.project_id, current_user, require_manage=True)
 
     from app.utils.soft_delete import soft_delete
 
@@ -620,6 +751,7 @@ async def create_area_record(
     current_user: User = Depends(get_current_user),
 ):
     """创建审核区域记录"""
+    await ensure_project_access(db, project_id, current_user)
     # 生成记录编号
     record_no = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -644,6 +776,7 @@ async def list_area_records(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核区域记录列表"""
+    await ensure_project_access(db, project_id, current_user)
     query = select(AuditAreaRecord).where(AuditAreaRecord.project_id == project_id)
 
     if area_id:
@@ -654,6 +787,7 @@ async def list_area_records(
     query = query.options(
         selectinload(AuditAreaRecord.area),
         selectinload(AuditAreaRecord.plan_item),
+        selectinload(AuditAreaRecord.items),
     ).order_by(AuditAreaRecord.created_at.desc())
     result = await db.execute(query)
     return make_response([area_record_response(item) for item in result.scalars().all()])
@@ -672,11 +806,13 @@ async def get_area_record(
         .options(
             selectinload(AuditAreaRecord.area),
             selectinload(AuditAreaRecord.plan_item),
+            selectinload(AuditAreaRecord.items),
         )
     )
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="审核区域记录不存在")
+    await ensure_project_access(db, record.project_id, current_user)
     return make_response(area_record_response(record))
 
 
@@ -694,6 +830,7 @@ async def update_area_record(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="审核区域记录不存在")
+    await ensure_project_access(db, record.project_id, current_user)
 
     # 验证权限：只有主填写人或协作填写人可以更新
     if record.recorded_by != current_user.id and current_user.id not in record.co_recorders:
@@ -717,6 +854,7 @@ async def create_nonconformity(
     current_user: User = Depends(get_current_user),
 ):
     """创建不符合项"""
+    await ensure_project_access(db, project_id, current_user)
     # 生成不符合项编号
     nc_no = f"NC-{datetime.now().strftime('%Y%m%d')}-{datetime.now().microsecond}"
 
@@ -741,6 +879,7 @@ async def list_nonconformities(
     current_user: User = Depends(get_current_user),
 ):
     """获取不符合项列表"""
+    await ensure_project_access(db, project_id, current_user)
     query = select(Nonconformity).where(Nonconformity.project_id == project_id)
 
     if severity:
@@ -767,8 +906,11 @@ async def update_nonconformity(
     nc = result.scalar_one_or_none()
     if not nc:
         raise HTTPException(status_code=404, detail="不符合项不存在")
+    await ensure_project_access(db, nc.project_id, current_user, require_manage=True)
 
-    for field, value in nc_update.model_dump(exclude_unset=True).items():
+    update_data = nc_update.model_dump(exclude_unset=True)
+    _validate_nonconformity_transition(nc, update_data)
+    for field, value in update_data.items():
         setattr(nc, field, value)
 
     await db.commit()
@@ -786,6 +928,7 @@ async def create_audit_report(
     current_user: User = Depends(get_current_user),
 ):
     """创建审核报告"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     # 生成报告编号
     report_no = f"REP-{datetime.now().strftime('%Y%m%d')}-{datetime.now().microsecond}"
 
@@ -808,6 +951,7 @@ async def list_audit_reports(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核报告列表"""
+    await ensure_project_access(db, project_id, current_user)
     result = await db.execute(
         select(AuditReport)
         .where(AuditReport.project_id == project_id)
@@ -830,6 +974,7 @@ async def update_audit_report(
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="审核报告不存在")
+    await ensure_project_access(db, report.project_id, current_user, require_manage=True)
 
     for field, value in report_update.model_dump(exclude_unset=True).items():
         setattr(report, field, value)
@@ -849,6 +994,7 @@ async def create_meeting(
     current_user: User = Depends(get_current_user),
 ):
     """创建沟通会议记录"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     db_meeting = CommunicationMeeting(
         project_id=project_id,
         created_by=current_user.id,
@@ -868,6 +1014,7 @@ async def list_meetings(
     current_user: User = Depends(get_current_user),
 ):
     """获取沟通会议记录列表"""
+    await ensure_project_access(db, project_id, current_user)
     query = select(CommunicationMeeting).where(
         CommunicationMeeting.project_id == project_id
     )
@@ -894,6 +1041,7 @@ async def update_meeting(
     meeting = result.scalar_one_or_none()
     if not meeting:
         raise HTTPException(status_code=404, detail="沟通会议记录不存在")
+    await ensure_project_access(db, meeting.project_id, current_user, require_manage=True)
 
     for field, value in meeting_update.model_dump(exclude_unset=True).items():
         setattr(meeting, field, value)
@@ -912,6 +1060,7 @@ async def get_project_progress(
     current_user: User = Depends(get_current_user),
 ):
     """获取审核项目进度"""
+    await ensure_project_access(db, project_id, current_user)
     # 获取所有计划项
     plan_items_result = await db.execute(
         select(AuditPlanItem).where(
@@ -967,6 +1116,16 @@ async def export_report_word(
     """导出 Word 格式审核报告"""
     # Authenticate using token query parameter
     current_user = await get_user_from_token(token, db)
+    await ensure_project_access(db, project_id, current_user)
+    quality = await project_artifact_service.quality_check(db, project_id)
+    if not quality["passed"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "完整性和一致性检查未通过，不能导出正式审核报告",
+                "quality_check": quality,
+            },
+        )
 
     try:
         buffer = await generate_audit_report_word(db, project_id)
@@ -993,6 +1152,16 @@ async def export_report_pdf(
     """导出 PDF 格式审核报告"""
     # Authenticate using token query parameter
     current_user = await get_user_from_token(token, db)
+    await ensure_project_access(db, project_id, current_user)
+    quality = await project_artifact_service.quality_check(db, project_id)
+    if not quality["passed"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "完整性和一致性检查未通过，不能导出正式审核报告",
+                "quality_check": quality,
+            },
+        )
 
     try:
         buffer = await generate_audit_report_pdf(db, project_id)
@@ -1026,6 +1195,7 @@ async def ai_prepare_audit(
     current_user: User = Depends(get_current_user),
 ):
     """AI 审核准备建议"""
+    await ensure_project_access(db, project_id, current_user)
     try:
         result = await prepare_audit_with_ai(db, project_id)
         return {"code": 200, "message": "success", "data": result}
@@ -1045,6 +1215,7 @@ async def ai_evaluate_evidence(
     current_user: User = Depends(get_current_user),
 ):
     """AI 证据充分性评估"""
+    await ensure_project_access(db, project_id, current_user)
     try:
         result = await evaluate_evidence_with_ai(db, evidence, clause_no, certification_system)
         return {"code": 200, "message": "success", "data": result}
@@ -1059,6 +1230,7 @@ async def ai_generate_report(
     current_user: User = Depends(get_current_user),
 ):
     """AI 生成审核报告叙述性评价"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
     try:
         result = await generate_report_with_ai(db, project_id)
         return {"code": 200, "message": "success", "data": result}
@@ -1078,6 +1250,7 @@ async def ai_suggest_nonconformity(
     current_user: User = Depends(get_current_user),
 ):
     """AI 建议不符合项"""
+    await ensure_project_access(db, project_id, current_user)
     try:
         result = await suggest_nc_with_ai(db, evidence, clause_no, certification_system)
         return {"code": 200, "message": "success", "data": result}

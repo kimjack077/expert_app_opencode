@@ -72,6 +72,7 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024
+    PROJECT_DOCUMENT_MAX_FILE_SIZE: int = 50 * 1024 * 1024
 
     DEBUG: bool = True
 

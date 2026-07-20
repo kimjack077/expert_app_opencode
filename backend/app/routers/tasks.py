@@ -25,6 +25,11 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.services import AuditService
+from app.services.formal_audit_sync_service import (
+    can_access_linked_task,
+    get_linked_plan_item,
+    sync_task_to_formal_record,
+)
 from app.services.llm_service import llm_service
 
 # Alias for backward compatibility
@@ -136,7 +141,7 @@ async def get_task(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to view this task")
 
     # 兼容历史数据：任务未写 template_id 时，尝试从关联审核计划项回填
@@ -178,7 +183,7 @@ async def update_task(
 
     # 专家用户只能更新分配给自己的任务状态
     if current_user.role == "expert":
-        if str(task.assigned_to) != str(current_user.id):
+        if not await can_access_linked_task(db, task, current_user):
             raise HTTPException(status_code=403, detail="Not authorized to update this task")
         # 专家用户只能更新状态
         if task_data.status:
@@ -223,6 +228,24 @@ async def update_task(
                 if project and project.status == "planning":
                     project.status = "in_progress"
 
+    # Older clients complete tasks through PUT instead of POST /complete.
+    # Route both paths through the formal-record bridge before committing.
+    if task_data.status == "completed":
+        try:
+            linked_plan_item = await get_linked_plan_item(db, UUID(task_id))
+        except ValueError:
+            linked_plan_item = None
+        if linked_plan_item:
+            try:
+                await sync_task_to_formal_record(
+                    db,
+                    task,
+                    linked_plan_item,
+                    current_user.id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     await db.commit()
     await db.refresh(task)
 
@@ -242,7 +265,7 @@ async def start_task(
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 管理员可以启动任何任务，专家只能启动分配给自己的任务
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
     if task.status != "pending":
@@ -282,43 +305,34 @@ async def complete_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from app.models.audit_project import AuditPlanItem, AuditProject
-    from sqlalchemy import text
-
     task = await db.get(InspectionTask, task_id)
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # 管理员可以完成任何任务，专家只能完成分配给自己的任务
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(
+        db, task, current_user
+    ):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
-    task.status = "completed"
-    task.completed_at = datetime.utcnow()
-
-    # 使用原生SQL更新关联的审核计划项状态
     try:
         task_uuid = UUID(task_id)
-        # 直接使用SQL更新，确保更新成功
-        result = await db.execute(
-            text("UPDATE audit_plan_items SET status = 'completed', updated_at = now() WHERE inspection_task_id = :task_id AND status != 'completed'"),
-            {"task_id": str(task_uuid)}
-        )
-        if result.rowcount > 0:
-            # 如果有计划项被更新，同时检查是否需要更新项目状态
-            project_result = await db.execute(
-                text("""
-                    UPDATE audit_projects
-                    SET status = 'in_progress', updated_at = now()
-                    WHERE id IN (
-                        SELECT DISTINCT project_id FROM audit_plan_items
-                        WHERE inspection_task_id = :task_id
-                    ) AND status = 'planning'
-                """),
-                {"task_id": str(task_uuid)}
-            )
+        plan_item = await get_linked_plan_item(db, task_uuid)
     except ValueError:
-        pass
+        plan_item = None
+
+    if plan_item:
+        try:
+            await sync_task_to_formal_record(
+                db,
+                task,
+                plan_item,
+                current_user.id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        task.status = "completed"
+        task.completed_at = datetime.utcnow()
 
     await db.commit()
 
@@ -375,7 +389,7 @@ async def get_task_records(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -481,7 +495,7 @@ async def create_or_update_record(
         raise HTTPException(status_code=404, detail="Task not found")
 
     # 管理员可以为任何任务创建记录，专家只能为分配给自己的任务创建记录
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
     if record_data.template_item_id:
@@ -540,7 +554,7 @@ async def update_record(
 
     task = await db.get(InspectionTask, record.task_id)
     if task:
-        if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+        if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
             raise HTTPException(status_code=403, detail="Not authorized")
 
     update_data = record_data.model_dump(exclude_unset=True)
@@ -620,7 +634,7 @@ async def generate_task_final_judgment_stream(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
@@ -712,7 +726,7 @@ async def generate_task_item_ai_stream(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    if current_user.role == "expert" and str(task.assigned_to) != str(current_user.id):
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(

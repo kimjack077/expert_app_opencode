@@ -70,11 +70,15 @@ const statusConfig: Record<string, { text: string; color: string }> = {
 }
 
 const categoryText: Record<string, string> = {
+  organization: 'A 组织/资质/合同',
+  audit_plan: 'B 审核通知/方案/计划',
   standard: '法律法规与标准',
   procedure: '程序文件',
   manual: '体系手册',
+  audit_material: 'D 审核过程资料',
   record: '企业记录',
   previous_audit: '历史审核资料',
+  certificate: 'Z 证书及其他',
   other: '其他',
 }
 
@@ -124,9 +128,19 @@ export default function ProjectDocuments({ projectId }: Props) {
 
   const uploadProps: UploadProps = {
     name: 'file',
-    multiple: false,
-    showUploadList: false,
-    accept: '.pdf,.docx,.xlsx,.txt,.md,.csv,.json,.zip',
+    multiple: true,
+    showUploadList: true,
+    accept: '.pdf,.doc,.docx,.xls,.xlsx,.txt,.md,.csv,.json,.zip',
+    beforeUpload: (file) => {
+      if (file.size > 50 * 1024 * 1024) {
+        message.error(`${file.name} 超过 50 MB，请拆分后再上传`)
+        return Upload.LIST_IGNORE
+      }
+      if (/\.(doc|xls)$/i.test(file.name)) {
+        message.info(`${file.name} 将保留原件归档；旧格式需转换为 DOCX/XLSX 后才能全文检索`)
+      }
+      return true
+    },
     customRequest: async ({ file, onError, onSuccess }) => {
       setUploading(true)
       try {
@@ -204,7 +218,13 @@ export default function ProjectDocuments({ projectId }: Props) {
       key: 'name',
       render: (_, item) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{documentName(item)}</Text>
+          <Space wrap size={6}>
+            <Text strong>{documentName(item)}</Text>
+            {Boolean((item.metadata as any)?.quarantined || (item.metadata as any)?.consistency?.risk_level === 'high') && (
+              <Tag color="error">一致性风险·已隔离</Tag>
+            )}
+            {Boolean((item.metadata as any)?.archive_only) && <Tag color="gold">仅归档</Tag>}
+          </Space>
           {item.summary && (
             <Text type="secondary" ellipsis style={{ maxWidth: 420 }} title={item.summary}>
               {item.summary}
@@ -317,11 +337,15 @@ export default function ProjectDocuments({ projectId }: Props) {
             style={{ width: 180 }}
             onChange={setCategory}
             options={[
+              { label: 'A 组织/资质/合同', value: 'organization' },
+              { label: 'B 审核通知/方案/计划', value: 'audit_plan' },
               { label: '法律法规与标准', value: 'standard' },
               { label: '程序文件', value: 'procedure' },
               { label: '体系手册', value: 'manual' },
+              { label: 'D 审核过程资料', value: 'audit_material' },
               { label: '企业记录', value: 'record' },
               { label: '历史审核资料', value: 'previous_audit' },
+              { label: 'Z 证书及其他', value: 'certificate' },
               { label: '其他', value: 'other' },
             ]}
           />
@@ -329,8 +353,8 @@ export default function ProjectDocuments({ projectId }: Props) {
       >
         <Dragger {...uploadProps} disabled={uploading}>
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">{uploading ? '正在上传并解析…' : '点击或拖拽一份资料到这里上传'}</p>
-          <p className="ant-upload-hint">支持 PDF、Word、Excel、TXT、Markdown、CSV、JSON 和 ZIP</p>
+          <p className="ant-upload-text">{uploading ? '正在上传并解析…' : '点击或拖拽多份资料到这里批量上传'}</p>
+          <p className="ant-upload-hint">PDF、DOCX、XLSX 等会建立索引；旧 DOC/XLS 保留原件归档并提示转换，不会进入 AI 检索</p>
         </Dragger>
       </Card>
 
