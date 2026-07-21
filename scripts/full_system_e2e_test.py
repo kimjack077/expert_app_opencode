@@ -682,17 +682,6 @@ def main() -> int:
         run_case(suite, "project-agent", "list artifacts", t_artifacts_list, "P2")
 
         # ---------- 7. Knowledge ----------
-        def t_knowledge_categories():
-            r = client.get("/api/knowledge/categories", headers=ah)
-            r.raise_for_status()
-            data = r.json()["data"]
-            items = data if isinstance(data, list) else data.get("items") or []
-            if items:
-                suite.context["knowledge_category_id"] = items[0]["id"]
-            return f"categories={len(items)}"
-
-        run_case(suite, "knowledge", "list categories", t_knowledge_categories, "P1")
-
         def t_knowledge_docs():
             r = client.get("/api/knowledge/documents", headers=ah, params={"limit": 20})
             if r.status_code == 404:
@@ -703,7 +692,7 @@ def main() -> int:
             items = data if isinstance(data, list) else (data or {}).get("items") or []
             return f"docs={len(items or [])}"
 
-        run_case(suite, "knowledge", "list documents", t_knowledge_docs, "P2")
+        run_case(suite, "knowledge", "list documents", t_knowledge_docs, "P1")
 
         # ---------- 8. Analytics / statistics ----------
         def t_analytics():

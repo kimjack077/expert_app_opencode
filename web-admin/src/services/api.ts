@@ -138,9 +138,6 @@ export const enterpriseApi = {
   createProduct: (enterpriseId: string, data: any) =>
     api.post(`/enterprises/${enterpriseId}/products`, data),
 
-  getInstruments: (enterpriseId: string) => api.get(`/enterprises/${enterpriseId}/instruments`),
-  createInstrument: (enterpriseId: string, data: any) =>
-    api.post(`/enterprises/${enterpriseId}/instruments`, data),
 
   getRectifications: (enterpriseId: string) => api.get(`/enterprises/${enterpriseId}/rectifications`),
   createRectification: (enterpriseId: string, data: any) =>
@@ -148,9 +145,6 @@ export const enterpriseApi = {
 }
 
 export const knowledgeApi = {
-  getCategories: (params?: any) => api.get('/knowledge/categories', { params }),
-  createCategory: (data: any) => api.post('/knowledge/categories', data),
-
   getDocuments: (params?: any) => api.get('/knowledge/documents', { params }),
   getDocument: (id: string) => api.get(`/knowledge/documents/${id}`),
   createDocument: (data: any) => api.post('/knowledge/documents', data),

@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPE
 from fastapi.responses import FileResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import defer, selectinload
 
 from app.config import settings
 from app.database import AsyncSessionLocal, get_db
@@ -20,7 +20,7 @@ from app.models.evidence_agent import AiAuditSession, AiDraftRecord, EvidenceIte
 from app.models.industry import Industry
 from app.models.media import MediaFile
 from app.models.project_artifact import ProjectArtifact
-from app.models.project_knowledge import ProjectDocument
+from app.models.project_knowledge import ProjectDocument, ProjectKnowledgeChunk
 from app.models.record import InspectionRecordItem
 from app.models.task import InspectionTask
 from app.models.template import TemplateItem
@@ -84,8 +84,26 @@ async def _document_project_context(
     )
 
 
-def document_dict(item: ProjectDocument) -> dict[str, Any]:
-    return {"id": str(item.id), "project_id": str(item.project_id), "title": item.title, "file_name": item.original_filename, "filename": item.original_filename, "category": item.document_type, "status": item.status, "parse_status": item.status, "file_size": item.file_size, "size": item.file_size, "metadata": item.document_metadata or {}, "parse_error": item.parse_error, "parsed_at": item.parsed_at, "created_at": item.created_at, "chunk_count": len(item.chunks) if "chunks" in item.__dict__ else None}
+def document_dict(item: ProjectDocument, chunk_count: int | None = None) -> dict[str, Any]:
+    if chunk_count is None and "chunks" in item.__dict__:
+        chunk_count = len(item.chunks)
+    return {
+        "id": str(item.id),
+        "project_id": str(item.project_id),
+        "title": item.title,
+        "file_name": item.original_filename,
+        "filename": item.original_filename,
+        "category": item.document_type,
+        "status": item.status,
+        "parse_status": item.status,
+        "file_size": item.file_size,
+        "size": item.file_size,
+        "metadata": item.document_metadata or {},
+        "parse_error": item.parse_error,
+        "parsed_at": item.parsed_at,
+        "created_at": item.created_at,
+        "chunk_count": chunk_count,
+    }
 
 
 def draft_dict(item: AiDraftRecord) -> dict[str, Any]:
@@ -298,9 +316,42 @@ async def _run_artifact_generation(job_id: UUID) -> None:
 
 @router.get("/{project_id}/documents")
 async def list_documents(project_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List project materials for UI — lightweight, no chunk bodies/embeddings."""
     await ensure_project_access(db, project_id, current_user)
-    result = await db.execute(select(ProjectDocument).where(ProjectDocument.project_id == project_id, ProjectDocument.is_deleted == False).options(selectinload(ProjectDocument.chunks)).order_by(ProjectDocument.created_at.desc()))
-    return response([document_dict(item) for item in result.scalars().unique().all()])
+
+    # Do NOT selectinload chunks: each chunk stores full text + embedding JSON.
+    # Loading them makes this endpoint multi-second even for a handful of docs.
+    # Also defer extracted_text (can be 100KB+ per file) — list UI never shows it.
+    result = await db.execute(
+        select(ProjectDocument)
+        .where(
+            ProjectDocument.project_id == project_id,
+            ProjectDocument.is_deleted == False,  # noqa: E712
+        )
+        .options(defer(ProjectDocument.extracted_text))
+        .order_by(ProjectDocument.created_at.desc())
+    )
+    documents = list(result.scalars().all())
+    if not documents:
+        return response([])
+
+    count_result = await db.execute(
+        select(
+            ProjectKnowledgeChunk.document_id,
+            func.count(ProjectKnowledgeChunk.id),
+        )
+        .where(
+            ProjectKnowledgeChunk.project_id == project_id,
+            ProjectKnowledgeChunk.document_id.in_([doc.id for doc in documents]),
+        )
+        .group_by(ProjectKnowledgeChunk.document_id)
+    )
+    chunk_counts = {row[0]: int(row[1]) for row in count_result.all()}
+
+    return response([
+        document_dict(item, chunk_count=chunk_counts.get(item.id, 0))
+        for item in documents
+    ])
 
 
 @router.post("/{project_id}/documents")

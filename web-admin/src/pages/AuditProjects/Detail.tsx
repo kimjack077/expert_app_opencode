@@ -43,7 +43,7 @@ export default function AuditProjectDetail() {
   const [aiModalVisible, setAiModalVisible] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiResult, setAiResult] = useState<any>(null)
-  const [activeTab, setActiveTab] = useState('plan')
+  const [activeTab, setActiveTab] = useState('team')
 
   useEffect(() => {
     if (id) {
@@ -362,14 +362,14 @@ export default function AuditProjectDetail() {
             onChange={setActiveTab}
             items={[
               {
-                key: 'plan',
-                label: '审核计划',
-                children: <PlanManagement projectId={id!} />,
-              },
-              {
                 key: 'team',
                 label: '审核组',
                 children: <TeamManagement projectId={id!} />,
+              },
+              {
+                key: 'plan',
+                label: '审核计划',
+                children: <PlanManagement projectId={id!} />,
               },
               {
                 key: 'records',

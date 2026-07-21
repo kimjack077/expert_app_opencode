@@ -12,7 +12,6 @@ from app.models.enterprise import (
     EnterpriseQualification,
     EnterpriseProduct,
     EnterpriseEquipment,
-    EnterpriseInstrument,
     EnterprisePersonnel,
     RectificationRecord,
 )
@@ -29,9 +28,6 @@ from app.schemas.enterprise import (
     ProductCreate,
     ProductUpdate,
     ProductResponse,
-    InstrumentCreate,
-    InstrumentUpdate,
-    InstrumentResponse,
     RectificationCreate,
     RectificationUpdate,
     RectificationResponse,
@@ -133,7 +129,6 @@ async def get_enterprise(
         .options(
             selectinload(Enterprise.qualifications),
             selectinload(Enterprise.products),
-            selectinload(Enterprise.instruments),
         )
         .where(Enterprise.id == enterprise_id)
         .where(Enterprise.is_deleted == False)  # noqa: E712
@@ -294,40 +289,6 @@ async def create_product(
     await db.refresh(product)
 
     return make_response(data=ProductResponse.model_validate(product).model_dump())
-
-
-@router.get("/{enterprise_id}/instruments", response_model=ApiResponse)
-async def get_instruments(
-    enterprise_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    result = await db.execute(
-        select(EnterpriseInstrument)
-        .where(EnterpriseInstrument.enterprise_id == enterprise_id)
-        .order_by(EnterpriseInstrument.next_verified.asc())
-    )
-    instruments = result.scalars().all()
-
-    return make_response(
-        data=[InstrumentResponse.model_validate(i).model_dump() for i in instruments]
-    )
-
-
-@router.post("/{enterprise_id}/instruments", response_model=ApiResponse)
-async def create_instrument(
-    enterprise_id: str,
-    instrument_data: InstrumentCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    instrument_data.enterprise_id = enterprise_id
-    instrument = EnterpriseInstrument(**instrument_data.model_dump())
-    db.add(instrument)
-    await db.commit()
-    await db.refresh(instrument)
-
-    return make_response(data=InstrumentResponse.model_validate(instrument).model_dump())
 
 
 @router.get("/rectifications/", response_model=ApiResponse)

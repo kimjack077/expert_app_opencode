@@ -128,16 +128,15 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
 
 ## 数据库迁移
 
-审核 Agent 的增量迁移：
-
-    backend/alembic/versions/a49ad7e0875f_add_project_audit_agent_p2_workflow.py
-
-执行：
+本地与生产共享同一 PostgreSQL 时，迁移只需在本地执行一次：
 
     cd backend
     alembic upgrade head
 
-迁移包含正式审核会话、证据提交、证据条目、AI 草稿、项目资料、项目知识片段、制品任务，以及媒体文件的项目和会话关联字段。
+相关迁移示例：
+
+- `a49ad7e0875f`：正式审核会话、证据、AI 草稿、项目资料与知识片段、制品任务
+- `drop_enterprise_instruments`：删除企业「计量器具」表 `enterprise_instruments`
 
 ## 项目 Agent API
 
@@ -161,6 +160,21 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
 | 查询/重试制品 | GET /artifacts、POST /artifacts/{artifact_id}/retry |
 | 下载资料包 | GET /package |
 
+## 知识库与项目资料
+
+### 全局知识库（Web：政策法规）
+
+- 文档以 **文档类型**（法规 / 政策 / 标准 / 细则）分类，不再使用独立「知识分类」字段。
+- 支持文件上传（PDF/Word/Excel/TXT）：解析正文后立即建立向量索引。
+- 列表不再展示浏览次数；查看详情不再写回 `view_count`。
+- 软删除文档时同步删除 `knowledge_embeddings`，检索只命中 `is_deleted=false` 且 `status=effective` 的文档。
+
+### 项目资料与知识库（审核项目详情页）
+
+- 列表接口轻量化：不加载片段正文与 embedding，仅 `COUNT` 片段数；`extracted_text` 列表侧 defer。
+- 「在项目资料中查找」提供检索进度（阶段、用时、进度条）；语义检索超时前端 120s。
+- 合并检索返回 `source_scope`：`project`（本项目）或 `global_regulation`（全局法规）。
+
 ## 项目级 RAG 隔离规则
 
 1. 项目资料和项目知识片段必须携带 project_id。
@@ -168,6 +182,7 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
 3. 检索同时返回全局法规和当前项目资料；source_scope 为 global_regulation 或 project。
 4. Web 与 H5 必须显示来源域和文档标题，不能把全局法规误标为项目资料。
 5. AI 草稿和报告快照保存使用过的引用，保证可追溯。
+6. 全局法规检索必须排除已软删除与非 effective 文档，避免已删知识库被引用。
 
 ## 质量门禁与提交规则
 
@@ -243,6 +258,18 @@ MIT License
 
 ## Latest Delivery Notes
 
-- The formal H5 audit session now exposes the shared streaming Agent, project-scoped context, photo and voice evidence capture, and real confirmation-card writes.
-- Complete ZIP packages are created as persisted background jobs with progress and retry; the download endpoint returns the latest ready version after the quality gate passes.
-- Production verification target: `49.232.213.79` (`Web :3000`, `H5 :5173`, `API :8000`).
+### 2026-07-21
+
+- **知识库精简**：移除「分类」与「浏览次数」；上传/列表仅依赖文档类型。
+- **企业详情**：移除「计量器具」标签，并 drop 表 `enterprise_instruments`。
+- **审核项目详情**：标签顺序调整为「审核组 → 审核计划 → …」。
+- **项目资料列表性能**：不再 `selectinload` 全部 chunks（原 ~11s → ~0.5s）。
+- **项目知识检索 UX**：检索中展示阶段、用时与进度，避免空白等待。
+- **全局 RAG 范围**：过滤已删除/非 effective 文档；删除时清理 embedding。
+- **Agent 最终答复恢复**：工具成功后模型返回空内容时自动重试，仍失败则基于工具结果整理答案与引用来源。
+
+### 既有能力
+
+- H5 正式审核会话支持流式 Agent、项目上下文、文字/语音/照片证据与确认卡写入。
+- 资料包为可重试后台任务，质量门禁通过后下载最新版本。
+- 生产验证地址：`49.232.213.79`（Web `:3000`，H5 `:5173`，API `:8000`）。

@@ -63,6 +63,16 @@ class RAGService:
         if not document:
             return {"error": "Document not found"}
 
+        if getattr(document, "is_deleted", False):
+            # Soft-deleted docs must not remain searchable
+            await db.execute(
+                delete(KnowledgeEmbedding).where(
+                    KnowledgeEmbedding.document_id == document_id
+                )
+            )
+            await db.commit()
+            return {"error": "Document is deleted", "embeddings_created": 0}
+
         if not document.content:
             return {"error": "Document has no content"}
 
@@ -119,7 +129,7 @@ class RAGService:
         query: str,
         db: AsyncSession,
         top_k: int = 5,
-        category_id: Optional[str] = None,
+        doc_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search knowledge base using semantic similarity.
@@ -132,15 +142,23 @@ class RAGService:
             print(f"[RAG] Error getting query embedding: {e}")
             return []
 
-        # Fetch all embeddings (in production, use vector database)
-        stmt = select(KnowledgeEmbedding).options(
-            selectinload(KnowledgeEmbedding.document)
+        # Only searchable global knowledge: not soft-deleted, and currently effective.
+        # Embeddings for deleted docs may still exist until cleaned up — filter at query time.
+        stmt = (
+            select(KnowledgeEmbedding)
+            .join(
+                KnowledgeDocument,
+                KnowledgeDocument.id == KnowledgeEmbedding.document_id,
+            )
+            .where(
+                KnowledgeDocument.is_deleted == False,  # noqa: E712
+                KnowledgeDocument.status == "effective",
+            )
+            .options(selectinload(KnowledgeEmbedding.document))
         )
 
-        if category_id:
-            stmt = stmt.join(KnowledgeDocument).where(
-                KnowledgeDocument.category_id == category_id
-            )
+        if doc_type:
+            stmt = stmt.where(KnowledgeDocument.doc_type == doc_type)
 
         result = await db.execute(stmt)
         embeddings = result.scalars().all()
@@ -151,6 +169,9 @@ class RAGService:
         # Calculate similarity scores
         scored_chunks = []
         for emb in embeddings:
+            doc = emb.document
+            if not doc or getattr(doc, "is_deleted", False) or doc.status != "effective":
+                continue
             if emb.embedding:
                 try:
                     stored_embedding = json.loads(emb.embedding)
@@ -161,8 +182,8 @@ class RAGService:
                         "document_id": str(emb.document_id),
                         "content": emb.content[:500] + "..." if len(emb.content) > 500 else emb.content,
                         "similarity": similarity,
-                        "document_title": emb.document.title if emb.document else "Unknown",
-                        "document_type": emb.document.doc_type if emb.document else None,
+                        "document_title": doc.title,
+                        "document_type": doc.doc_type,
                         "chunk_index": emb.chunk_index,
                         "is_table_of_contents": self._is_table_of_contents_chunk(emb.content),
                     })

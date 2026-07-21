@@ -182,3 +182,65 @@ def test_chat_stream_hides_tool_narration_and_avoids_duplicate_knowledge_searche
     ]
     assert execute_tool.await_count == 1
     assert events[-1]["type"] == "done"
+
+
+def test_chat_stream_recovers_when_model_returns_empty_after_tools():
+    db = AsyncMock()
+    tool_call = _tool_call(
+        0,
+        "call-1",
+        "search_audit_knowledge",
+        '{"query":"项目资料缺什么"}',
+    )
+    create = AsyncMock(
+        side_effect=[
+            _stream_response(_chunk(None, [tool_call])),
+            _stream_response(_chunk(content="")),  # empty final turn
+            # non-stream recovery path
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=""))]
+            ),
+        ]
+    )
+
+    async def collect_events():
+        return [
+            event
+            async for event in agent_service.chat_stream(
+                message="检查当前项目资料还缺什么，并列出引用来源。",
+                context={"project_id": str(uuid4())},
+                conversation=[],
+                db=db,
+            )
+        ]
+
+    tool_payload = {
+        "query": "项目资料缺什么",
+        "results": [
+            {
+                "source_scope": "project",
+                "document_title": "管理手册",
+                "content": "组织应建立质量管理体系",
+                "similarity": 0.8,
+            }
+        ],
+    }
+
+    with (
+        patch.object(agent_service, "_build_context", AsyncMock(return_value={})),
+        patch.object(
+            agent_service,
+            "_execute_tool",
+            AsyncMock(return_value=tool_payload),
+        ),
+        patch.object(agent_service, "_log_call", AsyncMock()),
+        patch.object(agent_service.client.chat.completions, "create", create),
+    ):
+        events = asyncio.run(collect_events())
+
+    content_events = [e for e in events if e["type"] == "content"]
+    assert len(content_events) == 1
+    assert "管理手册" in content_events[0]["content"]
+    assert "引用来源" in content_events[0]["content"] or "知识检索" in content_events[0]["content"]
+    assert events[-1]["type"] == "done"
+    assert not any(e["type"] == "error" for e in events)

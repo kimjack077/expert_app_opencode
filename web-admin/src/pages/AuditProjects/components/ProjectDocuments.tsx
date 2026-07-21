@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -8,10 +8,13 @@ import {
   Input,
   List,
   Popconfirm,
+  Progress,
   Row,
   Select,
   Space,
+  Spin,
   Statistic,
+  Steps,
   Table,
   Tag,
   Tooltip,
@@ -21,10 +24,12 @@ import {
 } from 'antd'
 import type { TableColumnsType, UploadProps } from 'antd'
 import {
+  CheckCircleOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   FileSearchOutlined,
   InboxOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
@@ -89,6 +94,21 @@ const formatFileSize = (size?: number) => {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+/** Simulated stage timeline while the embedding + retrieval request is in flight. */
+const SEARCH_STAGES = [
+  { key: 'embed', title: '理解检索问题', description: '调用嵌入模型向量化查询' },
+  { key: 'project', title: '匹配项目资料', description: '在本项目知识片段中语义检索' },
+  { key: 'global', title: '补充法规库', description: '同步检索全局法规与标准' },
+  { key: 'rank', title: '排序整理结果', description: '按相关度汇总并标注来源' },
+] as const
+
+const stageIndexFromElapsed = (seconds: number) => {
+  if (seconds < 1.5) return 0
+  if (seconds < 4) return 1
+  if (seconds < 8) return 2
+  return 3
+}
+
 export default function ProjectDocuments({ projectId }: Props) {
   const [documents, setDocuments] = useState<ProjectDocument[]>([])
   const [loading, setLoading] = useState(false)
@@ -100,6 +120,14 @@ export default function ProjectDocuments({ projectId }: Props) {
   const [searching, setSearching] = useState(false)
   const [searchAttempted, setSearchAttempted] = useState(false)
   const [hits, setHits] = useState<ProjectKnowledgeHit[]>([])
+  const [searchStage, setSearchStage] = useState(0)
+  const [searchElapsed, setSearchElapsed] = useState(0)
+  const [lastSearchMeta, setLastSearchMeta] = useState<{
+    query: string
+    count: number
+    durationMs: number
+  } | null>(null)
+  const searchTimersRef = useRef<{ tick?: number; stages?: number }>({})
 
   const fetchDocuments = async () => {
     setLoading(true)
@@ -118,11 +146,12 @@ export default function ProjectDocuments({ projectId }: Props) {
   }, [projectId])
 
   useEffect(() => {
+    // Only poll while indexing is in progress; avoid hammering the list API.
     const hasPendingDocument = documents.some((item) =>
       ['uploaded', 'pending', 'parsing', 'processing', 'indexing'].includes(item.parse_status || item.status || '')
     )
     if (!hasPendingDocument) return
-    const timer = window.setTimeout(fetchDocuments, 4000)
+    const timer = window.setTimeout(fetchDocuments, 8000)
     return () => window.clearTimeout(timer)
   }, [documents, projectId])
 
@@ -183,22 +212,59 @@ export default function ProjectDocuments({ projectId }: Props) {
     }
   }
 
+  const clearSearchTimers = () => {
+    if (searchTimersRef.current.tick) {
+      window.clearInterval(searchTimersRef.current.tick)
+      searchTimersRef.current.tick = undefined
+    }
+    if (searchTimersRef.current.stages) {
+      window.clearInterval(searchTimersRef.current.stages)
+      searchTimersRef.current.stages = undefined
+    }
+  }
+
+  useEffect(() => () => clearSearchTimers(), [])
+
   const handleSearch = async (value?: string) => {
     const keyword = (value ?? query).trim()
     if (!keyword) {
       message.info('请输入需要从项目资料中查找的问题')
       return
     }
+    if (searching) return
 
     setSearching(true)
     setSearchAttempted(true)
+    setHits([])
+    setLastSearchMeta(null)
+    setSearchStage(0)
+    setSearchElapsed(0)
+
+    const startedAt = performance.now()
+    clearSearchTimers()
+    searchTimersRef.current.tick = window.setInterval(() => {
+      const elapsed = (performance.now() - startedAt) / 1000
+      setSearchElapsed(elapsed)
+      setSearchStage(stageIndexFromElapsed(elapsed))
+    }, 200)
+
     try {
       const response = await projectDocumentApi.search(projectId, keyword)
-      setHits(toList<ProjectKnowledgeHit>(unwrap(response)))
+      const results = toList<ProjectKnowledgeHit>(unwrap(response))
+      setHits(results)
+      setSearchStage(SEARCH_STAGES.length - 1)
+      setLastSearchMeta({
+        query: keyword,
+        count: results.length,
+        durationMs: Math.round(performance.now() - startedAt),
+      })
     } catch (error: any) {
       setHits([])
+      setLastSearchMeta(null)
       message.error(error.response?.data?.detail || error.response?.data?.message || '项目知识检索失败')
     } finally {
+      clearSearchTimers()
+      setSearchElapsed((performance.now() - startedAt) / 1000)
       setSearching(false)
     }
   }
@@ -377,24 +443,104 @@ export default function ProjectDocuments({ projectId }: Props) {
         />
       </Card>
 
-      <Card title={<Space><FileSearchOutlined />在项目资料中查找</Space>}>
+      <Card
+        title={<Space><FileSearchOutlined />在项目资料中查找</Space>}
+        extra={
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            语义检索（嵌入模型），通常需数秒，请稍候
+          </Text>
+        }
+      >
         <Space.Compact style={{ width: '100%' }}>
           <Input
             value={query}
             prefix={<SearchOutlined />}
             placeholder="例如：上次审核有哪些未关闭问题？本项目适用哪些标准？"
             allowClear
+            disabled={searching}
             onChange={(event) => setQuery(event.target.value)}
             onPressEnter={() => handleSearch()}
             aria-label="项目知识检索问题"
           />
-          <Button loading={searching} onClick={() => handleSearch()}>
-            检索
+          <Button type="primary" loading={searching} onClick={() => handleSearch()}>
+            {searching ? '检索中…' : '检索'}
           </Button>
         </Space.Compact>
 
-        <div style={{ marginTop: 16 }} aria-live="polite">
-          {hits.length > 0 ? (
+        <div style={{ marginTop: 16 }} aria-live="polite" aria-busy={searching}>
+          {searching && (
+            <div
+              style={{
+                padding: 20,
+                borderRadius: 8,
+                background: 'linear-gradient(180deg, #f0f7ff 0%, #fafafa 100%)',
+                border: '1px solid #d6e4ff',
+              }}
+            >
+              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                <Space align="center">
+                  <Spin indicator={<LoadingOutlined style={{ fontSize: 20 }} spin />} />
+                  <div>
+                    <Text strong>
+                      正在检索：{SEARCH_STAGES[searchStage]?.title}
+                    </Text>
+                    <div>
+                      <Text type="secondary">
+                        {SEARCH_STAGES[searchStage]?.description}
+                        {' · '}
+                        已用时 {searchElapsed.toFixed(1)} 秒
+                        {searchElapsed >= 8 ? '（嵌入模型响应较慢，请继续等待）' : ''}
+                      </Text>
+                    </div>
+                  </div>
+                </Space>
+
+                <Progress
+                  percent={Math.min(95, Math.round(((searchStage + 1) / SEARCH_STAGES.length) * 70 + Math.min(searchElapsed, 12) * 2))}
+                  status="active"
+                  showInfo={false}
+                  strokeColor={{ from: '#1677ff', to: '#69b1ff' }}
+                />
+
+                <Steps
+                  size="small"
+                  current={searchStage}
+                  items={SEARCH_STAGES.map((stage, index) => ({
+                    title: stage.title,
+                    description: index < searchStage ? '完成' : index === searchStage ? '进行中' : '等待',
+                    status:
+                      index < searchStage
+                        ? 'finish'
+                        : index === searchStage
+                          ? 'process'
+                          : 'wait',
+                  }))}
+                />
+              </Space>
+            </div>
+          )}
+
+          {!searching && lastSearchMeta && (
+            <Alert
+              style={{ marginBottom: 12 }}
+              type={lastSearchMeta.count > 0 ? 'success' : 'warning'}
+              showIcon
+              icon={lastSearchMeta.count > 0 ? <CheckCircleOutlined /> : undefined}
+              message={
+                lastSearchMeta.count > 0
+                  ? `找到 ${lastSearchMeta.count} 条相关片段`
+                  : '未找到相关内容'
+              }
+              description={
+                <Text type="secondary">
+                  查询「{lastSearchMeta.query}」· 用时 {(lastSearchMeta.durationMs / 1000).toFixed(1)} 秒
+                  · 结果来自本项目资料与全局法规库，已标注来源
+                </Text>
+              }
+            />
+          )}
+
+          {!searching && hits.length > 0 ? (
             <List
               dataSource={hits}
               renderItem={(hit, index) => {
@@ -424,14 +570,16 @@ export default function ProjectDocuments({ projectId }: Props) {
                 )
               }}
             />
-          ) : searchAttempted && !searching ? (
+          ) : !searching && searchAttempted ? (
             <Empty description="未在当前项目资料中找到相关内容，可换一种问法或补充资料" />
-          ) : (
+          ) : !searching ? (
             <div style={{ textAlign: 'center', padding: 24 }}>
               <Title level={5}>先问资料，再开始审核</Title>
-              <Text type="secondary">检索结果会明确标注来源，不会混入其他项目资料。</Text>
+              <Text type="secondary">
+                检索会调用嵌入模型做语义匹配（非即时全文搜索），结果会明确标注来源，不会混入其他项目资料。
+              </Text>
             </div>
-          )}
+          ) : null}
         </div>
       </Card>
     </Space>

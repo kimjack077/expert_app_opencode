@@ -133,46 +133,6 @@ class ProductResponse(ProductBase):
         from_attributes = True
 
 
-class InstrumentBase(BaseModel):
-    name: str
-    model: Optional[str] = None
-    serial_no: Optional[str] = None
-    measure_range: Optional[str] = None
-    accuracy: Optional[str] = None
-    verification_method: Optional[str] = None
-    last_verified: Optional[date] = None
-    next_verified: Optional[date] = None
-    status: Optional[str] = "normal"
-    remarks: Optional[str] = None
-
-
-class InstrumentCreate(InstrumentBase):
-    enterprise_id: UUID
-
-
-class InstrumentUpdate(BaseModel):
-    name: Optional[str] = None
-    model: Optional[str] = None
-    serial_no: Optional[str] = None
-    measure_range: Optional[str] = None
-    accuracy: Optional[str] = None
-    verification_method: Optional[str] = None
-    last_verified: Optional[date] = None
-    next_verified: Optional[date] = None
-    status: Optional[str] = None
-    remarks: Optional[str] = None
-
-
-class InstrumentResponse(InstrumentBase):
-    id: UUID
-    enterprise_id: UUID
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
 class RectificationBase(BaseModel):
     enterprise_id: UUID
     task_id: Optional[UUID] = None
@@ -218,4 +178,3 @@ class RectificationResponse(RectificationBase):
 class EnterpriseDetail(EnterpriseResponse):
     qualifications: List[QualificationResponse] = []
     products: List[ProductResponse] = []
-    instruments: List[InstrumentResponse] = []

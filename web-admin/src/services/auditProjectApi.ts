@@ -330,10 +330,15 @@ export const projectDocumentApi = {
     ),
 
   search: (projectId: string, query: string, limit = 8) =>
-    api.post(`${PROJECT_AGENT_BASE}/${projectId}/knowledge/search`, {
-      query,
-      top_k: limit,
-    }),
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/knowledge/search`,
+      {
+        query,
+        top_k: limit,
+      },
+      // Embedding + dual-scope retrieval can take tens of seconds
+      { timeout: 120000 },
+    ),
 }
 
 export const projectSessionApi = {

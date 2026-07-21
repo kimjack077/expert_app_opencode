@@ -18,13 +18,10 @@ interface Document {
   issue_date: string
   effective_date: string
   status: string
-  view_count: number
-  category: { id: string; name: string }
 }
 
 export default function Knowledge() {
   const [documents, setDocuments] = useState<Document[]>([])
-  const [categories, setCategories] = useState<any[]>([])
   const [guidelines, setGuidelines] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [docModalVisible, setDocModalVisible] = useState(false)
@@ -38,29 +35,19 @@ export default function Knowledge() {
   const [editingDocId, setEditingDocId] = useState<string | null>(null)
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([])
   const [uploading, setUploading] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [selectedDocType, setSelectedDocType] = useState<string | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
 
   useEffect(() => {
-    fetchCategories()
     fetchDocuments()
     fetchGuidelines()
   }, [])
-
-  const fetchCategories = async () => {
-    try {
-      const res: any = await knowledgeApi.getCategories()
-      setCategories(res.data || [])
-    } catch (error) {
-      console.error('Failed to fetch categories:', error)
-    }
-  }
 
   const fetchDocuments = async () => {
     setLoading(true)
     try {
       const params: any = {}
-      if (selectedCategory) params.category_id = selectedCategory
+      if (selectedDocType) params.doc_type = selectedDocType
       if (searchKeyword) params.keyword = searchKeyword
       const res: any = await knowledgeApi.getDocuments(params)
       setDocuments(res.data || [])
@@ -237,7 +224,6 @@ export default function Knowledge() {
       width: 80,
       render: (status: string) => getStatusTag(status),
     },
-    { title: '浏览次数', dataIndex: 'view_count', key: 'view_count', width: 100 },
     {
       title: '操作',
       key: 'action',
@@ -300,17 +286,16 @@ export default function Knowledge() {
           >
             <div style={{ marginBottom: 16, display: 'flex', gap: 16 }}>
               <Select
-                placeholder="选择分类"
+                placeholder="文档类型"
                 allowClear
-                style={{ width: 200 }}
-                value={selectedCategory || undefined}
-                onChange={(v) => setSelectedCategory(v || null)}
+                style={{ width: 160 }}
+                value={selectedDocType || undefined}
+                onChange={(v) => setSelectedDocType(v || null)}
               >
-                {categories.map((c) => (
-                  <Select.Option key={c.id} value={c.id}>
-                    {c.name}
-                  </Select.Option>
-                ))}
+                <Select.Option value="regulation">法规</Select.Option>
+                <Select.Option value="policy">政策</Select.Option>
+                <Select.Option value="standard">标准</Select.Option>
+                <Select.Option value="guideline">细则</Select.Option>
               </Select>
               <Input
                 placeholder="搜索关键词"
@@ -369,15 +354,6 @@ export default function Knowledge() {
             <Input />
           </Form.Item>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="category_id" label="分类" rules={[{ required: true }]}>
-              <Select>
-                {categories.map((c) => (
-                  <Select.Option key={c.id} value={c.id}>
-                    {c.name}
-                  </Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
             <Form.Item name="doc_type" label="文档类型" rules={[{ required: true }]}>
               <Select>
                 <Select.Option value="regulation">法规</Select.Option>
@@ -461,13 +437,6 @@ export default function Knowledge() {
             </Upload.Dragger>
           </Form.Item>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="category_id" label="分类" rules={[{ required: true, message: '请选择分类' }]}>
-              <Select>
-                {categories.map((c) => (
-                  <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
             <Form.Item name="doc_type" label="文档类型" rules={[{ required: true }]}>
               <Select>
                 <Select.Option value="regulation">法规</Select.Option>
@@ -560,7 +529,6 @@ export default function Knowledge() {
                 <span>文号：{currentDoc.doc_no || '-'}</span>
                 <span>发布机关：{currentDoc.issue_authority || '-'}</span>
                 <span>发布日期：{currentDoc.issue_date ? dayjs(currentDoc.issue_date).format('YYYY-MM-DD') : '-'}</span>
-                <span>浏览次数：{currentDoc.view_count}</span>
               </Space>
             </div>
             {currentDoc.summary && (

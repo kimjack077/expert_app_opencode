@@ -1,5 +1,5 @@
 import json
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
 
 from openai import AsyncOpenAI
@@ -391,6 +391,10 @@ MAX_TOOL_ROUNDS = 5
 MAX_KNOWLEDGE_SEARCHES = 2
 FINAL_RESPONSE_INSTRUCTION = """工具调用已结束。请仅基于已获得的工具结果，直接给出完整、准确的最终答复。
 不要描述继续检索的过程，不要再次请求工具；若资料不足，必须明确说明缺少什么资料。"""
+FORCE_FINAL_USER_PROMPT = (
+    "请立即给出完整最终答复：基于已获得的工具结果回答用户问题，"
+    "列出引用来源；禁止再次调用工具；不要只输出空内容。"
+)
 
 
 class AgentService:
@@ -483,27 +487,35 @@ class AgentService:
         error_text: Optional[str] = None
         knowledge_search_signatures: set[str] = set()
         knowledge_search_count = 0
+        collected_tool_results: list[tuple[str, Any]] = []
 
         try:
             for round_idx in range(MAX_TOOL_ROUNDS):
                 is_last_round = round_idx == MAX_TOOL_ROUNDS - 1
+                # Only the last round forbids tools. Earlier rounds may still
+                # call tools; empty final answers are recovered after the loop.
+                force_final = is_last_round
 
-                if is_last_round:
-                    # Some tool-capable models otherwise end the last round
-                    # with an empty message after several tool calls.
-                    messages.append({"role": "system", "content": FINAL_RESPONSE_INSTRUCTION})
+                request_messages = list(messages)
+                if force_final:
+                    request_messages.append(
+                        {"role": "system", "content": FINAL_RESPONSE_INSTRUCTION}
+                    )
+                    request_messages.append(
+                        {"role": "user", "content": FORCE_FINAL_USER_PROMPT}
+                    )
 
                 response = await self.client.chat.completions.create(
                     model=self.model,
-                    messages=messages,
-                    tools=None if is_last_round else TOOLS,
-                    tool_choice="auto" if not is_last_round else None,
+                    messages=request_messages,
+                    tools=None if force_final else TOOLS,
+                    tool_choice="auto" if not force_final else None,
                     max_tokens=settings.LLM_MAX_TOKENS,
                     temperature=settings.LLM_TEMPERATURE,
                     stream=True,
                 )
 
-                tool_calls_buffer = {}
+                tool_calls_buffer: dict[int, dict] = {}
                 had_tool_calls = False
                 assistant_text = ""
 
@@ -518,7 +530,7 @@ class AgentService:
                     if delta.content:
                         assistant_text += delta.content
 
-                    if delta.tool_calls:
+                    if delta.tool_calls and not force_final:
                         had_tool_calls = True
                         for tool_call_delta in delta.tool_calls:
                             idx = tool_call_delta.index
@@ -526,22 +538,34 @@ class AgentService:
                             if idx not in tool_calls_buffer:
                                 tool_calls_buffer[idx] = {
                                     "id": "",
-                                    "function": {"name": "", "arguments": ""}
+                                    "function": {"name": "", "arguments": ""},
                                 }
 
                             if tool_call_delta.id:
                                 tool_calls_buffer[idx]["id"] = tool_call_delta.id
                             if tool_call_delta.function:
                                 if tool_call_delta.function.name:
-                                    tool_calls_buffer[idx]["function"]["name"] = tool_call_delta.function.name
+                                    tool_calls_buffer[idx]["function"]["name"] = (
+                                        tool_call_delta.function.name
+                                    )
                                 if tool_call_delta.function.arguments:
-                                    tool_calls_buffer[idx]["function"]["arguments"] += tool_call_delta.function.arguments
+                                    tool_calls_buffer[idx]["function"][
+                                        "arguments"
+                                    ] += tool_call_delta.function.arguments
 
                 if not had_tool_calls:
-                    # Only stream visible text once the turn is known to be a
-                    # final answer.  Tool-call narration such as "let me
-                    # search again" is not useful to the inspection user.
+                    # Only surface text once the turn is a final answer.
                     if not assistant_text.strip():
+                        recovered = await self._recover_empty_final_answer(
+                            messages=messages,
+                            user_message=message,
+                            collected_tool_results=collected_tool_results,
+                        )
+                        if recovered:
+                            full_response_text += recovered
+                            yield {"type": "content", "content": recovered}
+                            break
+
                         error_text = "模型未生成最终答复"
                         yield {
                             "type": "error",
@@ -558,7 +582,28 @@ class AgentService:
                 tool_call_entries = []
                 for idx in sorted(tool_calls_buffer.keys()):
                     tool_call = tool_calls_buffer[idx]
+                    if not tool_call["function"]["name"]:
+                        continue
+                    if not tool_call["id"]:
+                        tool_call["id"] = f"call_{round_idx}_{idx}"
                     tool_call_entries.append(tool_call)
+
+                if not tool_call_entries:
+                    recovered = await self._recover_empty_final_answer(
+                        messages=messages,
+                        user_message=message,
+                        collected_tool_results=collected_tool_results,
+                    )
+                    if recovered:
+                        full_response_text += recovered
+                        yield {"type": "content", "content": recovered}
+                        break
+                    error_text = "模型返回空的工具调用"
+                    yield {
+                        "type": "error",
+                        "content": "AI 未能生成最终答复，请稍后重试。",
+                    }
+                    return
 
                 messages.append({
                     "role": "assistant",
@@ -568,9 +613,9 @@ class AgentService:
                         "type": "function",
                         "function": {
                             "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"]
-                        }
-                    } for tc in tool_call_entries]
+                            "arguments": tc["function"]["arguments"] or "{}",
+                        },
+                    } for tc in tool_call_entries],
                 })
 
                 for tool_call in tool_call_entries:
@@ -607,6 +652,9 @@ class AgentService:
                             tool_name, tool_args, context, db
                         )
 
+                    tool_result = self._compact_tool_result(tool_name, tool_result)
+                    collected_tool_results.append((tool_name, tool_result))
+
                     if isinstance(tool_result, dict) and tool_result.get("type") == "action_proposal":
                         yield tool_result
                     else:
@@ -615,16 +663,25 @@ class AgentService:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": json.dumps(tool_result, ensure_ascii=False)
+                        "content": json.dumps(tool_result, ensure_ascii=False, default=str),
                     })
 
             if not full_response_text.strip():
-                error_text = "工具轮次结束后未生成最终答复"
-                yield {
-                    "type": "error",
-                    "content": "AI 未能生成最终答复，请稍后重试。",
-                }
-                return
+                recovered = await self._recover_empty_final_answer(
+                    messages=messages,
+                    user_message=message,
+                    collected_tool_results=collected_tool_results,
+                )
+                if recovered:
+                    full_response_text = recovered
+                    yield {"type": "content", "content": recovered}
+                else:
+                    error_text = "工具轮次结束后未生成最终答复"
+                    yield {
+                        "type": "error",
+                        "content": "AI 未能生成最终答复，请稍后重试。",
+                    }
+                    return
 
             yield {"type": "done", "content": ""}
 
@@ -679,6 +736,169 @@ class AgentService:
         )
         db.add(log)
         await db.commit()
+
+    @staticmethod
+    def _compact_tool_result(tool_name: str, tool_result: Any) -> Any:
+        """Shrink large retrieval payloads so the final answer turn stays reliable."""
+        if not isinstance(tool_result, dict):
+            return tool_result
+
+        if tool_name not in {"search_knowledge_base", "search_audit_knowledge"}:
+            return tool_result
+
+        results = tool_result.get("results")
+        if not isinstance(results, list):
+            return tool_result
+
+        compact_results = []
+        for item in results[:8]:
+            if not isinstance(item, dict):
+                compact_results.append(item)
+                continue
+            content = item.get("content") or item.get("text") or ""
+            compact_results.append(
+                {
+                    "source_scope": item.get("source_scope"),
+                    "document_id": item.get("document_id"),
+                    "document_title": item.get("document_title")
+                    or item.get("file_name")
+                    or item.get("source"),
+                    "file_name": item.get("file_name"),
+                    "similarity": item.get("similarity")
+                    or item.get("score")
+                    or item.get("relevance"),
+                    "content": str(content)[:500],
+                }
+            )
+
+        return {
+            **tool_result,
+            "results": compact_results,
+            "result_count": len(results),
+        }
+
+    async def _recover_empty_final_answer(
+        self,
+        *,
+        messages: list,
+        user_message: str,
+        collected_tool_results: list[tuple[str, Any]],
+    ) -> Optional[str]:
+        """Retry once for an empty final turn; if still empty, synthesize from tools."""
+        if not collected_tool_results:
+            return None
+
+        try:
+            retry_messages = list(messages) + [
+                {"role": "system", "content": FINAL_RESPONSE_INSTRUCTION},
+                {
+                    "role": "user",
+                    "content": (
+                        f"用户原问题：{user_message}\n\n{FORCE_FINAL_USER_PROMPT}"
+                    ),
+                },
+            ]
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=retry_messages,
+                tools=None,
+                max_tokens=min(2048, settings.LLM_MAX_TOKENS),
+                temperature=0.3,
+                stream=False,
+            )
+            content = ""
+            if response.choices:
+                content = (response.choices[0].message.content or "").strip()
+            if content:
+                return content
+        except Exception as exc:
+            print(f"[Agent] Final-answer recovery failed: {type(exc).__name__}: {exc}")
+
+        return self._fallback_answer_from_tools(user_message, collected_tool_results)
+
+    @staticmethod
+    def _fallback_answer_from_tools(
+        user_message: str,
+        collected_tool_results: list[tuple[str, Any]],
+    ) -> str:
+        """Deterministic answer when the model returns empty after tools."""
+        lines = [
+            "已完成工具调用，但模型未生成自然语言总结。以下根据工具结果直接整理：",
+            "",
+            f"**用户问题：** {user_message}",
+            "",
+        ]
+
+        for tool_name, payload in collected_tool_results:
+            if tool_name == "get_audit_project_context" and isinstance(payload, dict):
+                lines.extend(
+                    [
+                        "## 项目上下文",
+                        f"- 项目：{payload.get('project_title') or '未知'}",
+                        f"- 企业：{payload.get('enterprise_name') or '未知'}",
+                        f"- 区域：{payload.get('area_name') or '未设定'}",
+                        f"- 认证体系：{'、'.join(payload.get('certification_systems') or []) or '未指定'}",
+                        f"- 待确认草稿：{len(payload.get('pending_drafts') or [])} 条",
+                        "",
+                    ]
+                )
+                continue
+
+            if tool_name in {"search_knowledge_base", "search_audit_knowledge"} and isinstance(
+                payload, dict
+            ):
+                results = payload.get("results") or []
+                lines.append("## 知识检索结果与引用来源")
+                if payload.get("query"):
+                    lines.append(f"- 检索词：{payload.get('query')}")
+                if not results:
+                    lines.append("- 未检索到可用资料片段。")
+                    lines.append("")
+                    continue
+                for index, item in enumerate(results[:8], start=1):
+                    if not isinstance(item, dict):
+                        lines.append(f"{index}. {item}")
+                        continue
+                    title = (
+                        item.get("document_title")
+                        or item.get("file_name")
+                        or item.get("source")
+                        or "未命名资料"
+                    )
+                    scope = item.get("source_scope") or "unknown"
+                    scope_label = (
+                        "全局法规" if scope == "global_regulation" else "项目资料"
+                    )
+                    score = (
+                        item.get("similarity")
+                        or item.get("score")
+                        or item.get("relevance")
+                    )
+                    score_text = ""
+                    if isinstance(score, (int, float)):
+                        score_text = (
+                            f"，相关度 {score * 100:.0f}%"
+                            if score <= 1
+                            else f"，相关度 {score:.0f}"
+                        )
+                    excerpt = str(item.get("content") or item.get("text") or "").strip()
+                    if len(excerpt) > 280:
+                        excerpt = excerpt[:280] + "…"
+                    lines.append(f"{index}. **[{scope_label}] {title}**{score_text}")
+                    if excerpt:
+                        lines.append(f"   > {excerpt}")
+                lines.append("")
+                continue
+
+            if isinstance(payload, dict) and payload.get("error"):
+                lines.append(f"## 工具 `{tool_name}`")
+                lines.append(f"- 错误：{payload.get('error')}")
+                lines.append("")
+
+        lines.append(
+            "如需更完整的自然语言分析，请再试一次或换一种问法（例如先问「当前项目资料清单」）。"
+        )
+        return "\n".join(lines)
 
     async def _build_context(self, context: dict, db: AsyncSession) -> dict:
         result = {

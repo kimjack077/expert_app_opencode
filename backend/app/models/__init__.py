@@ -11,11 +11,10 @@ from .enterprise import (
     EnterpriseQualification,
     EnterpriseProduct,
     EnterpriseEquipment,
-    EnterpriseInstrument,
     EnterprisePersonnel,
     RectificationRecord,
 )
-from .knowledge import KnowledgeCategory, KnowledgeDocument, InspectionGuideline
+from .knowledge import KnowledgeDocument, InspectionGuideline
 from .rag import (
     KnowledgeEmbedding,
     CheckItemRegulation,
@@ -61,10 +60,8 @@ __all__ = [
     "EnterpriseQualification",
     "EnterpriseProduct",
     "EnterpriseEquipment",
-    "EnterpriseInstrument",
     "EnterprisePersonnel",
     "RectificationRecord",
-    "KnowledgeCategory",
     "KnowledgeDocument",
     "InspectionGuideline",
     # RAG and Agent models

@@ -1,14 +1,13 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models.knowledge import InspectionGuideline, KnowledgeCategory, KnowledgeDocument
+from app.models.knowledge import InspectionGuideline, KnowledgeDocument
 from app.models.user import User
 from app.schemas import ApiResponse
 from app.services import AuditService
@@ -25,127 +24,8 @@ def make_response(data=None, code=200, message="success"):
     )
 
 
-@router.get("/categories", response_model=ApiResponse)
-async def get_categories(
-    category_type: Optional[str] = Query(None),
-    parent_id: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    query = select(KnowledgeCategory).where(KnowledgeCategory.is_deleted == False)  # noqa: E712
-
-    if category_type:
-        query = query.where(KnowledgeCategory.category_type == category_type)
-    if parent_id:
-        query = query.where(KnowledgeCategory.parent_id == parent_id)
-    else:
-        query = query.where(KnowledgeCategory.parent_id == None)
-
-    query = query.order_by(KnowledgeCategory.sort_order)
-    result = await db.execute(query)
-    categories = result.scalars().all()
-
-    return make_response(
-        data=[{
-            "id": str(c.id),
-            "name": c.name,
-            "code": c.code,
-            "category_type": c.category_type,
-            "sort_order": c.sort_order,
-            "description": c.description,
-        } for c in categories]
-    )
-
-
-class CategoryCreate(BaseModel):
-    name: str
-    category_type: str
-    code: Optional[str] = None
-    parent_id: Optional[str] = None
-    sort_order: int = 0
-    description: Optional[str] = None
-
-
-@router.post("/categories", response_model=ApiResponse)
-async def create_category(
-    data: CategoryCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    category = KnowledgeCategory(
-        name=data.name,
-        code=data.code,
-        category_type=data.category_type,
-        parent_id=data.parent_id,
-        sort_order=data.sort_order,
-        description=data.description,
-    )
-    db.add(category)
-    await db.commit()
-    await db.refresh(category)
-
-    return make_response(data={"id": str(category.id), "name": category.name})
-
-
-@router.get("/categories/{category_id}", response_model=ApiResponse)
-async def get_category(
-    category_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    category = await db.get(KnowledgeCategory, category_id)
-    if not category or category.is_deleted:
-        raise HTTPException(status_code=404, detail="知识分类不存在")
-    return make_response(data={
-        "id": str(category.id),
-        "name": category.name,
-        "code": category.code,
-        "category_type": category.category_type,
-        "sort_order": category.sort_order,
-        "description": category.description,
-    })
-
-
-@router.put("/categories/{category_id}", response_model=ApiResponse)
-async def update_category(
-    category_id: str,
-    data: CategoryCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    category = await db.get(KnowledgeCategory, category_id)
-    if not category or category.is_deleted:
-        raise HTTPException(status_code=404, detail="知识分类不存在")
-
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(category, key, value)
-
-    await db.commit()
-    await db.refresh(category)
-    return make_response(data={"id": str(category.id), "name": category.name})
-
-
-@router.delete("/categories/{category_id}", response_model=ApiResponse)
-async def delete_category(
-    category_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    category = await db.get(KnowledgeCategory, category_id)
-    if not category or category.is_deleted:
-        raise HTTPException(status_code=404, detail="知识分类不存在")
-
-    from app.utils.soft_delete import soft_delete
-
-    await soft_delete(db, category, unique_fields=["code"])
-    await db.commit()
-    return make_response(message="删除成功")
-
-
 @router.get("/documents", response_model=ApiResponse)
 async def get_documents(
-    category_id: Optional[str] = Query(None),
     doc_type: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -154,10 +34,8 @@ async def get_documents(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(KnowledgeDocument).options(selectinload(KnowledgeDocument.category)).where(KnowledgeDocument.is_deleted == False)  # noqa: E712
+    query = select(KnowledgeDocument).where(KnowledgeDocument.is_deleted == False)  # noqa: E712
 
-    if category_id:
-        query = query.where(KnowledgeDocument.category_id == category_id)
     if doc_type:
         query = query.where(KnowledgeDocument.doc_type == doc_type)
     if keyword:
@@ -184,15 +62,12 @@ async def get_documents(
             "issue_date": d.issue_date.isoformat() if d.issue_date else None,
             "effective_date": d.effective_date.isoformat() if d.effective_date else None,
             "status": d.status,
-            "view_count": d.view_count,
-            "category": {"id": str(d.category.id), "name": d.category.name} if d.category else None,
         } for d in documents]
     )
 
 
 class DocumentCreate(BaseModel):
     title: str
-    category_id: str
     doc_type: str
     content: Optional[str] = None
     doc_no: Optional[str] = None
@@ -209,7 +84,6 @@ class DocumentCreate(BaseModel):
 
 class DocumentUpdate(BaseModel):
     title: Optional[str] = None
-    category_id: Optional[str] = None
     doc_type: Optional[str] = None
     content: Optional[str] = None
     doc_no: Optional[str] = None
@@ -230,7 +104,6 @@ async def create_document(
 ):
     document = KnowledgeDocument(
         title=data.title,
-        category_id=data.category_id,
         doc_type=data.doc_type,
         content=data.content,
         doc_no=data.doc_no,
@@ -270,7 +143,6 @@ async def create_document(
 @router.post("/documents/upload", response_model=ApiResponse)
 async def upload_document(
     file: UploadFile = File(...),
-    category_id: str = Form(...),
     doc_type: str = Form(...),
     title: Optional[str] = Form(None),
     doc_no: Optional[str] = Form(None),
@@ -287,7 +159,6 @@ async def upload_document(
 
     document = KnowledgeDocument(
         title=title or metadata.get("filename") or "未命名知识文档",
-        category_id=category_id,
         doc_type=doc_type,
         content=content,
         doc_no=doc_no,
@@ -334,13 +205,9 @@ async def get_document(
     if not document or document.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    document.view_count += 1
-    await db.commit()
-
     return make_response(data={
         "id": str(document.id),
         "title": document.title,
-        "category_id": str(document.category_id) if document.category_id else None,
         "doc_type": document.doc_type,
         "doc_no": document.doc_no,
         "content": document.content,
@@ -353,7 +220,6 @@ async def get_document(
         "status": document.status,
         "file_url": document.file_url,
         "file_name": document.file_name,
-        "view_count": document.view_count,
     })
 
 
@@ -396,8 +262,15 @@ async def delete_document(
     if not document or document.is_deleted:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    from sqlalchemy import delete as sa_delete
+
+    from app.models.rag import KnowledgeEmbedding
     from app.utils.soft_delete import soft_delete
 
+    # Remove RAG index so deleted knowledge cannot be retrieved
+    await db.execute(
+        sa_delete(KnowledgeEmbedding).where(KnowledgeEmbedding.document_id == document.id)
+    )
     await soft_delete(db, document)
     await db.commit()
 

@@ -533,21 +533,6 @@ export default function Enterprises() {
                 <Table.Column title="获证状态" dataIndex="cert_status" />
               </Table>
             </TabPane>
-            <TabPane tab="计量器具" key="instruments">
-              <Table
-                dataSource={currentEnterprise.instruments || []}
-                rowKey="id"
-                size="middle"
-                pagination={false}
-                locale={{ emptyText: '暂无计量器具信息' }}
-              >
-                <Table.Column title="器具名称" dataIndex="name" />
-                <Table.Column title="型号" dataIndex="model" />
-                <Table.Column title="出厂编号" dataIndex="serial_no" />
-                <Table.Column title="下次检定日期" dataIndex="next_verified" render={(v) => v ? dayjs(v).format('YYYY-MM-DD') : '-'} />
-                <Table.Column title="状态" dataIndex="status" />
-              </Table>
-            </TabPane>
           </Tabs>
         )}
       </Modal>

@@ -71,7 +71,7 @@ def main():
             ("enterprises", "/api/enterprises?limit=5"),
             ("users", "/api/users?limit=5"),
             ("industries", "/api/industries"),
-            ("knowledge", "/api/knowledge/categories"),
+            ("knowledge", "/api/knowledge/documents?limit=5"),
             ("audit_projects", "/api/audit-projects?limit=5"),
             ("statistics", "/api/statistics"),
         ]

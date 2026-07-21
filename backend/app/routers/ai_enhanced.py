@@ -43,7 +43,7 @@ def make_response(data=None, code=200, message="success"):
 class KnowledgeSearchRequest(BaseModel):
     query: str
     top_k: int = 5
-    category_id: Optional[str] = None
+    doc_type: Optional[str] = None
 
 
 class CreateEmbeddingRequest(BaseModel):
@@ -89,7 +89,7 @@ async def search_knowledge(
         query=request.query,
         db=db,
         top_k=request.top_k,
-        category_id=request.category_id,
+        doc_type=request.doc_type,
     )
 
     return make_response(data={

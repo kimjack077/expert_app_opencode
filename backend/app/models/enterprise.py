@@ -55,7 +55,6 @@ class Enterprise(Base, SoftDeleteMixin):
     qualifications = relationship("EnterpriseQualification", back_populates="enterprise", cascade="all, delete-orphan")
     products = relationship("EnterpriseProduct", back_populates="enterprise", cascade="all, delete-orphan")
     equipment = relationship("EnterpriseEquipment", back_populates="enterprise", cascade="all, delete-orphan")
-    instruments = relationship("EnterpriseInstrument", back_populates="enterprise", cascade="all, delete-orphan")
     personnel = relationship("EnterprisePersonnel", back_populates="enterprise", cascade="all, delete-orphan")
     rectifications = relationship("RectificationRecord", back_populates="enterprise", cascade="all, delete-orphan")
     industry = relationship("Industry")
@@ -114,27 +113,6 @@ class EnterpriseEquipment(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     enterprise = relationship("Enterprise", back_populates="equipment")
-
-
-class EnterpriseInstrument(Base):
-    __tablename__ = "enterprise_instruments"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    enterprise_id = Column(UUID(as_uuid=True), ForeignKey("enterprises.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(200), nullable=False)
-    model = Column(String(100))
-    serial_no = Column(String(100))
-    measure_range = Column(String(100))
-    accuracy = Column(String(50))
-    verification_method = Column(String(50))
-    last_verified = Column(Date)
-    next_verified = Column(Date)
-    status = Column(String(20), default="normal")
-    remarks = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    enterprise = relationship("Enterprise", back_populates="instruments")
 
 
 class EnterprisePersonnel(Base):
