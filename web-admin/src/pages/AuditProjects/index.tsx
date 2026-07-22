@@ -105,11 +105,11 @@ export default function AuditProjects() {
       title: '认证体系',
       dataIndex: 'certification_systems',
       key: 'certification_systems',
-      width: 150,
+      width: 180,
       render: (systems: string[]) => (
-        <Space size={4}>
+        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
           {systems?.map((sys) => (
-            <Tag key={sys}>{sys}</Tag>
+            <Tag key={sys} style={{ whiteSpace: 'nowrap' }}>{sys}</Tag>
           ))}
         </Space>
       ),
@@ -136,10 +136,10 @@ export default function AuditProjects() {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 120,
       render: (status: string) => {
         const config = statusMap[status] || { text: status, color: 'default' }
-        return <Tag color={config.color}>{config.text}</Tag>
+        return <Tag color={config.color} style={{ whiteSpace: 'nowrap' }}>{config.text}</Tag>
       },
     },
     {

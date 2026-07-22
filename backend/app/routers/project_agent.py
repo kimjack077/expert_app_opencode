@@ -38,6 +38,7 @@ from app.services.project_access_service import ensure_project_access
 from app.services.project_artifact_service import project_artifact_service
 from app.services.project_knowledge_service import project_knowledge_service
 from app.utils.file_handler import save_upload_file
+from app.utils.storage_path import resolve_storage_path, storage_key
 
 
 router = APIRouter(prefix="/api/audit-projects", tags=["project-agent"])
@@ -251,7 +252,10 @@ def session_dict(item: AiAuditSession, include_children: bool = False) -> dict[s
 
 
 def artifact_dict(item: ProjectArtifact) -> dict[str, Any]:
-    return {"id": str(item.id), "project_id": str(item.project_id), "type": item.artifact_type, "artifact_type": item.artifact_type, "name": item.filename, "file_name": item.filename, "status": item.status, "progress": item.progress, "error_message": item.error_message, "metadata": item.artifact_metadata or {}, "version": item.version, "file_size": item.file_size, "size": item.file_size, "mime_type": item.mime_type, "generated_at": item.created_at, "created_at": item.created_at, "updated_at": item.updated_at}
+    available = (
+        item.status == "ready" and resolve_storage_path(item.path) is not None
+    )
+    return {"id": str(item.id), "project_id": str(item.project_id), "type": item.artifact_type, "artifact_type": item.artifact_type, "name": item.filename, "file_name": item.filename, "status": item.status, "progress": item.progress, "error_message": item.error_message, "metadata": item.artifact_metadata or {}, "version": item.version, "file_size": item.file_size, "size": item.file_size, "mime_type": item.mime_type, "available": available, "generated_at": item.created_at, "created_at": item.created_at, "updated_at": item.updated_at}
 
 
 async def _run_artifact_generation(job_id: UUID) -> None:
@@ -368,7 +372,7 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
     stored_name = f"{hashlib.sha256(content).hexdigest()[:16]}_{filename}"
     stored_path = directory / stored_name
     stored_path.write_bytes(content)
-    document = ProjectDocument(project_id=project_id, title=Path(filename).stem, document_type=category or "auto", original_filename=filename, stored_path=str(stored_path.resolve()), mime_type=file.content_type, file_size=len(content), checksum_sha256=hashlib.sha256(content).hexdigest(), status="uploaded", created_by=current_user.id)
+    document = ProjectDocument(project_id=project_id, title=Path(filename).stem, document_type=category or "auto", original_filename=filename, stored_path=storage_key(stored_path), mime_type=file.content_type, file_size=len(content), checksum_sha256=hashlib.sha256(content).hexdigest(), status="uploaded", created_by=current_user.id)
     db.add(document); await db.commit(); await db.refresh(document)
     try:
         enterprise_name, industry_keywords = await _document_project_context(
@@ -396,7 +400,6 @@ async def delete_document(project_id: UUID, document_id: UUID, db: AsyncSession 
     document = await db.get(ProjectDocument, document_id)
     if not document or document.project_id != project_id or document.is_deleted:
         raise HTTPException(status_code=404, detail="项目资料不存在")
-    path = Path(document.stored_path)
     await soft_delete(db, document)
     await db.commit()
     # 保留物理文件以便审计追溯，不再 unlink
@@ -408,8 +411,8 @@ async def reindex_document(project_id: UUID, document_id: UUID, db: AsyncSession
     await ensure_project_access(db, project_id, current_user)
     document = await db.get(ProjectDocument, document_id)
     if not document or document.project_id != project_id or document.is_deleted: raise HTTPException(status_code=404, detail="项目资料不存在")
-    path = Path(document.stored_path)
-    if not path.is_file(): raise HTTPException(status_code=404, detail="原始文件不存在")
+    path = resolve_storage_path(document.stored_path)
+    if not path: raise HTTPException(status_code=404, detail="原始文件不存在")
     enterprise_name, industry_keywords = await _document_project_context(
         db, project_id
     )
@@ -1126,6 +1129,7 @@ async def generate_artifacts(project_id: UUID, payload: ArtifactGenerateRequest,
             "area_record_id": str(payload.area_record_id)
             if payload.area_record_id
             else None,
+            "force": payload.force,
         },
         status="pending",
         progress=0,
@@ -1177,7 +1181,9 @@ async def retry_artifact_generation(
 @router.get("/{project_id}/artifacts/{artifact_id}/download")
 async def download_artifact(project_id: UUID, artifact_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user); item=await db.get(ProjectArtifact,artifact_id)
-    if not item or item.project_id != project_id or item.is_deleted or not Path(item.path).is_file(): raise HTTPException(status_code=404,detail="成果文件不存在")
+    if not item or item.project_id != project_id or item.is_deleted: raise HTTPException(status_code=404,detail="成果文件不存在")
+    path = resolve_storage_path(item.path)
+    if not path: raise HTTPException(status_code=404,detail="成果文件不存在")
     # P0-5 修复：制品下载必须通过质量门禁（与 /package 接口一致）
     # 仅 generation_job 元数据任务文件不强制门禁（用户不会直接下载此类文件）
     if item.artifact_type != "generation_job":
@@ -1190,7 +1196,7 @@ async def download_artifact(project_id: UUID, artifact_id: UUID, db: AsyncSessio
                     "quality_check": quality,
                 },
             )
-    return FileResponse(item.path,media_type=item.mime_type,filename=item.filename)
+    return FileResponse(path,media_type=item.mime_type,filename=item.filename)
 
 
 @router.get("/{project_id}/package")
@@ -1205,7 +1211,7 @@ async def download_package(project_id: UUID, db: AsyncSession = Depends(get_db),
                 "quality_check": quality,
             },
         )
-    item = (
+    items = (
         await db.execute(
             select(ProjectArtifact)
             .where(
@@ -1216,12 +1222,20 @@ async def download_package(project_id: UUID, db: AsyncSession = Depends(get_db),
             )
             .order_by(ProjectArtifact.version.desc())
         )
-    ).scalars().first()
-    if not item or not Path(item.path).is_file():
+    ).scalars().all()
+    item = None
+    path = None
+    for candidate in items:
+        candidate_path = resolve_storage_path(candidate.path)
+        if candidate_path:
+            item = candidate
+            path = candidate_path
+            break
+    if not item or not path:
         raise HTTPException(
             status_code=404,
             detail="完整资料包尚未生成，请先创建资料包生成任务",
         )
     return FileResponse(
-        item.path, media_type="application/zip", filename=item.filename
+        path, media_type="application/zip", filename=item.filename
     )

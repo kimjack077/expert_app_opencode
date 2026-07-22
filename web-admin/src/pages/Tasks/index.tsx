@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm, Typography } from 'antd'
-import { PlusOutlined, EyeOutlined, PlayCircleOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
+import { PlusOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
 import { formatTaskDisplay } from '@/utils/display'
@@ -175,7 +175,7 @@ export default function Tasks() {
               icon={<PlayCircleOutlined />}
               onClick={() => navigate(`/inspection/${record.id}`)}
             >
-              开始检查
+              继续检查
             </Button>
           )}
           {record.status === 'in_progress' && (
@@ -191,10 +191,10 @@ export default function Tasks() {
           {record.status === 'completed' && (
             <Button
               size="small"
-              icon={<EyeOutlined />}
+              icon={<ReloadOutlined />}
               onClick={() => navigate(`/inspection/${record.id}`)}
             >
-              查看检查
+              重新检查
             </Button>
           )}
           <Button
@@ -203,7 +203,7 @@ export default function Tasks() {
             icon={<EyeOutlined />}
             onClick={() => navigate(`/tasks/${record.id}`)}
           >
-            详情
+            查看
           </Button>
           <Popconfirm
             title="确认删除"

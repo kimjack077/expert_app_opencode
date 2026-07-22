@@ -237,11 +237,11 @@ export default function PlanEditor({ projectId }: Props) {
       title: '认证体系',
       dataIndex: 'certification_systems',
       key: 'certification_systems',
-      width: 120,
+      width: 180,
       render: (systems: string[]) => (
-        <Space size={4}>
+        <Space size={4} style={{ whiteSpace: 'nowrap' }}>
           {systems?.map((sys) => (
-            <Tag key={sys}>{sys}</Tag>
+            <Tag key={sys} style={{ whiteSpace: 'nowrap' }}>{sys}</Tag>
           ))}
         </Space>
       ),
@@ -250,7 +250,7 @@ export default function PlanEditor({ projectId }: Props) {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 80,
+      width: 120,
       render: (status: string) => {
         const statusTextMap: Record<string, string> = {
           pending: '待开始',
@@ -258,7 +258,7 @@ export default function PlanEditor({ projectId }: Props) {
           completed: '已完成',
         }
         return (
-          <Tag color={statusColorMap[status]}>{statusTextMap[status] || status}</Tag>
+          <Tag color={statusColorMap[status]} style={{ whiteSpace: 'nowrap' }}>{statusTextMap[status] || status}</Tag>
         )
       },
     },

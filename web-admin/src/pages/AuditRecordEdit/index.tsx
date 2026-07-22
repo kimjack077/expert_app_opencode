@@ -49,6 +49,7 @@ export default function AuditRecordEdit() {
   const { projectId, recordId } = useParams<{ projectId: string; recordId: string }>()
   const [searchParams] = useSearchParams()
   const planItemId = searchParams.get('planItemId')
+  const readOnly = searchParams.get('mode') === 'view'
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
@@ -141,6 +142,8 @@ export default function AuditRecordEdit() {
   }
 
   const handleSaveRecord = async () => {
+    if (readOnly) return
+
     try {
       const values = await form.validateFields()
       setSaving(true)
@@ -169,6 +172,8 @@ export default function AuditRecordEdit() {
   }
 
   const handleSelectTemplate = async (templateId: string) => {
+    if (readOnly) return
+
     try {
       const res = await templateApi.getTemplate(templateId)
       setTemplate(res.data)
@@ -179,6 +184,8 @@ export default function AuditRecordEdit() {
   }
 
   const handleItemChange = async (item: RecordItem, field: string, value: any) => {
+    if (readOnly) return
+
     // 更新本地状态
     const updatedItems = flatItems.map(i => {
       if (i.id === item.id || i.template_item_id === item.id) {
@@ -200,6 +207,8 @@ export default function AuditRecordEdit() {
   }
 
   const handleAIEvaluate = async () => {
+    if (readOnly) return
+
     const evidence = form.getFieldValue('conclusion')
     if (!evidence || evidence.length < 10) {
       message.warning('请先填写审核结论（至少10个字符）')
@@ -230,6 +239,11 @@ export default function AuditRecordEdit() {
   }
 
   const handleUpload = async (uploadInfo: any) => {
+    if (readOnly) {
+      if (uploadInfo.onError) uploadInfo.onError(new Error('只读模式不能上传照片'))
+      return
+    }
+
     const file = uploadInfo.file as File
     if (!recordId || recordId === 'new') {
       message.warning('请先保存记录后再上传照片')
@@ -343,7 +357,7 @@ export default function AuditRecordEdit() {
               返回
             </Button>
             <span style={{ fontSize: 18, fontWeight: 600 }}>
-              {recordId === 'new' ? '新建审核记录' : '编辑审核记录'}
+              {readOnly ? '查看审核记录' : recordId === 'new' ? '新建审核记录' : '编辑审核记录'}
             </span>
             {record && (
               <Tag color={record.status === 'submitted' ? 'success' : 'warning'}>
@@ -351,25 +365,27 @@ export default function AuditRecordEdit() {
               </Tag>
             )}
           </Space>
-          <Space>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={handleSaveRecord}
-            >
-              保存
-            </Button>
-            {progress === 100 && record?.status !== 'submitted' && (
+          {!readOnly && (
+            <Space>
               <Button
                 type="primary"
-                icon={<SendOutlined />}
-                style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                icon={<SaveOutlined />}
+                loading={saving}
+                onClick={handleSaveRecord}
               >
-                提交
+                保存
               </Button>
-            )}
-          </Space>
+              {progress === 100 && record?.status !== 'submitted' && (
+                <Button
+                  type="primary"
+                  icon={<SendOutlined />}
+                  style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                >
+                  提交
+                </Button>
+              )}
+            </Space>
+          )}
         </div>
       </div>
 
@@ -393,7 +409,7 @@ export default function AuditRecordEdit() {
         <div style={{ flex: 1 }}>
           {/* 基本信息 */}
           <Card title="基本信息" bordered={false} style={{ marginBottom: 16 }}>
-            <Form form={form} layout="vertical">
+            <Form form={form} layout="vertical" disabled={readOnly}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <Form.Item
                   name="audit_date"
@@ -450,7 +466,7 @@ export default function AuditRecordEdit() {
               title="检查项列表"
               bordered={false}
               style={{ marginBottom: 16 }}
-              extra={
+              extra={!readOnly ? (
                 <Space>
                   <Button
                     icon={<BulbOutlined />}
@@ -461,7 +477,7 @@ export default function AuditRecordEdit() {
                     AI 评估
                   </Button>
                 </Space>
-              }
+              ) : undefined}
             >
               <Table
                 columns={itemColumns}
@@ -475,7 +491,7 @@ export default function AuditRecordEdit() {
 
           {/* 审核结论 */}
           <Card title="审核结论" bordered={false}>
-            <Form form={form} layout="vertical">
+            <Form form={form} layout="vertical" disabled={readOnly}>
               <Form.Item
                 name="conclusion"
                 label="审核结论"
@@ -552,17 +568,18 @@ export default function AuditRecordEdit() {
             </Card>
           )}
 
-          {/* 操作提示 */}
-          <Card title="操作提示" size="small">
-            <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
-              <p>1. 选择检查模板或使用计划项关联模板</p>
-              <p>2. 填写审核日期和时间</p>
-              <p>3. 逐项填写检查结果</p>
-              <p>4. 点击详情可查看检查项详情、上传照片</p>
-              <p>5. 使用AI评估获取智能建议</p>
-              <p>6. 填写审核结论后保存</p>
-            </div>
-          </Card>
+          {!readOnly && (
+            <Card title="操作提示" size="small">
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.8 }}>
+                <p>1. 选择检查模板或使用计划项关联模板</p>
+                <p>2. 填写审核日期和时间</p>
+                <p>3. 逐项填写检查结果</p>
+                <p>4. 点击详情可查看检查项详情、上传照片</p>
+                <p>5. 使用AI评估获取智能建议</p>
+                <p>6. 填写审核结论后保存</p>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -609,6 +626,7 @@ export default function AuditRecordEdit() {
                 </div>
                 <Select
                   value={selectedItem.radio_value}
+                  disabled={readOnly}
                   onChange={(value) => handleItemChange(selectedItem, 'radio_value', value)}
                   style={{ width: '100%' }}
                   placeholder="选择检查结果"
@@ -625,6 +643,7 @@ export default function AuditRecordEdit() {
                   rows={3}
                   placeholder="请输入审核证据"
                   value={selectedItem.audit_evidence || ''}
+                  readOnly={readOnly}
                   onChange={(e) => handleItemChange(selectedItem, 'audit_evidence', e.target.value)}
                 />
               </div>
@@ -639,6 +658,7 @@ export default function AuditRecordEdit() {
                     rows={3}
                     placeholder="请描述发现的问题"
                     value={selectedItem.audit_findings || ''}
+                    readOnly={readOnly}
                     onChange={(e) => handleItemChange(selectedItem, 'audit_findings', e.target.value)}
                   />
                 </div>
@@ -650,6 +670,7 @@ export default function AuditRecordEdit() {
                   rows={2}
                   placeholder="请输入审核记录"
                   value={selectedItem.inspector_note || ''}
+                  readOnly={readOnly}
                   onChange={(e) => handleItemChange(selectedItem, 'inspector_note', e.target.value)}
                 />
               </div>
@@ -664,9 +685,11 @@ export default function AuditRecordEdit() {
                       <span style={{ color: '#ff4d4f', fontSize: 12, marginLeft: 8 }}>（必填）</span>
                     )}
                   </div>
-                  <Upload {...uploadProps}>
-                    <Button icon={<CameraOutlined />}>上传照片</Button>
-                  </Upload>
+                  {!readOnly && (
+                    <Upload {...uploadProps}>
+                      <Button icon={<CameraOutlined />}>上传照片</Button>
+                    </Upload>
+                  )}
                   {selectedItem.photos && selectedItem.photos.length > 0 && (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
                       <Image.PreviewGroup>

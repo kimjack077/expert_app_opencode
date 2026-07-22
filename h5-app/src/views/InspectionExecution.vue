@@ -1266,13 +1266,6 @@ const onQuickInput = async (item, field, value) => {
 }
 
 const goToItem = (item) => {
-  // 任务模式使用列表快速录入（与 Web 任务数据链一致），暂不进入记录明细页
-  if (executionMode.value === 'task') {
-    currentItemId.value = item.id
-    showToast('请在当前页快速填写检查结果')
-    return
-  }
-
   currentItemId.value = item.id
   const recordItem = record.value?.items?.find(i =>
     i.template_item_id === item.id || i.id === item.id

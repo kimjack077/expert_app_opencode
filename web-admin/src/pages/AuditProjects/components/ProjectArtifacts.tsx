@@ -119,8 +119,8 @@ export default function ProjectArtifacts({ projectId }: Props) {
   const [downloadingId, setDownloadingId] = useState<string>()
   const [downloadingPackage, setDownloadingPackage] = useState(false)
 
-  const fetchData = async () => {
-    setLoading(true)
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const [artifactResult, sessionResult] = await Promise.allSettled([
         projectArtifactApi.list(projectId),
@@ -148,13 +148,22 @@ export default function ProjectArtifacts({ projectId }: Props) {
     } catch (error: any) {
       message.error(getErrorMessage(error, '获取项目成果失败'))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchData()
   }, [projectId])
+
+  const trackGenerationJob = (response: any) => {
+    const job = unwrap(response) as ProjectArtifact | undefined
+    if (!job?.id) return
+    setArtifacts((current) => [
+      job,
+      ...current.filter((item) => item.id !== job.id),
+    ])
+  }
 
   const handleQualityCheck = async () => {
     setChecking(true)
@@ -179,9 +188,11 @@ export default function ProjectArtifacts({ projectId }: Props) {
       setQuality(latestQuality)
       if (!latestQuality.passed) {
         message.warning('质量门禁未通过，请先处理阻断项')
+        setGenerating(false)
         return
       }
-      await projectArtifactApi.generate(projectId)
+      const generationResponse = await projectArtifactApi.generate(projectId, { artifact_types: ['package'], force: true })
+      trackGenerationJob(generationResponse)
       message.success('成果生成任务已创建，可在列表中查看进度')
       await fetchData()
     } catch (error: any) {
@@ -194,12 +205,37 @@ export default function ProjectArtifacts({ projectId }: Props) {
     if (!artifact.id) return
     setGenerating(true)
     try {
-      await projectArtifactApi.retry(projectId, artifact.id)
+      const retryResponse = await projectArtifactApi.retry(projectId, artifact.id)
+      trackGenerationJob(retryResponse)
       message.success('失败任务已重新提交')
       await fetchData()
     } catch (error: any) {
       setGenerating(false)
       message.error(getErrorMessage(error, '重试成果生成失败'))
+    }
+  }
+
+  const handleGeneratePackage = async () => {
+    setGenerating(true)
+    try {
+      const qualityResponse = await projectArtifactApi.qualityCheck(projectId)
+      const qualityPayload = unwrap(qualityResponse) || {}
+      const latestQuality = qualityPayload.quality_check || qualityPayload.quality || qualityPayload
+      setQuality(latestQuality)
+      if (!latestQuality.passed) {
+        message.warning('质量门禁未通过，请先处理阻断项')
+        setGenerating(false)
+        return false
+      }
+      const generationResponse = await projectArtifactApi.generate(projectId, { artifact_types: ['package'], force: true })
+      trackGenerationJob(generationResponse)
+      message.success('完整资料包重新生成任务已创建，完成后将生成新版本')
+      await fetchData()
+      return true
+    } catch (error: any) {
+      setGenerating(false)
+      message.error(getErrorMessage(error, '创建完整资料包生成任务失败'))
+      return false
     }
   }
 
@@ -225,7 +261,12 @@ export default function ProjectArtifacts({ projectId }: Props) {
       const status = error?.response?.status
       const msg = getErrorMessage(error, '下载成果失败')
       if (status === 404 || /不存在|missing|not found/i.test(msg)) {
-        message.error('文件缺失或尚未生成，请点击「重试生成」后再下载')
+        if ((artifact.artifact_type || artifact.type) === 'package') {
+          message.warning('历史资料包文件不可用，正在创建新的资料包版本')
+          await handleGeneratePackage()
+        } else {
+          message.error('成果文件缺失，请重新生成项目成果后再下载')
+        }
       } else {
         message.error(msg)
       }
@@ -239,24 +280,8 @@ export default function ProjectArtifacts({ projectId }: Props) {
       .filter((item) => item.artifact_type === 'package' && ['completed', 'ready'].includes(item.status || ''))
       .sort((left, right) => Number(right.version || 0) - Number(left.version || 0))[0]
 
-    if (!latestPackage) {
-      setGenerating(true)
-      try {
-        const qualityResponse = await projectArtifactApi.qualityCheck(projectId)
-        const qualityPayload = unwrap(qualityResponse) || {}
-        const latestQuality = qualityPayload.quality_check || qualityPayload.quality || qualityPayload
-        setQuality(latestQuality)
-        if (!latestQuality.passed) {
-          message.warning('质量门禁未通过，请先处理阻断项')
-          return
-        }
-        await projectArtifactApi.generate(projectId, { artifact_types: ['package'] })
-        message.success('完整资料包生成任务已创建，可在列表中查看进度并在完成后下载')
-        await fetchData()
-      } catch (error: any) {
-        setGenerating(false)
-        message.error(getErrorMessage(error, '创建完整资料包生成任务失败'))
-      }
+    if (!latestPackage || latestPackage.available === false) {
+      await handleGeneratePackage()
       return
     }
 
@@ -335,16 +360,25 @@ export default function ProjectArtifacts({ projectId }: Props) {
     [sessions]
   )
 
-  const activeGenerationKey = artifacts
-    .filter((item) => item.artifact_type === 'generation_job' && ['pending', 'generating'].includes(item.status || ''))
-    .map((item) => `${item.id}:${item.status}:${item.progress}`)
-    .join('|')
+  const hasActiveGeneration = artifacts.some((item) =>
+    item.artifact_type === 'generation_job' &&
+    ['pending', 'generating'].includes(item.status || '')
+  )
 
   useEffect(() => {
-    if (!activeGenerationKey) return
-    const timer = window.setTimeout(fetchData, 1500)
-    return () => window.clearTimeout(timer)
-  }, [activeGenerationKey, projectId])
+    if (!hasActiveGeneration) return
+    let requestInFlight = false
+    const timer = window.setInterval(async () => {
+      if (requestInFlight) return
+      requestInFlight = true
+      try {
+        await fetchData(true)
+      } finally {
+        requestInFlight = false
+      }
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [hasActiveGeneration, projectId])
 
   const columns: TableColumnsType<ProjectArtifact> = [
     {
@@ -364,8 +398,11 @@ export default function ProjectArtifacts({ projectId }: Props) {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (value?: string) => {
-        const config = statusConfig[value || 'pending'] || { text: value || '待生成', color: 'default' }
+      render: (value: string | undefined, artifact) => {
+        const isMissing = artifact.artifact_type !== 'generation_job' && artifact.available === false
+        const config = isMissing
+          ? statusConfig.missing
+          : statusConfig[value || 'pending'] || { text: value || '待生成', color: 'default' }
         return <Tag color={config.color}>{config.text}</Tag>
       },
     },
@@ -412,11 +449,21 @@ export default function ProjectArtifacts({ projectId }: Props) {
             </Button>
           ) : <Text type="secondary">{artifact.status === 'completed' ? '已完成' : '处理中'}</Text>
         }
-        const canDownload = Boolean(artifactId) && (
-          artifact.available === true ||
-          !artifact.status ||
-          ['completed', 'ready'].includes(artifact.status)
-        )
+        const isMissingPackage = artifact.artifact_type === 'package' && artifact.available === false
+        if (isMissingPackage) {
+          return (
+            <Button
+              icon={<ReloadOutlined />}
+              loading={generating}
+              onClick={handleGeneratePackage}
+            >
+              重新生成
+            </Button>
+          )
+        }
+        const canDownload = Boolean(artifactId) &&
+          artifact.available !== false &&
+          (!artifact.status || ['completed', 'ready'].includes(artifact.status))
         return (
           <Button
             icon={<CloudDownloadOutlined />}
@@ -443,7 +490,7 @@ export default function ProjectArtifacts({ projectId }: Props) {
           </Col>
           <Col>
             <Space wrap>
-              <Button icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>刷新</Button>
+              <Button icon={<ReloadOutlined />} onClick={() => fetchData()} loading={loading}>刷新</Button>
               <Button
                 icon={<SafetyCertificateOutlined />}
                 loading={checking}

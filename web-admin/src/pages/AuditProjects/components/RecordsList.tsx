@@ -44,8 +44,25 @@ export default function RecordsList({ projectId }: Props) {
     navigate(`/inspection/${taskId}`)
   }
 
-  const handleViewRecord = (recordId: string) => {
+  const handleEditRecord = (recordId: string) => {
     navigate(`/audit-projects/${projectId}/records/${recordId}`)
+  }
+
+  const handleViewRecord = (recordId: string) => {
+    navigate(`/audit-projects/${projectId}/records/${recordId}?mode=view`)
+  }
+
+  const handleViewPlanRecord = (planItem: any) => {
+    const matchingRecord = records.find((record) => (
+      record.plan_item_id === planItem.id || record.plan_item?.id === planItem.id
+    ))
+
+    if (!matchingRecord) {
+      message.warning('未找到该检查任务对应的审核记录')
+      return
+    }
+
+    handleViewRecord(matchingRecord.id)
   }
 
   const inspectionTaskColumns = [
@@ -80,17 +97,30 @@ export default function RecordsList({ projectId }: Props) {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 180,
       render: (_: any, record: any) => (
         <Space>
           <Button
             type="link"
             size="small"
             icon={record.status === 'completed' ? <EyeOutlined /> : <EditOutlined />}
-            onClick={() => handleViewTask(record.inspection_task_id)}
+            onClick={() => record.status === 'completed'
+              ? handleViewPlanRecord(record)
+              : handleViewTask(record.inspection_task_id)
+            }
           >
-            {record.status === 'completed' ? '查看/修改检查' : '执行检查'}
+            {record.status === 'completed' ? '查看' : '执行检查'}
           </Button>
+          {record.status === 'completed' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => handleViewTask(record.inspection_task_id)}
+            >
+              修改
+            </Button>
+          )}
           {record.status === 'completed' && (
             <Tag color="success" icon={<CheckCircleOutlined />}>已提交</Tag>
           )}
@@ -132,7 +162,7 @@ export default function RecordsList({ projectId }: Props) {
             type="link"
             size="small"
             icon={<EditOutlined />}
-            onClick={() => handleViewRecord(record.id)}
+            onClick={() => handleEditRecord(record.id)}
           >
             编辑
           </Button>

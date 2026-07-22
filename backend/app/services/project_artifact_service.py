@@ -8,7 +8,6 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
 from uuid import UUID
 
 from docx import Document
@@ -30,6 +29,7 @@ from app.models.evidence_agent import AiDraftRecord
 from app.models.project_artifact import ProjectArtifact
 from app.models.project_knowledge import ProjectDocument
 from app.services.report_generator import generate_audit_report_word
+from app.utils.storage_path import resolve_storage_path, storage_key
 
 
 def _safe_name(value: str) -> str:
@@ -745,8 +745,8 @@ class ProjectArtifactService:
             for document in documents:
                 if self._is_quarantined_metadata(document.document_metadata):
                     continue
-                path = Path(document.stored_path)
-                if path.is_file():
+                path = resolve_storage_path(document.stored_path)
+                if path:
                     folder = self._document_archive_folder(document)
                     add_bytes(f"{folder}/{_safe_name(document.original_filename)}", path.read_bytes())
             folder_map = {
@@ -757,8 +757,8 @@ class ProjectArtifactService:
                 "manifest": "I案卷检查表",
             }
             for artifact in self._latest_artifacts(artifacts):
-                path = Path(artifact.path)
-                if not path.is_file():
+                path = resolve_storage_path(artifact.path)
+                if not path:
                     continue
                 # 避免与上方固定路径的完整性 Word 重复塞两份
                 if artifact.artifact_type == "manifest":
@@ -784,7 +784,7 @@ class ProjectArtifactService:
         versioned_name = f"v{version}_{_safe_name(filename)}"
         path = directory / versioned_name
         path.write_bytes(content)
-        artifact = ProjectArtifact(project_id=project.id, artifact_type=artifact_type, path=str(path.resolve()), filename=filename, mime_type=mime_type, file_size=len(content), checksum_sha256=hashlib.sha256(content).hexdigest(), version=version, source_snapshot=snapshot, status="ready", progress=100, created_by=created_by)
+        artifact = ProjectArtifact(project_id=project.id, artifact_type=artifact_type, path=storage_key(path), filename=filename, mime_type=mime_type, file_size=len(content), checksum_sha256=hashlib.sha256(content).hexdigest(), version=version, source_snapshot=snapshot, status="ready", progress=100, created_by=created_by)
         db.add(artifact)
         await db.flush()
         return artifact
@@ -1046,49 +1046,7 @@ class ProjectArtifactService:
 
     @staticmethod
     def _resolve_upload_path(reference: Any) -> Path | None:
-        if isinstance(reference, dict):
-            reference = next(
-                (
-                    reference.get(key)
-                    for key in ("stored_path", "path", "url", "file_path")
-                    if reference.get(key)
-                ),
-                None,
-            )
-        if not reference or not isinstance(reference, (str, Path)):
-            return None
-
-        raw = str(reference).strip()
-        parsed = urlparse(raw)
-        if parsed.scheme and parsed.scheme not in {"file"}:
-            return None
-        path_text = unquote(parsed.path or raw).replace("\\", "/")
-        upload_root = Path(settings.UPLOAD_DIR).resolve()
-        candidates: list[Path] = []
-        supplied = Path(path_text)
-        if supplied.is_absolute():
-            candidates.append(supplied)
-        normalized_parts = [part for part in path_text.strip("/").split("/") if part]
-        if upload_root.name in normalized_parts:
-            index = normalized_parts.index(upload_root.name)
-            candidates.append(
-                upload_root.parent.joinpath(*normalized_parts[index:])
-            )
-        candidates.extend(
-            [
-                upload_root.joinpath(*normalized_parts),
-                upload_root.parent.joinpath(*normalized_parts),
-            ]
-        )
-        for candidate in candidates:
-            try:
-                resolved = candidate.resolve()
-                resolved.relative_to(upload_root)
-            except (OSError, ValueError):
-                continue
-            if resolved.is_file():
-                return resolved
-        return None
+        return resolve_storage_path(reference)
 
     @staticmethod
     def _meeting_docx(project: AuditProject, meeting: dict[str, Any]) -> bytes:

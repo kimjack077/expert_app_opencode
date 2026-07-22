@@ -100,12 +100,7 @@ class ArtifactGenerateRequest(BaseModel):
     artifact_types: list[
         Literal["area_record", "audit_report", "nc_summary", "manifest", "package"]
     ] = Field(
-        default_factory=lambda: [
-            "area_record",
-            "audit_report",
-            "nc_summary",
-            "manifest",
-        ]
+        default_factory=lambda: ["package"]
     )
     area_record_id: Optional[UUID] = None
     force: bool = False
