@@ -932,6 +932,10 @@ const fetchRecord = async () => {
       error?.message ||
       '获取记录失败'
     showToast(typeof msg === 'string' ? msg : '获取记录失败')
+    // 详细日志以便调试
+    if (error.response) {
+      console.error('完整错误:', error.response.data)
+    }
   } finally {
     loading.value = false
   }

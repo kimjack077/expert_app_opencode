@@ -195,15 +195,15 @@ onMounted(() => {
 .audit-tasks-page {
   min-height: 100vh;
   background-color: var(--bg-gray);
-  padding-bottom: 20px;
+  padding-bottom: 12px;
 }
 
 .empty-state {
-  padding: 60px 0;
+  padding: 40px 0;
 }
 
 .task-card {
-  margin: 12px;
+  margin: 6px;
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg-white);
@@ -214,7 +214,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
+  padding: 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -225,18 +225,14 @@ onMounted(() => {
 }
 
 .task-info {
-  padding: 12px 16px;
+  padding: 10px 12px;
 }
 
 .info-row {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   font-size: 14px;
-}
-
-.info-row:last-child {
-  margin-bottom: 0;
 }
 
 .label {
@@ -255,7 +251,7 @@ onMounted(() => {
 }
 
 .task-actions {
-  padding: 12px 16px;
+  padding: 10px 12px;
   border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: flex-end;

@@ -997,9 +997,15 @@ const saveItem = async () => {
     }
 
     const saveData = {
-      id: itemData.value.id,
-      template_item_id: itemData.value.template_item_id,
-      ...formData.value,
+      template_item_id: itemData.value.template_item_id || itemData.value.id,
+      radio_value: formData.value.radio_value,
+      text_value: formData.value.text_value,
+      numeric_value: formData.value.numeric_value,
+      score_value: formData.value.score_value,
+      multi_value: formData.value.multi_value || [],
+      problem_description: formData.value.problem_description,
+      inspector_note: formData.value.inspector_note,
+      photos: formData.value.photos || []
     }
 
     await request.post(`/records/${recordId}/items`, saveData)

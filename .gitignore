@@ -95,6 +95,12 @@ alembic/versions/*.pyc
 uploads/
 media/
 
+# Temporary test/data files
+*.json
+*.bat
+*.pyc
+*.png
+
 # Deployment and test scripts
 deploy.py
 redeploy_h5.py

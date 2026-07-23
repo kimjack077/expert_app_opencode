@@ -700,10 +700,10 @@ async def get_record(
                 else None,
                 "radio_value": i.radio_value,
                 "score_value": float(i.score_value)
-                if i.score_value is not None
+                if i.score_value is not None and i.score_value != ""
                 else None,
                 "numeric_value": float(i.numeric_value)
-                if i.numeric_value is not None
+                if i.numeric_value is not None and i.numeric_value != ""
                 else None,
                 "text_value": i.text_value,
                 "multi_value": i.multi_value or [],
