@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
+from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -92,9 +93,8 @@ class TaskService:
         target_address: Optional[str] = None,
         scheduled_at: Optional[datetime] = None,
     ) -> InspectionTask:
-        count_result = await db.execute(select(func.count(InspectionTask.id)))
-        count = count_result.scalar() or 0
-        task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{count + 1:04d}"
+        # 同 routers/tasks.py：count(*)+1 并发会撞号，改用随机短码
+        task_no = f"TASK-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:6].upper()}"
 
         task = InspectionTask(
             task_no=task_no,

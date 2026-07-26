@@ -8,7 +8,7 @@ Audit Statistics API Router
 - 不符合项分析
 - 审核员工作量统计
 """
-from datetime import datetime, timedelta, date
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ def make_response(data=None, code: int = 200, message: str = "success") -> ApiRe
         code=code,
         message=message,
         data=data,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
     )
 
 
@@ -55,7 +55,7 @@ async def get_overview_statistics(
     - completed: 已完成项目数
     - this_month: 本月新增项目数
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     month_start = datetime(now.year, now.month, 1)
 
     # 使用单个查询获取所有统计数据
@@ -163,7 +163,7 @@ async def get_project_trend(
 
     返回：[{month, created, completed}] 格式的趋势数据
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     data = []
 
     for i in range(months - 1, -1, -1):
@@ -362,7 +362,7 @@ async def get_nc_trend(
 
     返回：[{month, total, major, minor, observation}] 格式的趋势数据
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     data = []
 
     for i in range(months - 1, -1, -1):

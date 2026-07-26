@@ -89,6 +89,14 @@ class AgentMemory(Base):
     last_accessed_at = Column(DateTime(timezone=True))
     expires_at = Column(DateTime(timezone=True), comment="Optional expiration time")
     extra_data = Column(Text, comment="Additional metadata (JSON)")
+    # 长期记忆作用域（#5）：企业级记忆记录"这家企业反复出现的问题"，
+    # 跨会话、跨审核员复用；项目级记忆绑定单个审核项目。均可空。
+    enterprise_id = Column(UUID(as_uuid=True), nullable=True, comment="企业级记忆归属企业")
+    project_id = Column(UUID(as_uuid=True), nullable=True, comment="项目级记忆归属项目")
+    scope = Column(
+        String(20), nullable=False, default="user", server_default="user",
+        comment="记忆作用域：user/enterprise/project",
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationship

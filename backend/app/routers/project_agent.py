@@ -33,24 +33,24 @@ from app.schemas.project_agent import (
     EvidenceSubmitRequest,
     ManualRecordCreateRequest,
 )
+from app.services.agent_feedback_service import agent_feedback_service
+from app.services.agent_memory_service import agent_memory_service
 from app.services.evidence_agent_service import EvidenceCandidate, evidence_agent_service
-from app.services.project_access_service import ensure_project_access
+from app.services.multimodal_service import multimodal_service
+from app.services.project_access_service import PRIVILEGED_ROLES, ensure_project_access
 from app.services.project_artifact_service import project_artifact_service
 from app.services.project_knowledge_service import project_knowledge_service
-from app.utils.file_handler import save_upload_file
+from app.utils.file_handler import enforce_magic_bytes, save_upload_file
+from app.utils.response import make_response
 from app.utils.storage_path import resolve_storage_path, storage_key
+from app.services.project_document_parser import SUPPORTED_PROJECT_EXTENSIONS
 
 
 router = APIRouter(prefix="/api/audit-projects", tags=["project-agent"])
 
 
 def response(data: Any = None, message: str = "success") -> dict[str, Any]:
-    return {
-        "code": 200,
-        "message": message,
-        "data": data,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
+    return make_response(data=data, message=message)
 
 
 async def _document_project_context(
@@ -367,6 +367,15 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
     if len(content) > settings.PROJECT_DOCUMENT_MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="文件超过允许大小")
     filename = Path(file.filename or "project-document").name
+    # 落盘前校验扩展名与真实文件头。原先直接写盘、把类型判断留给解析器，
+    # 等于任何类型的文件都能先进 uploads/ 目录。
+    extension = Path(filename).suffix.lower()
+    if extension not in SUPPORTED_PROJECT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的项目资料格式: {extension or '未知'}",
+        )
+    enforce_magic_bytes(content, extension)
     directory = Path(settings.UPLOAD_DIR) / "audit_projects" / str(project_id) / "documents"
     directory.mkdir(parents=True, exist_ok=True)
     stored_name = f"{hashlib.sha256(content).hexdigest()[:16]}_{filename}"
@@ -550,6 +559,19 @@ async def _load_session(db: AsyncSession, project_id: UUID, session_id: UUID, ch
     return item
 
 
+def _ensure_can_confirm_session(session: AiAuditSession, user: User) -> None:
+    """确认 AI 草稿 = 生成有法律效力的正式记录，需限定执行人。
+
+    项目成员之间不应互相确认对方的 AI 草稿（审核职责分离）。
+    平台管理角色保留兜底权限。
+    """
+    if user.role in PRIVILEGED_ROLES:
+        return
+    if session.created_by and str(session.created_by) == str(user.id):
+        return
+    raise HTTPException(status_code=403, detail="只能确认本人发起的审核会话草稿")
+
+
 @router.get("/{project_id}/sessions/{session_id}")
 async def get_session(project_id: UUID, session_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     await ensure_project_access(db, project_id, current_user)
@@ -695,7 +717,42 @@ async def submit_evidence(project_id: UUID, session_id: UUID, payload: EvidenceS
             status_code=422,
             detail="当前审核计划未绑定可用检查项（或模板无检查项），无法生成多条款 AI 记录。请在计划中绑定带检查项的模板。",
         )
-    results = await evidence_agent_service.analyze(payload.content, candidates, citations)
+
+    # 多模态融合（#7）：先用视觉模型分析随证据一起提交的现场照片，
+    # 把识别出的问题作为客观证据的一部分喂进多条款判定，而不是仅存为附件。
+    photo_findings: list[dict[str, Any]] = []
+    for media in media_rows:
+        if not (media.mime_type or "").startswith("image/"):
+            continue
+        try:
+            pa = await multimodal_service.analyze_photo(
+                str(media.id), db, analysis_type="compliance"
+            )
+            if isinstance(pa, dict) and not pa.get("error"):
+                photo_findings.append({
+                    "media_file_id": str(media.id),
+                    "filename": media.original_name,
+                    "description": pa.get("description", ""),
+                    "issues": pa.get("issues", []),
+                })
+        except Exception as exc:  # 照片分析失败不阻断文字判定
+            print(f"[Evidence] photo analysis skipped for {media.id}: {exc}")
+
+    # 反馈回流（#1）：取该体系近期被拒绝的判定作为负面 few-shot
+    systems = {c.certification_system for c in candidates if getattr(c, "certification_system", None)}
+    feedback_hints = await agent_feedback_service.few_shot_examples(
+        db, certification_system=next(iter(systems), None), limit=3
+    )
+
+    results = await evidence_agent_service.analyze(
+        payload.content,
+        candidates,
+        citations,
+        db=db,
+        user_id=str(current_user.id),
+        photo_findings=photo_findings or None,
+        feedback_hints=feedback_hints or None,
+    )
 
     # Load existing drafts so re-generation supersedes same-clause history instead of stacking
     existing_drafts = (
@@ -765,7 +822,11 @@ async def submit_evidence(project_id: UUID, session_id: UUID, payload: EvidenceS
             status="draft",
             model_provider=settings.LLM_PROVIDER,
             model_name=settings.LLM_MODEL,
-            prompt_version="evidence-multiclause-v2",
+            # 溯源：版本号与 call log id 均由分析服务随结果返回，
+            # 不再在这里硬编码字面量（硬编码会与真实提示词脱节）。
+            prompt_version=result.get("_prompt_version")
+            or evidence_agent_service.prompt_fingerprint(),
+            llm_call_log_id=result.get("_llm_call_log_id"),
         )
         db.add(draft)
         drafts.append(draft)
@@ -1011,26 +1072,94 @@ async def _session_quality(session: AiAuditSession) -> dict[str, Any]:
     return {"passed": not blockers, "blockers": blockers, "warnings": warnings, "blocking_count": len(blockers), "warning_count": len(warnings), "confirmed_ai_count": confirmed_ai_count, "manual_record_count": manual_record_count, "confirmed_record_count": confirmed_ai_count + manual_record_count}
 
 
-@router.post("/{project_id}/sessions/{session_id}/drafts/confirm")
-async def confirm_drafts(project_id: UUID, session_id: UUID, payload: DraftConfirmRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await ensure_project_access(db, project_id, current_user); session = await _load_session(db, project_id, session_id, True)
+async def perform_draft_confirmation(
+    db: AsyncSession,
+    project_id: UUID,
+    session_id: UUID,
+    payload: DraftConfirmRequest,
+    current_user: User,
+) -> dict[str, Any]:
+    """确认/驳回 AI 草稿的核心能力函数。
+
+    路由与 Agent 动作注册表共用同一份实现，避免同一业务规则出现两份。
+    """
+    await ensure_project_access(db, project_id, current_user)
+    session = await _load_session(db, project_id, session_id, True)
+
+    # 审核职责：确认 AI 草稿会生成有法律效力的正式记录与不符合项，
+    # 只允许该会话的发起人本人、项目负责人或平台管理角色执行。
+    _ensure_can_confirm_session(session, current_user)
+
+    # 用于把确认的不符合项写入企业级长期记忆（#5）
+    _project = await db.get(AuditProject, project_id)
+    _project_enterprise_id = _project.enterprise_id if _project else None
+
     # P1-6 修复：兼容 draft_id 单数误用情况
     resolved_ids = payload.resolve_draft_ids()
     selected = [draft for draft in session.drafts if draft.status == "draft" and (draft.id in resolved_ids or payload.safe_only)]
+
+    # 幂等闸：对候选草稿加行锁并强制刷新状态后再判定。
+    # 否则重复点击 / 客户端重试会并发通过 status=="draft" 检查，
+    # 生成重复的 InspectionRecordItem 与重复的 Nonconformity。
+    if selected:
+        locked = (
+            await db.execute(
+                select(AiDraftRecord)
+                .where(AiDraftRecord.id.in_([d.id for d in selected]))
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalars().all()
+        still_pending = {d.id for d in locked if d.status == "draft"}
+        selected = [d for d in selected if d.id in still_pending]
     if payload.safe_only: selected = [draft for draft in selected if str(draft.evaluation) != "3" and float(draft.confidence or 0) >= .7 and (draft.quality or {}).get("level") == "sufficient" and not (draft.quality or {}).get("attachment_missing") and (draft.quality or {}).get("model_status") != "fallback"]
     overrides = {item.draft_id: item for item in payload.overrides}; confirmed=[]
     for draft in selected:
         if payload.action == "reject": draft.status="rejected"; draft.confirmed_by=current_user.id; draft.confirmed_at=datetime.now(timezone.utc); continue
         override=overrides.get(draft.id); record_payload={**(draft.record_payload or {})}
+        # 反馈信号（#1）：审核员对本条草稿做了实质改动则标记 was_edited，
+        # 用于区分"AI 直接对 / 半对（被改）"，喂给采纳率统计与提示词回流。
+        edited = False
         if override:
             for key in ("evaluation_3level", "audit_evidence", "audit_findings", "rectification_suggestion"):
-                value=getattr(override, key); record_payload[key]=value if value is not None else record_payload.get(key)
+                value=getattr(override, key)
+                if value is not None and value != record_payload.get(key):
+                    edited = True
+                record_payload[key]=value if value is not None else record_payload.get(key)
+        draft.was_edited = edited
         item = InspectionRecordItem(audit_area_record_id=draft.area_record_id, template_item_id=UUID(record_payload["template_item_id"]) if record_payload.get("template_item_id") else None, result="fail" if record_payload.get("evaluation_3level") == "3" else "pass", result_text=record_payload.get("audit_findings") or record_payload.get("audit_evidence"), problem_description=record_payload.get("audit_findings"), rectification_suggestion=record_payload.get("rectification_suggestion"), audit_evidence=record_payload.get("audit_evidence"), evaluation_3level=record_payload.get("evaluation_3level") or draft.evaluation, audit_findings=record_payload.get("audit_findings"), certification_system=draft.certification_system, clause_no_snapshot=draft.primary_clause_no, ai_generated=True, ai_suggestion=draft.reasoning, ai_basis="; ".join(str(c.get("document_title") or c.get("file_name") or "项目资料") for c in draft.citations or []), photos=record_payload.get("photo_paths") or [], item_title=(draft.clause_refs or [{}])[0].get("title"), item_risk_level=record_payload.get("risk_level"), item_check_type="audit_3level", item_attachment_required=record_payload.get("attachment_required"), item_use_ai=True)
         db.add(item); await db.flush(); draft.status="confirmed"; draft.confirmed_by=current_user.id; draft.confirmed_at=datetime.now(timezone.utc); draft.confirmed_record_item_id=item.id; confirmed.append(draft)
         if str(item.evaluation_3level) == "3":
-            nc = Nonconformity(project_id=project_id, plan_item_id=draft.plan_item_id, area_record_id=draft.area_record_id, record_item_id=item.id, nc_no=f"AI-{str(draft.id)[:8].upper()}", severity="minor", certification_system=draft.certification_system, clause_no=draft.primary_clause_no, description=item.audit_findings or item.audit_evidence or "AI 识别的不符合项", evidence=item.audit_evidence, corrective_action_required=item.rectification_suggestion or "请分析原因并完成整改", status="draft", created_by=current_user.id, source_draft_id=draft.id)
+            nc = Nonconformity(project_id=project_id, plan_item_id=draft.plan_item_id, area_record_id=draft.area_record_id, record_item_id=item.id, nc_no=f"AI-{str(draft.id).replace('-', '')[:12].upper()}", severity="minor", certification_system=draft.certification_system, clause_no=draft.primary_clause_no, description=item.audit_findings or item.audit_evidence or "AI 识别的不符合项", evidence=item.audit_evidence, corrective_action_required=item.rectification_suggestion or "请分析原因并完成整改", status="draft", created_by=current_user.id, source_draft_id=draft.id)
             db.add(nc)
-    await db.commit(); return response({"confirmed": [str(item.id) for item in confirmed], "count": len(confirmed), "requested_ids": [str(i) for i in resolved_ids]}, "AI 草稿已处理")
+            # 长期记忆（#5）：确认的不符合项沉淀为企业级记忆，下次审核该企业时带入简报
+            if _project_enterprise_id:
+                await agent_memory_service.remember_enterprise(
+                    db,
+                    enterprise_id=_project_enterprise_id,
+                    user_id=current_user.id,
+                    content=f"条款 {draft.primary_clause_no or '?'}（{draft.certification_system or ''}）曾判不符合：{(item.audit_findings or item.audit_evidence or '')[:120]}",
+                )
+    await db.commit()
+    return {
+        "confirmed": [str(item.id) for item in confirmed],
+        "count": len(confirmed),
+        "requested_ids": [str(i) for i in resolved_ids],
+    }
+
+
+@router.post("/{project_id}/sessions/{session_id}/drafts/confirm")
+async def confirm_drafts(
+    project_id: UUID,
+    session_id: UUID,
+    payload: DraftConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await perform_draft_confirmation(
+        db, project_id, session_id, payload, current_user
+    )
+    return response(result, "AI 草稿已处理")
 
 
 @router.post("/{project_id}/sessions/{session_id}/quality-check")

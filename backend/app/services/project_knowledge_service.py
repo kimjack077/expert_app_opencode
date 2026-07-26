@@ -3,9 +3,11 @@
 import json
 import math
 import re
+from functools import partial
 from typing import Any
 from uuid import UUID
 
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -31,17 +33,24 @@ class ProjectKnowledgeService:
         document.parse_error = None
         await db.flush()
         try:
-            parsed = project_document_parser.parse(content, document.original_filename)
+            # PDF/Word/Excel 解析是同步 CPU 密集操作，必须卸载到线程池，
+            # 否则会阻塞事件循环、卡住所有并发请求（含 Agent 的 SSE 流）。
+            parsed = await run_in_threadpool(
+                project_document_parser.parse, content, document.original_filename
+            )
             document.extracted_text = parsed.text
             document.document_metadata = {
                 **(document.document_metadata or {}),
                 **parsed.metadata,
             }
-            consistency = project_document_parser.analyze_consistency(
-                parsed.text,
-                expected_enterprise_name=expected_enterprise_name,
-                expected_industry_keywords=expected_industry_keywords,
-                filename=document.original_filename,
+            consistency = await run_in_threadpool(
+                partial(
+                    project_document_parser.analyze_consistency,
+                    parsed.text,
+                    expected_enterprise_name=expected_enterprise_name,
+                    expected_industry_keywords=expected_industry_keywords,
+                    filename=document.original_filename,
+                )
             )
             if consistency["recommended_quarantine"]:
                 document.document_metadata = {
@@ -84,7 +93,9 @@ class ProjectKnowledgeService:
                     "embedding_errors": [],
                 }
 
-            chunks = project_document_parser.chunk_text(parsed.text)
+            chunks = await run_in_threadpool(
+                project_document_parser.chunk_text, parsed.text
+            )
             errors: list[str] = []
             for index, chunk_text in enumerate(chunks):
                 embedding: list[float] | None = None

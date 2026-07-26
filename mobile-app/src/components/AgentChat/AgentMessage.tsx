@@ -44,6 +44,7 @@ function renderContent(content: string): { __html: string } {
 
 interface AgentMessageProps {
   message: ChatMessageState
+  /** 本条消息的动作提案未登记在服务端注册表中，只能复制手填。 */
   advisoryOnly?: boolean
   onConfirmAction: () => void
   onCancelAction: () => void

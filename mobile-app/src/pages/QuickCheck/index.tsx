@@ -193,14 +193,14 @@ const QuickCheck: React.FC = () => {
         </Button>
       </div>
 
-      {/* AI 助手：快速检查为本地模拟流程，暂无真实 record/task 关联，
-          因此始终以 advisory-only 模式展示建议，不提供一键写入 */}
+      {/* AI 助手：写回统一走 POST /api/agent/actions/confirm。快速检查没有
+          record/task 上下文，Agent 通常给不出可执行提案；若给出，也由服务端
+          动作注册表校验后执行，未登记的动作降级为"复制后手填" */}
       <AgentFab onClick={() => setShowAgentPanel(true)} />
       <AgentChatPanel
         visible={showAgentPanel}
         onClose={() => setShowAgentPanel(false)}
         context={{}}
-        advisoryOnly
       />
     </div>
   )

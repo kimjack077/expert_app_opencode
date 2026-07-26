@@ -1,7 +1,7 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -40,7 +40,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -52,19 +52,28 @@ async def get_tasks(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(InspectionTask).where(InspectionTask.is_deleted == False)  # noqa: E712
+    # 条件构建一次，分页与计数共用，保证 total 与实际可见数据一致
+    conditions = [InspectionTask.is_deleted == False]  # noqa: E712
 
-    if current_user.role == "expert":
-        query = query.where(InspectionTask.assigned_to == current_user.id)
+    if current_user.role not in RECORD_VIEW_ALL_ROLES:
+        conditions.append(InspectionTask.assigned_to == current_user.id)
 
     if status:
-        query = query.where(InspectionTask.status == status)
+        conditions.append(InspectionTask.status == status)
 
-    query = query.order_by(InspectionTask.created_at.desc()).offset(skip).limit(limit)
+    query = (
+        select(InspectionTask)
+        .where(*conditions)
+        .order_by(InspectionTask.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(query)
     tasks = result.scalars().all()
 
-    total = (await db.execute(select(func.count(InspectionTask.id)).where(InspectionTask.is_deleted == False))).scalar()  # noqa: E712
+    total = (
+        await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
+    ).scalar() or 0
 
     return make_response(
         data={
@@ -82,9 +91,9 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    count_result = await db.execute(select(func.count(InspectionTask.id)))
-    count = count_result.scalar() or 0
-    task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{count + 1:04d}"
+    # 不能用 count(*)+1：并发创建会生成相同编号（且会把软删行计入，删除后编号回退重复）。
+    # 改用随机短码，保证唯一且无需额外往返。
+    task_no = f"TASK-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:6].upper()}"
 
     task = InspectionTask(
         task_no=task_no,
@@ -189,9 +198,9 @@ async def update_task(
         if task_data.status:
             task.status = task_data.status
             if task_data.status == "in_progress":
-                task.started_at = datetime.utcnow()
+                task.started_at = datetime.now(timezone.utc)
             elif task_data.status == "completed":
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(timezone.utc)
                 # 检查是否有关联的审核计划项
                 try:
                     task_uuid = UUID(task_id)
@@ -213,7 +222,7 @@ async def update_task(
             setattr(task, key, value)
         # 如果管理员更新状态为 completed，也要同步审核计划项
         if task_data.status == "completed":
-            task.completed_at = datetime.utcnow()
+            task.completed_at = datetime.now(timezone.utc)
             try:
                 task_uuid = UUID(task_id)
                 plan_item_result = await db.execute(
@@ -272,7 +281,7 @@ async def start_task(
         raise HTTPException(status_code=400, detail="Task cannot be started")
 
     task.status = "in_progress"
-    task.started_at = datetime.utcnow()
+    task.started_at = datetime.now(timezone.utc)
 
     # 检查是否有关联的审核计划项，更新为进行中状态
     try:
@@ -332,7 +341,7 @@ async def complete_task(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     else:
         task.status = "completed"
-        task.completed_at = datetime.utcnow()
+        task.completed_at = datetime.now(timezone.utc)
 
     await db.commit()
 
@@ -516,7 +525,7 @@ async def create_or_update_record(
                 record.result_text = record_data.result_text
             if record_data.inspector_note is not None:
                 record.inspector_note = record_data.inspector_note
-            record.updated_at = datetime.utcnow()
+            record.updated_at = datetime.now(timezone.utc)
             await db.commit()
             await db.refresh(record)
             return make_response(
@@ -552,15 +561,17 @@ async def update_record(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    task = await db.get(InspectionTask, record.task_id)
-    if task:
-        if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
-            raise HTTPException(status_code=403, detail="Not authorized")
+    # 默认拒绝：父任务缺失（孤儿记录）时不能放行，否则任何登录用户都能改
+    task = await db.get(InspectionTask, record.task_id) if record.task_id else None
+    if not task:
+        raise HTTPException(status_code=404, detail="Parent task not found")
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     update_data = record_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(record, key, value)
-    record.updated_at = datetime.utcnow()
+    record.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(record)
@@ -579,6 +590,10 @@ async def get_task_summary(
     task = await db.get(InspectionTask, task_id)
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # 与 get_task / get_task_records 保持一致的访问控制（原先缺失导致可越权读他人任务汇总）
+    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     result = await db.execute(
         select(InspectionRecord)

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,7 +28,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 

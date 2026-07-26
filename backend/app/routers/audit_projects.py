@@ -2,7 +2,7 @@
 审核项目 API 路由
 Audit Projects API Routes
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.services.project_access_service import ensure_project_access
+from app.services.project_access_service import (
+    ensure_project_access,
+    project_visibility_condition,
+)
+from app.utils.response import utc_now_iso
 from app.services.project_artifact_service import project_artifact_service
 from app.services.report_generator import generate_audit_report_word, generate_audit_report_pdf
 from app.models.audit_project import (
@@ -73,7 +77,9 @@ def make_response(data=None, code=200, message="success"):
         "code": code,
         "message": message,
         "data": encoded_data,
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        # 统一时间戳格式；注意不能再手工拼 "Z"：
+        # 现在的时间已带 +00:00 偏移，再加 Z 会产出非法的 ISO8601。
+        "timestamp": utc_now_iso()
     }
 
 
@@ -194,6 +200,12 @@ async def list_audit_projects(
 ):
     """获取审核项目列表"""
     query = select(AuditProject).where(AuditProject.is_deleted == False)  # noqa: E712
+
+    # 可见性：非平台管理角色只能看到自己创建/负责/参与的项目。
+    # 缺少此过滤会导致任何登录用户都能枚举全部项目元数据。
+    visibility = project_visibility_condition(current_user)
+    if visibility is not None:
+        query = query.where(visibility)
 
     # 过滤条件
     conditions = []
@@ -1197,7 +1209,7 @@ async def ai_prepare_audit(
     """AI 审核准备建议"""
     await ensure_project_access(db, project_id, current_user)
     try:
-        result = await prepare_audit_with_ai(db, project_id)
+        result = await prepare_audit_with_ai(db, project_id, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1217,7 +1229,7 @@ async def ai_evaluate_evidence(
     """AI 证据充分性评估"""
     await ensure_project_access(db, project_id, current_user)
     try:
-        result = await evaluate_evidence_with_ai(db, evidence, clause_no, certification_system)
+        result = await evaluate_evidence_with_ai(db, evidence, clause_no, certification_system, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")
@@ -1232,7 +1244,7 @@ async def ai_generate_report(
     """AI 生成审核报告叙述性评价"""
     await ensure_project_access(db, project_id, current_user, require_manage=True)
     try:
-        result = await generate_report_with_ai(db, project_id)
+        result = await generate_report_with_ai(db, project_id, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -1252,7 +1264,7 @@ async def ai_suggest_nonconformity(
     """AI 建议不符合项"""
     await ensure_project_access(db, project_id, current_user)
     try:
-        result = await suggest_nc_with_ai(db, evidence, clause_no, certification_system)
+        result = await suggest_nc_with_ai(db, evidence, clause_no, certification_system, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")

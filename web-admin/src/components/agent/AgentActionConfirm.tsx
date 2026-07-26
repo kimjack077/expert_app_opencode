@@ -17,6 +17,12 @@ export interface AgentAction {
   title: string
   data: Record<string, unknown>
   status: 'pending' | 'confirmed' | 'cancelled' | 'failed'
+  /**
+   * 服务端持久化提案的定位坐标（来自 SSE 的 conversation / action_proposal 事件）。
+   * 确认时只回传这两个值，执行内容完全由服务端动作注册表决定。
+   */
+  messageId?: string
+  actionIndex?: number
 }
 
 interface Props {

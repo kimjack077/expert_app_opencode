@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 
@@ -50,14 +51,17 @@ class DocumentParser:
 
         text_content = ""
 
+        # 这些解析器是同步 CPU 密集操作（PyMuPDF / python-docx / openpyxl），
+        # 必须卸载到线程池；否则解析大文件期间整个事件循环被占用，
+        # 所有并发请求（含 Agent SSE 流）都会卡住。
         if ext == ".txt":
             text_content = self._parse_text(content)
         elif ext == ".pdf":
-            text_content = await self._parse_pdf(content)
+            text_content = await run_in_threadpool(self._parse_pdf, content)
         elif ext in [".doc", ".docx"]:
-            text_content = await self._parse_word(content, ext)
+            text_content = await run_in_threadpool(self._parse_word, content, ext)
         elif ext in [".xls", ".xlsx"]:
-            text_content = await self._parse_excel(content, ext)
+            text_content = await run_in_threadpool(self._parse_excel, content, ext)
         else:
             text_content = content.decode("utf-8", errors="ignore")
 
@@ -72,7 +76,7 @@ class DocumentParser:
             except UnicodeDecodeError:
                 return content.decode("utf-8", errors="ignore")
 
-    async def _parse_pdf(self, content: bytes) -> str:
+    def _parse_pdf(self, content: bytes) -> str:
         try:
             import fitz
             
@@ -95,7 +99,7 @@ class DocumentParser:
         except Exception as e:
             return f"[PDF解析失败: {str(e)}]"
 
-    async def _parse_word(self, content: bytes, ext: str) -> str:
+    def _parse_word(self, content: bytes, ext: str) -> str:
         try:
             from docx import Document
             
@@ -127,7 +131,7 @@ class DocumentParser:
         except Exception as e:
             return f"[Word解析失败: {str(e)}]"
 
-    async def _parse_excel(self, content: bytes, ext: str) -> str:
+    def _parse_excel(self, content: bytes, ext: str) -> str:
         try:
             import openpyxl
             

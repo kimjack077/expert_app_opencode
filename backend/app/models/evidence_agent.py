@@ -3,6 +3,7 @@
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -311,7 +312,17 @@ class AiDraftRecord(Base):
     rejected_reason = Column(Text)
     model_provider = Column(String(100))
     model_name = Column(String(100))
-    prompt_version = Column(String(50))
+    # prompt_version 现在带内容指纹（形如 "evidence-multiclause-v2+ab12cd34ef56"），
+    # 50 字符不够用，放宽到 100。
+    prompt_version = Column(String(100))
+    # 指向产生这条草稿的具体 LLM 调用，使已确认的审核结论可以完整复现：
+    # 提示词版本 + 模型 + 原始请求/响应 + token 用量。
+    # 多态关联到 llm_call_logs，不加外键约束以便日志表可独立归档清理。
+    llm_call_log_id = Column(UUID(as_uuid=True), nullable=True)
+    # 反馈信号（#1 反馈闭环）：确认时若审核员改动了 AI 生成内容则置 True。
+    # 区分"AI 直接对（confirmed 未改）/ 半对（confirmed 且 edited）/ 错（rejected）"，
+    # 是评估提示词质量、按条款统计采纳率的核心标注。
+    was_edited = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

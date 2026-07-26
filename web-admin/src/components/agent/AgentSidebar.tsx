@@ -11,8 +11,6 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 
-import { recordApi } from '@/services/api'
-import { nonconformityApi } from '@/services/auditProjectApi'
 import { useAuthStore } from '@/stores/auth'
 import AgentActionConfirm, { type AgentAction } from './AgentActionConfirm'
 import AgentMessageRenderer from './AgentMessageRenderer'
@@ -22,6 +20,69 @@ import './index.css'
 const { Text } = Typography
 const HISTORY_KEY = 'efis-agent-conversations-v2'
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+
+/**
+ * 服务端 `agent_actions` 注册表允许审核员在确认前覆写的字段。
+ * 其余键（record_id / item_id / project_id 等定位字段）由服务端提案决定，
+ * 客户端传了也会被丢弃，这里提前过滤以免产生"改了却没生效"的错觉。
+ */
+const OVERRIDABLE_FIELDS = new Set([
+  'result',
+  'verdict',
+  'problem_description',
+  'rectification_suggestion',
+  'comment',
+])
+
+/** 卡片内部用驼峰展示，服务端只认下划线。 */
+const OVERRIDE_ALIASES: Record<string, string> = {
+  problemDescription: 'problem_description',
+  rectificationSuggestion: 'rectification_suggestion',
+}
+
+/** 尚未进入服务端动作注册表、仍需走旧确认协议的动作。 */
+const LEGACY_CONFIRM_ACTIONS = new Set(['submit_audit_evidence'])
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+let actionRegistryPromise: Promise<string[]> | null = null
+
+/** 拉取一次服务端动作注册表并缓存；失败不缓存，下次确认时可重试。 */
+const loadActionRegistry = async (token?: string | null): Promise<string[]> => {
+  if (!actionRegistryPromise) {
+    actionRegistryPromise = fetch(`${API_BASE_URL}/api/agent/actions/registry`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('registry'))))
+      .then((body) => (Array.isArray(body?.data?.actions) ? body.data.actions.map(String) : []))
+      .catch(() => {
+        actionRegistryPromise = null
+        return [] as string[]
+      })
+  }
+  return actionRegistryPromise
+}
+
+const buildOverrides = (data?: Record<string, unknown>): Record<string, unknown> | undefined => {
+  if (!data) return undefined
+  const overrides: Record<string, unknown> = {}
+  Object.entries(data).forEach(([key, value]) => {
+    const field = OVERRIDE_ALIASES[key] || key
+    if (OVERRIDABLE_FIELDS.has(field) && value !== undefined) overrides[field] = value
+  })
+  return Object.keys(overrides).length > 0 ? overrides : undefined
+}
+
+/** 仅接受同源相对路径，返回解析后的 URL（用于严格前缀校验）。 */
+const parseRelativeEndpoint = (endpoint: string): URL | null => {
+  if (!endpoint.startsWith('/')) return null
+  try {
+    const url = new URL(endpoint, window.location.origin)
+    return url.origin === window.location.origin ? url : null
+  } catch {
+    return null
+  }
+}
 
 interface ToolCall {
   name: string
@@ -274,6 +335,9 @@ export default function AgentSidebar({ context }: Props) {
 
       const decoder = new TextDecoder()
       let buffer = ''
+      // 服务端在 conversation 事件里预告了本轮助手消息的 ID，
+      // 动作提案就挂在这条消息上；确认时需要它来定位提案。
+      let serverMessageId = ''
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -287,6 +351,7 @@ export default function AgentSidebar({ context }: Props) {
             const event = JSON.parse(line.slice(6))
             if (event.type === 'conversation') {
               setConversationId(String(event.conversation_id))
+              if (event.message_id) serverMessageId = String(event.message_id)
             } else if (event.type === 'content') {
               updateAssistant(assistantId, (item) => ({ ...item, content: item.content + String(event.content || '') }))
             } else if (event.type === 'tool_call') {
@@ -304,7 +369,16 @@ export default function AgentSidebar({ context }: Props) {
               }))
             } else if (event.type === 'action_proposal' || event.type === 'action_confirm') {
               const proposal = typeof event.action === 'object' ? event.action : event
-              updateAssistant(assistantId, (item) => ({ ...item, actionConfirm: normalizeAction(proposal) }))
+              const messageId = String(event.message_id || proposal?.message_id || serverMessageId || '')
+              const actionIndex = Number(event.action_index ?? proposal?.action_index ?? 0)
+              updateAssistant(assistantId, (item) => ({
+                ...item,
+                actionConfirm: {
+                  ...normalizeAction(proposal),
+                  messageId: messageId || undefined,
+                  actionIndex: Number.isFinite(actionIndex) ? actionIndex : 0,
+                },
+              }))
             } else if (event.type === 'citations' || event.type === 'citation') {
               const values = event.type === 'citation' ? [event.citation || event] : event.citations || []
               updateAssistant(assistantId, (item) => ({ ...item, citations: values.map(asCitation) }))
@@ -329,48 +403,51 @@ export default function AgentSidebar({ context }: Props) {
     }
   }
 
-  const persistAction = async (action: AgentAction, modifiedData?: Record<string, unknown>) => {
+  /**
+   * 走服务端动作注册表执行。客户端只回传「执行哪一条提案」
+   * （message_id + action_index）以及白名单内的字段覆写，
+   * 「执行什么」完全由服务端持久化的提案决定。
+   */
+  const confirmRegisteredAction = async (action: AgentAction, modifiedData?: Record<string, unknown>) => {
+    if (!action.messageId) throw new Error('缺少提案定位信息，请重新向 Agent 提问后再确认')
+
+    const overrides = buildOverrides(modifiedData)
+    const response = await fetch(`${API_BASE_URL}/api/agent/actions/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        message_id: action.messageId,
+        action_index: action.actionIndex ?? 0,
+        ...(overrides ? { overrides } : {}),
+      }),
+    })
+
+    const body = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(String(body?.detail || `执行失败（${response.status}）`))
+    return body
+  }
+
+  /**
+   * 旧的「模型自带 confirm_endpoint」协议，仅保留给尚未进入注册表的
+   * submit_audit_evidence。校验：必须有当前项目上下文 + 同源相对路径 +
+   * 严格前缀命中当前项目，任何一条不满足都直接拒绝执行。
+   */
+  const confirmLegacyAction = async (action: AgentAction, modifiedData?: Record<string, unknown>) => {
     const data = { ...action.data, ...(modifiedData || {}) }
-    if (action.serverAction === 'apply_check_result') {
-      const recordId = String(data.recordId || data.record_id || '')
-      if (!recordId) throw new Error('缺少检查记录 ID')
-      await recordApi.createRecordItem(recordId, {
-        id: data.itemId || data.item_id,
-        radio_value: data.result,
-        problem_description: data.problemDescription || data.problem_description || '',
-        rectification_suggestion: data.rectificationSuggestion || data.rectification_suggestion || '',
-        ai_generated: true,
-      })
-      return
-    }
-
-    if (action.serverAction === 'apply_final_verdict') {
-      const recordId = String(data.recordId || data.record_id || '')
-      if (!recordId) throw new Error('缺少检查记录 ID')
-      await recordApi.updateRecord(recordId, {
-        overall_result: data.verdict,
-        remarks: data.comment || '',
-      })
-      return
-    }
-
-    if (action.serverAction === 'confirm_nonconformity') {
-      const projectId = String(data.project_id || context?.projectId || '')
-      const ncId = String(data.nonconformity_id || data.nc_id || '')
-      if (!projectId || !ncId) throw new Error('缺少项目或不符合项 ID')
-      await nonconformityApi.confirm(projectId, ncId, data)
-      return
+    const projectId = String(context?.projectId || '')
+    if (!UUID_PATTERN.test(projectId)) {
+      throw new Error('缺少当前项目上下文，无法执行该操作')
     }
 
     const endpoint = String(data.confirm_endpoint || data.endpoint || '')
     const method = String(data.confirm_method || data.method || 'POST').toUpperCase()
-    const isAllowedEndpoint = /^\/api\/(?:v1\/)?audit-projects\/[0-9a-f-]+\//i.test(endpoint)
-    const belongsToCurrentProject = !context?.projectId || endpoint.includes(`/audit-projects/${context.projectId}/`)
-    if (!endpoint || !isAllowedEndpoint || !belongsToCurrentProject || !['POST', 'PUT', 'PATCH'].includes(method)) {
+    const url = parseRelativeEndpoint(endpoint)
+    const allowedPrefix = `/api/audit-projects/${projectId}/`
+    if (!url || !url.pathname.startsWith(allowedPrefix) || !['POST', 'PUT', 'PATCH'].includes(method)) {
       throw new Error('该建议没有可执行的受控写入协议')
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${API_BASE_URL}${url.pathname}${url.search}`, {
       method,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(data.confirm_payload || modifiedData || {}),
@@ -378,15 +455,29 @@ export default function AgentSidebar({ context }: Props) {
     if (!response.ok) throw new Error(`执行失败（${response.status}）`)
   }
 
+  /** 返回服务端提示语（幂等重复确认时会是「该操作已执行过」）。 */
+  const persistAction = async (action: AgentAction, modifiedData?: Record<string, unknown>): Promise<string | undefined> => {
+    const serverAction = String(action.serverAction || '')
+    const registry = await loadActionRegistry(token)
+
+    if (!registry.includes(serverAction) && LEGACY_CONFIRM_ACTIONS.has(serverAction)) {
+      await confirmLegacyAction(action, modifiedData)
+      return undefined
+    }
+    // 注册表拉取失败或动作暂未登记时，仍交由服务端裁决（未注册动作会被拒绝并返回原因）。
+    const body = await confirmRegisteredAction(action, modifiedData)
+    return body?.message ? String(body.message) : undefined
+  }
+
   const handleActionConfirm = async (messageId: string, action: AgentAction, modifiedData?: Record<string, unknown>) => {
     setApplyingMessageId(messageId)
     try {
-      await persistAction(action, modifiedData)
+      const serverMessage = await persistAction(action, modifiedData)
       updateAssistant(messageId, (item) => ({
         ...item,
         actionConfirm: item.actionConfirm ? { ...item.actionConfirm, status: 'confirmed', data: { ...item.actionConfirm.data, ...(modifiedData || {}) } } : undefined,
       }))
-      message.success('操作已确认并写入系统')
+      message.success(serverMessage || '操作已确认并写入系统')
     } catch (error) {
       updateAssistant(messageId, (item) => ({
         ...item,

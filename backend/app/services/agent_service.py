@@ -18,6 +18,7 @@ from app.models.evidence_agent import AiAuditSession, AiDraftRecord
 from app.services.rag_service import rag_service
 from app.services.template_recommendation_service import template_recommendation_service
 from app.services.multimodal_service import multimodal_service
+from app.services.agent_memory_service import agent_memory_service
 
 
 AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅助检查员完成现场检查。
@@ -389,6 +390,11 @@ TOOLS.extend(
 
 MAX_TOOL_ROUNDS = 5
 MAX_KNOWLEDGE_SEARCHES = 2
+# 单次对话的累计 token 预算。此前只有轮次上限，没有成本上限：
+# 一轮里塞进超长检索结果同样会把成本推高。达到预算后强制收尾出答案。
+MAX_CONVERSATION_TOKENS = 60000
+# 送入模型的最近历史条数（其余省略，并在 system 消息中明确告知模型）
+HISTORY_TURNS_SENT_TO_MODEL = 10
 FINAL_RESPONSE_INSTRUCTION = """工具调用已结束。请仅基于已获得的工具结果，直接给出完整、准确的最终答复。
 不要描述继续检索的过程，不要再次请求工具；若资料不足，必须明确说明缺少什么资料。"""
 FORCE_FINAL_USER_PROMPT = (
@@ -473,7 +479,20 @@ class AgentService:
 
         messages = [{"role": "system", "content": system_prompt}]
 
-        for msg in conversation[-10:]:
+        # 只带最近 N 轮进模型。超出部分会被丢弃——明确告知模型，
+        # 避免它把「上文不存在」当成「用户没说过」而给出自相矛盾的回答。
+        recent = conversation[-HISTORY_TURNS_SENT_TO_MODEL:]
+        if len(conversation) > HISTORY_TURNS_SENT_TO_MODEL:
+            messages.append({
+                "role": "system",
+                "content": (
+                    f"注意：本次仅提供最近 {HISTORY_TURNS_SENT_TO_MODEL} 条对话，"
+                    f"更早的 {len(conversation) - HISTORY_TURNS_SENT_TO_MODEL} 条已省略。"
+                    "如需更早的信息，请明确向用户确认，不要臆测。"
+                ),
+            })
+
+        for msg in recent:
             messages.append({
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", "")
@@ -494,7 +513,13 @@ class AgentService:
                 is_last_round = round_idx == MAX_TOOL_ROUNDS - 1
                 # Only the last round forbids tools. Earlier rounds may still
                 # call tools; empty final answers are recovered after the loop.
-                force_final = is_last_round
+                # 预算耗尽同样强制收尾，避免单次对话成本失控。
+                over_budget = total_tokens >= MAX_CONVERSATION_TOKENS
+                if over_budget and round_idx > 0:
+                    print(
+                        f"[Agent] token budget reached ({total_tokens}), forcing final answer"
+                    )
+                force_final = is_last_round or over_budget
 
                 request_messages = list(messages)
                 if force_final:
@@ -719,16 +744,18 @@ class AgentService:
         tokens_used: int,
         duration_ms: int,
         error_text: Optional[str],
+        call_type: str = "agent_chat",
+        model: Optional[str] = None,
     ) -> None:
         from app.models.audit import LLMCallLog
 
         log = LLMCallLog(
             user_id=user_id,
             record_id=record_id or None,
-            call_type="agent_chat",
+            call_type=call_type,
             prompt=prompt,
             response=response,
-            model=self.model,
+            model=model or self.model,
             tokens_used=tokens_used or None,
             duration_ms=duration_ms,
             is_success="false" if error_text else "true",
@@ -1393,6 +1420,10 @@ class AgentService:
             f"- {r.get('title', '')}: {r.get('content', '')[:100]}" for r in kb_results[:5]
         )
 
+        # 长期记忆（#5）：带入这家企业既往审核沉淀的记忆（如某条款反复不符合）
+        memory_text = await agent_memory_service.recall_text(db, enterprise.id, limit=5)
+        memory_block = f"\n{memory_text}\n" if memory_text else ""
+
         prompt = f"""你是资深检查专家，请为即将进行的现场检查生成一份简明的"检查准备简报"。
 
 企业信息：
@@ -1405,7 +1436,7 @@ class AgentService:
 
 历史遗留问题（近3次检查中的不合格项）：
 {issues_summary}
-
+{memory_block}
 相关法规参考：
 {regs_summary}
 
@@ -1429,6 +1460,7 @@ class AgentService:
         enterprise_id: str,
         db: AsyncSession,
         model_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> dict:
         briefing = await self._prepare_briefing(enterprise_id, db)
         if "error" in briefing:
@@ -1441,6 +1473,12 @@ class AgentService:
         client, selected_model = resolved_model
         max_tokens = 4096 if selected_model == self.vision_model else 1500
 
+        # 简报此前完全不写 LLMCallLog，导致这条链路的用量与失败率在成本
+        # 统计里是盲区。统一记账。
+        start_time = time.monotonic()
+        briefing_text = ""
+        tokens_used = 0
+        error_text: Optional[str] = None
         try:
             response = await client.chat.completions.create(
                 model=selected_model,
@@ -1449,17 +1487,36 @@ class AgentService:
                 temperature=0.5,
             )
             briefing_text = response.choices[0].message.content or ""
+            tokens_used = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
             if not briefing_text.strip():
+                error_text = "empty briefing content"
                 return {
                     "error": "所选模型未返回简报内容，请切换模型后重试",
                     "status_code": 502,
                 }
         except Exception as e:
+            error_text = f"{type(e).__name__}: {e}"
             print(f"[Agent] Briefing generation failed: {type(e).__name__}")
             return {
                 "error": "AI 简报服务暂时不可用，请切换模型或稍后重试",
                 "status_code": 502,
             }
+        finally:
+            try:
+                await self._log_call(
+                    db=db,
+                    user_id=user_id,
+                    record_id=None,
+                    prompt=briefing["prompt"],
+                    response=briefing_text,
+                    tokens_used=tokens_used,
+                    duration_ms=int((time.monotonic() - start_time) * 1000),
+                    error_text=error_text,
+                    call_type="agent_briefing",
+                    model=selected_model,
+                )
+            except Exception as log_err:
+                print(f"[Agent] Failed to write briefing LLMCallLog: {log_err}")
 
         return {
             key: value
@@ -1475,6 +1532,7 @@ class AgentService:
         enterprise_id: str,
         db: AsyncSession,
         model_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[dict, None]:
         briefing = await self._prepare_briefing(enterprise_id, db)
         if "error" in briefing:
@@ -1501,6 +1559,10 @@ class AgentService:
         yield {"type": "metadata", "data": metadata}
 
         has_content = False
+        start_time = time.monotonic()
+        collected_text = ""
+        stream_tokens = 0
+        stream_error: Optional[str] = None
         try:
             stream = await client.chat.completions.create(
                 model=selected_model,
@@ -1510,13 +1572,18 @@ class AgentService:
                 stream=True,
             )
             async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage and getattr(usage, "total_tokens", None):
+                    stream_tokens = usage.total_tokens
                 if not chunk.choices:
                     continue
                 content = chunk.choices[0].delta.content
                 if content:
                     has_content = True
+                    collected_text += content
                     yield {"type": "content", "content": content}
         except Exception as exc:
+            stream_error = f"{type(exc).__name__}: {exc}"
             print(f"[Agent] Briefing stream failed: {type(exc).__name__}: {exc}")
             yield {
                 "type": "error",
@@ -1524,6 +1591,22 @@ class AgentService:
                 "status_code": 502,
             }
             return
+        finally:
+            try:
+                await self._log_call(
+                    db=db,
+                    user_id=user_id,
+                    record_id=None,
+                    prompt=briefing["prompt"],
+                    response=collected_text,
+                    tokens_used=stream_tokens,
+                    duration_ms=int((time.monotonic() - start_time) * 1000),
+                    error_text=stream_error,
+                    call_type="agent_briefing_stream",
+                    model=selected_model,
+                )
+            except Exception as log_err:
+                print(f"[Agent] Failed to write briefing LLMCallLog: {log_err}")
 
         if not has_content:
             yield {

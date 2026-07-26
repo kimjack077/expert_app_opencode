@@ -22,6 +22,25 @@
             <span v-if="record.template?.is_quantified" class="total-score-badge">总分: {{ totalScore }}</span>
           </div>
           <div class="template-name">{{ record.template?.name }} ({{ record.template?.version }})</div>
+          <div class="offline-row">
+            <span v-if="offlineMode" class="offline-chip offline">
+              <van-icon name="warning-o" size="12" /> 离线模式 · 本地缓存，填写不会上传
+            </span>
+            <span v-else-if="cachedEntry" class="offline-chip cached">
+              <van-icon name="passed" size="12" /> 离线可用 · {{ formatCachedAt(cachedEntry.cachedAt) }}
+            </span>
+            <van-button
+              v-if="!offlineMode"
+              size="mini"
+              plain
+              round
+              :loading="caching"
+              class="offline-cache-btn"
+              @click="cacheCurrentForOffline"
+            >
+              {{ cachedEntry ? '更新缓存' : '缓存到本地' }}
+            </van-button>
+          </div>
         </div>
       </div>
     </div>
@@ -388,6 +407,13 @@ import {
 import RiskAlertPopup from '../components/RiskAlertPopup.vue'
 import AgentFab from '../components/agent/AgentFab.vue'
 import AgentChatPanel from '../components/agent/AgentChatPanel.vue'
+import {
+  cacheRecordForOffline,
+  cacheTaskForOffline,
+  formatCachedAt,
+  getCachedEntry,
+  isOnline,
+} from '@/utils/offlineCache.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -414,6 +440,12 @@ const riskProfile = ref(null)
 
 const showAgentPanel = ref(false)
 const currentItemId = ref(null)
+
+// 离线缓存：断网时用本机缓存渲染检查项（只读，不排队上传）
+const offlineMode = ref(false)
+const cachedEntry = ref(null)
+const caching = ref(false)
+let offlineWriteWarned = false
 
 const finalJudgment = reactive({
   result: '',
@@ -454,6 +486,9 @@ const resetState = () => {
   loading.value = true
   finalJudgment.result = ''
   finalJudgment.remarks = ''
+  offlineMode.value = false
+  cachedEntry.value = null
+  offlineWriteWarned = false
 }
 
 const flattenItems = computed(() => {
@@ -683,6 +718,15 @@ const buildTaskItemPayload = (item, inputs = {}) => {
 }
 
 const saveItemResult = async (item, field, value) => {
+  // 离线只读：不做写队列，避免给审核员「已保存」的错觉
+  if (!isOnline()) {
+    if (!offlineWriteWarned) {
+      offlineWriteWarned = true
+      showToast('当前离线，填写内容不会上传，恢复网络后请重新填写')
+    }
+    return
+  }
+
   if (executionMode.value === 'task') {
     if (!currentTaskId.value) throw new Error('任务 ID 无效')
     const inputs = {
@@ -768,25 +812,12 @@ const loadTaskExecution = async (task) => {
     }
   }
 
-  let template = {
-    id: templateId || null,
-    name: task.title || '检查任务',
-    version: '',
-    is_quantified: false,
-    items: [],
-  }
-
+  let template = null
   if (templateId) {
     try {
       const tplRes = await getTemplateItems(templateId)
       if (tplRes.code === 200 && tplRes.data) {
-        template = {
-          id: tplRes.data.id,
-          name: tplRes.data.name || template.name,
-          version: tplRes.data.version || '',
-          is_quantified: !!tplRes.data.is_quantified,
-          items: tplRes.data.items || [],
-        }
+        template = tplRes.data
       }
     } catch (e) {
       console.error('获取任务模板失败', e)
@@ -794,6 +825,25 @@ const loadTaskExecution = async (task) => {
     }
   } else {
     showToast('该任务未关联检查模板，暂无检查项可填写')
+  }
+
+  await applyTaskExecutionData(task, template, taskRecords)
+}
+
+/**
+ * 用已取到的任务数据渲染执行页。抽出来是为了让离线缓存能复用同一套装配逻辑。
+ */
+const applyTaskExecutionData = async (task, rawTemplate, taskRecords = []) => {
+  executionMode.value = 'task'
+  currentTaskId.value = String(task.id)
+  actualRecordId.value = String(task.id)
+
+  const template = {
+    id: rawTemplate?.id || task.template_id || null,
+    name: rawTemplate?.name || task.title || '检查任务',
+    version: rawTemplate?.version || '',
+    is_quantified: !!rawTemplate?.is_quantified,
+    items: rawTemplate?.items || [],
   }
 
   const resultByItemId = {}
@@ -845,6 +895,9 @@ const applyRecordData = async (data, recordId) => {
   }
   initExpandedItems()
 
+  // 离线时不去请求风险画像，避免弹出网络错误提示
+  if (!isOnline()) return
+
   const shownRecordId = sessionStorage.getItem('riskAlertShownRecordId')
   if (shownRecordId !== String(recordId) && data.enterprise_id) {
     await fetchAndShowRiskProfile(data.enterprise_id, recordId)
@@ -879,11 +932,71 @@ const onAgentVerdictApplied = ({ verdict, comment }) => {
   }
 }
 
+/** 断网时用出发前缓存渲染检查项；成功返回 true */
+const loadFromOfflineCache = async (id) => {
+  const taskEntry = getCachedEntry('task', id)
+  if (taskEntry?.payload?.task) {
+    await applyTaskExecutionData(
+      taskEntry.payload.task,
+      taskEntry.payload.template,
+      taskEntry.payload.taskRecords || [],
+    )
+    offlineMode.value = true
+    cachedEntry.value = taskEntry
+    showToast('离线模式：已加载本地缓存的检查项')
+    return true
+  }
+
+  const recordEntry = getCachedEntry('record', id)
+  if (recordEntry?.payload?.record) {
+    await applyRecordData(recordEntry.payload.record, id)
+    offlineMode.value = true
+    cachedEntry.value = recordEntry
+    showToast('离线模式：已加载本地缓存的检查项')
+    return true
+  }
+
+  return false
+}
+
+/** 联网时把当前检查表存到本机，供进厂后离线查看 */
+const cacheCurrentForOffline = async () => {
+  if (caching.value || !isOnline()) return
+  caching.value = true
+  try {
+    if (executionMode.value === 'task') {
+      await cacheTaskForOffline(currentTaskId.value)
+    } else {
+      await cacheRecordForOffline(currentRecordId.value)
+    }
+    refreshCachedEntry()
+    showSuccessToast('已缓存到本地，断网也能查看检查项')
+  } catch (error) {
+    console.error('缓存到本地失败:', error)
+    showToast(error?.message || '缓存失败，请检查网络')
+  } finally {
+    caching.value = false
+  }
+}
+
+const refreshCachedEntry = () => {
+  const id = route.params.id
+  cachedEntry.value =
+    getCachedEntry(executionMode.value === 'task' ? 'task' : 'record', id) ||
+    getCachedEntry('task', id) ||
+    getCachedEntry('record', id)
+}
+
 const fetchRecord = async () => {
   try {
     const id = route.params.id
     if (!id || id === 'undefined' || id === 'null') {
       showToast('无效的检查 ID')
+      return
+    }
+
+    // 断网优先读缓存，别让审核员卡在加载失败页
+    if (!isOnline() && (await loadFromOfflineCache(id))) {
       return
     }
 
@@ -894,8 +1007,10 @@ const fetchRecord = async () => {
       const taskRes = await getTask(id)
       if (taskRes.code === 200 && taskRes.data) {
         await loadTaskExecution(taskRes.data)
+        refreshCachedEntry()
         return
       }
+      if (await loadFromOfflineCache(id)) return
       showToast(taskRes.message || '获取任务失败')
       return
     }
@@ -905,6 +1020,7 @@ const fetchRecord = async () => {
       const res = await getRecord(id)
       if (res.code === 200 && res.data) {
         await applyRecordData(res.data, id)
+        refreshCachedEntry()
         return
       }
     } catch (e) {
@@ -917,15 +1033,19 @@ const fetchRecord = async () => {
       const taskRes = await getTask(id)
       if (taskRes.code === 200 && taskRes.data) {
         await loadTaskExecution(taskRes.data)
+        refreshCachedEntry()
         return
       }
     } catch (e) {
       console.error('Failed to load task execution:', e)
     }
 
+    if (await loadFromOfflineCache(id)) return
+
     showToast('获取记录失败')
   } catch (error) {
     console.error('获取记录失败:', error)
+    if (await loadFromOfflineCache(route.params.id)) return
     const msg =
       error?.response?.data?.detail ||
       error?.response?.data?.message ||
@@ -1709,6 +1829,42 @@ watch(
 .template-name {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
+}
+
+.offline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.offline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.offline-chip.offline {
+  background: rgba(251, 146, 60, 0.28);
+}
+
+.offline-chip.cached {
+  background: rgba(34, 197, 94, 0.28);
+}
+
+.offline-cache-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
 }
 
 .loading-container {

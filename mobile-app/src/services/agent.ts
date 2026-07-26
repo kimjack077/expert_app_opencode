@@ -37,10 +37,14 @@ export interface ActionProposalEvent {
   status: 'pending'
   title: string
   data: ActionProposalData
+  /** 服务端持久化提案的坐标，确认时回传这两个值即可。 */
+  message_id?: string
+  action_index?: number
 }
 
 export interface ChatCallbacks {
-  onConversation?: (conversationId: string) => void
+  /** conversation 事件同时预告本轮助手消息 ID（动作提案挂在这条消息上）。 */
+  onConversation?: (conversationId: string, messageId?: string) => void
   onContent?: (content: string) => void
   onToolCall?: (tool: string, status: string) => void
   onToolResult?: (tool: string, status: string) => void
@@ -123,7 +127,7 @@ export async function chatWithAgent(
         const event = JSON.parse(line.slice(6))
         switch (event.type) {
           case 'conversation':
-            callbacks.onConversation?.(event.conversation_id)
+            callbacks.onConversation?.(event.conversation_id, event.message_id)
             break
           case 'content':
             callbacks.onContent?.(event.content)
@@ -151,4 +155,64 @@ export async function chatWithAgent(
       }
     }
   }
+}
+
+let actionRegistryPromise: Promise<string[]> | null = null
+
+/**
+ * 拉取服务端支持的 Agent 动作列表（GET /api/agent/actions/registry）。
+ * 结果按模块级缓存，只请求一次；失败时不缓存，下次调用可重试。
+ * 未登记的动作不提供一键写入，只能复制后手动填写。
+ */
+export function fetchActionRegistry(): Promise<string[]> {
+  if (!actionRegistryPromise) {
+    const token = useAuthStore.getState().token
+    actionRegistryPromise = fetch('/api/agent/actions/registry', {
+      headers: { Authorization: token ? `Bearer ${token}` : '' },
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error('registry'))))
+      .then((body) => (Array.isArray(body?.data?.actions) ? body.data.actions.map(String) : []))
+      .catch(() => {
+        actionRegistryPromise = null
+        return [] as string[]
+      })
+  }
+  return actionRegistryPromise
+}
+
+/**
+ * 确认并执行一条动作提案（POST /api/agent/actions/confirm）。
+ *
+ * 客户端只说明「执行哪一条」（message_id + action_index），
+ * 「执行什么」由服务端持久化的提案 + 动作注册表决定，
+ * 因此这里不需要知道任何业务端点，也不区分 task-flow / record-flow。
+ * `overrides` 仅 result / verdict / problem_description /
+ * rectification_suggestion / comment 会被服务端采纳，其余键一律丢弃。
+ * 接口是幂等的：重复确认返回首次结果。
+ */
+export async function confirmAgentAction(
+  messageId: string,
+  actionIndex: number,
+  overrides?: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const token = useAuthStore.getState().token
+
+  const response = await fetch('/api/agent/actions/confirm', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token ? `Bearer ${token}` : '',
+    },
+    body: JSON.stringify({
+      message_id: messageId,
+      action_index: actionIndex,
+      ...(overrides ? { overrides } : {}),
+    }),
+  })
+
+  const body = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(String(body?.detail || `执行失败（${response.status}）`))
+  }
+  return (body?.data || {}) as Record<string, unknown>
 }

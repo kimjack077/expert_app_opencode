@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..database import get_db
 from ..models import Industry
@@ -15,7 +15,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 @router.get("/tree", response_model=ApiResponse)

@@ -12,6 +12,7 @@ from uuid import UUID
 
 from docx import Document
 from sqlalchemy import func, select
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -642,7 +643,7 @@ class ProjectArtifactService:
                 if area_record_id:
                     records = [item for item in records if item.id == area_record_id]
                 for record in records:
-                    content = self._area_record_docx(project, record)
+                    content = await run_in_threadpool(self._area_record_docx, project, record)
                     generated.append(await self._store(db, project, "area_record", f"区域审核记录_{self._area_name(record)}_{record.id}.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
             elif artifact_type == "meeting_record":
                 for meeting in snapshot.get("meetings") or []:
@@ -653,7 +654,7 @@ class ProjectArtifactService:
                             project,
                             "meeting_record",
                             f"{meeting_type}_{meeting.get('id')}.docx",
-                            self._meeting_docx(project, meeting),
+                            await run_in_threadpool(self._meeting_docx, project, meeting),
                             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                             snapshot,
                             created_by,
@@ -667,10 +668,10 @@ class ProjectArtifactService:
                 generated.append(await self._store(db, project, "audit_report", f"审核报告_{project.project_no}.docx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
             elif artifact_type == "nc_summary":
                 ncs = (await db.execute(select(Nonconformity).where(Nonconformity.project_id == project_id))).scalars().all()
-                generated.append(await self._store(db, project, "nc_summary", f"不符合项汇总_{project.project_no}.docx", self._nc_summary_docx(project, ncs), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
+                generated.append(await self._store(db, project, "nc_summary", f"不符合项汇总_{project.project_no}.docx", await run_in_threadpool(self._nc_summary_docx, project, ncs), "application/vnd.openxmlformats-officedocument.wordprocessingml.document", snapshot, created_by))
             elif artifact_type == "manifest":
                 # 面向交付用户：完整性检查用 Word，不再输出 JSON
-                content = self._quality_check_docx(project, quality, snapshot)
+                content = await run_in_threadpool(self._quality_check_docx, project, quality, snapshot)
                 generated.append(
                     await self._store(
                         db,
@@ -732,15 +733,15 @@ class ProjectArtifactService:
             # 用户可读交付物统一为 Word（不再向用户暴露业务 JSON）
             add_bytes(
                 "A组织信息/项目摘要.docx",
-                self._project_summary_docx(project, snapshot),
+                await run_in_threadpool(self._project_summary_docx, project, snapshot),
             )
             add_bytes(
                 "B审核通知/审核计划汇总.docx",
-                self._audit_plan_docx(project, snapshot),
+                await run_in_threadpool(self._audit_plan_docx, project, snapshot),
             )
             add_bytes(
                 "I案卷检查表/资料完整性检查.docx",
-                self._quality_check_docx(project, quality, snapshot),
+                await run_in_threadpool(self._quality_check_docx, project, quality, snapshot),
             )
             for document in documents:
                 if self._is_quarantined_metadata(document.document_metadata):
@@ -772,7 +773,7 @@ class ProjectArtifactService:
             # 文件清单也用 Word，便于客户核对
             add_bytes(
                 "I案卷检查表/资料包文件清单.docx",
-                self._package_file_list_docx(project, quality, manifest_files),
+                await run_in_threadpool(self._package_file_list_docx, project, quality, manifest_files),
             )
         return await self._store(db, project, "package", f"完整审核资料包_{project.project_no}.zip", buffer.getvalue(), "application/zip", snapshot, created_by)
 

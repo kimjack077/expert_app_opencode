@@ -12,9 +12,9 @@ import './AgentActionCard.css'
 interface AgentActionCardProps {
   action: ActionProposalState
   /**
-   * 任务流页面（如 Inspection/QuickCheck）走 /api/tasks/* 的 TaskItemRecord，
-   * 与本卡片对应的 /api/records/* 写入接口是不同的表。这类页面必须传
-   * advisoryOnly，此时卡片只展示建议内容 + 复制按钮，不提供"采纳并填写"。
+   * 该动作未登记在服务端动作注册表（GET /api/agent/actions/registry）中，
+   * 无法一键写入。此时卡片只展示建议内容 + 复制按钮，不提供"采纳并填写"。
+   * 由 AgentChatPanel 按动作名逐条判定，与页面走 task-flow 还是 record-flow 无关。
    */
   advisoryOnly?: boolean
   onConfirm?: () => void

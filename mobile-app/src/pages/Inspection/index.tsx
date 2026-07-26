@@ -430,14 +430,13 @@ const Inspection: React.FC = () => {
         </FloatingPanel>
       )}
 
-      {/* AI 助手：本页走 task-flow（/api/tasks/*，TaskItemRecord），与
-          agent 写回接口对应的 record-flow（/api/records/*）是不同的表，
-          因此以 advisoryOnly 模式渲染，操作卡片仅可复制、不可一键写入 */}
+      {/* AI 助手：写回统一走 POST /api/agent/actions/confirm，由服务端动作
+          注册表决定落到哪张表，前端不再区分 task-flow / record-flow。
+          未登记的动作会自动降级为"复制后手填" */}
       <AgentFab onClick={() => setShowAgentPanel(true)} />
       <AgentChatPanel
         visible={showAgentPanel}
         onClose={() => setShowAgentPanel(false)}
-        advisoryOnly
         context={{
           currentItemId: currentItem.id,
           currentItemTitle: currentItem.title,

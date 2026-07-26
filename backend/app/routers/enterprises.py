@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -368,7 +368,7 @@ async def review_rectification(
 
     rectification.status = status
     rectification.reviewer = current_user.id
-    rectification.reviewed_at = datetime.utcnow()
+    rectification.reviewed_at = datetime.now(timezone.utc)
     if rectification_result:
         rectification.rectification_result = rectification_result
 

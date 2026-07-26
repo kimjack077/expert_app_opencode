@@ -3,6 +3,7 @@ import re
 import time
 from typing import Optional, List, AsyncGenerator
 from openai import AsyncOpenAI
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 
@@ -137,7 +138,13 @@ class AIExtractService:
         self.base_url = settings.LLM_BASE_URL
 
     async def _parse_file_bytes(self, file_content: bytes, filename: str) -> str:
-        """从文件字节中提取文本内容（本地解析，无需上传到第三方）"""
+        """从文件字节中提取文本内容（本地解析，无需上传到第三方）。
+
+        解析本身是同步 CPU 密集操作，统一卸载到线程池，避免阻塞事件循环。
+        """
+        return await run_in_threadpool(self._parse_file_bytes_sync, file_content, filename)
+
+    def _parse_file_bytes_sync(self, file_content: bytes, filename: str) -> str:
         from pathlib import Path
         import tempfile, os
 

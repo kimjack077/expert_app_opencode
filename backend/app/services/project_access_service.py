@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_project import AuditProject, AuditTeamMember
@@ -18,12 +18,36 @@ async def get_project_or_404(
     project_id: UUID | str,
 ) -> AuditProject:
     result = await db.execute(
-        select(AuditProject).where(AuditProject.id == project_id)
+        select(AuditProject).where(
+            AuditProject.id == project_id,
+            AuditProject.is_deleted == False,  # noqa: E712
+        )
     )
     project = result.scalar_one_or_none()
     if not project:
         raise HTTPException(status_code=404, detail="审核项目不存在")
     return project
+
+
+def project_visibility_condition(user: User):
+    """列表查询用的可见性条件，与 ``ensure_project_access`` 语义保持一致。
+
+    返回 ``None`` 表示该角色无需限制（平台管理角色）。列表端点必须使用本函数，
+    否则会出现「详情页有鉴权、列表页却能枚举全部项目」的泄露。
+    """
+
+    if user.role in PRIVILEGED_ROLES:
+        return None
+
+    return or_(
+        AuditProject.created_by == user.id,
+        AuditProject.team_leader_id == user.id,
+        AuditProject.id.in_(
+            select(AuditTeamMember.project_id).where(
+                AuditTeamMember.member_id == user.id,
+            )
+        ),
+    )
 
 async def ensure_project_access(
     db: AsyncSession,

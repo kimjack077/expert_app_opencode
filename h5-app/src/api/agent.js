@@ -159,6 +159,34 @@ export function getAgentModels() {
 }
 
 /**
+ * 执行一条服务端已登记的动作提案。
+ *
+ * 安全边界：前端只回传「执行哪一条」(message_id + action_index)，
+ * 不再回传「执行什么」——写入接口与请求体由服务端动作注册表决定。
+ * overrides 仅允许 result / verdict / problem_description /
+ * rectification_suggestion / comment，其余键会被服务端丢弃。
+ *
+ * @param {Object} params
+ * @param {string} params.messageId - SSE conversation/action_proposal 事件里的 message_id
+ * @param {number} [params.actionIndex] - 同一条消息内的提案序号，默认 0
+ * @param {Object} [params.overrides] - 审核员确认前修改过的字段
+ */
+export function confirmAgentAction({ messageId, actionIndex = 0, overrides }) {
+  return request.post('/agent/actions/confirm', {
+    message_id: messageId,
+    action_index: actionIndex,
+    overrides: overrides && Object.keys(overrides).length > 0 ? overrides : undefined,
+  })
+}
+
+/**
+ * 获取服务端支持的动作列表，用于判断某张确认卡是否可一键执行。
+ */
+export function getAgentActionRegistry() {
+  return request.get('/agent/actions/registry')
+}
+
+/**
  * 获取对话历史列表
  */
 export function getConversations() {
@@ -177,6 +205,8 @@ export default {
   chatWithAgent,
   getInspectionBriefing,
   streamInspectionBriefing,
+  confirmAgentAction,
+  getAgentActionRegistry,
   getConversations,
   getConversation,
 }

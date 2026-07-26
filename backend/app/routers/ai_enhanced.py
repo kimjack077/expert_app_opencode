@@ -8,7 +8,7 @@ This router provides endpoints for:
 - Regulation linking
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -34,7 +34,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 

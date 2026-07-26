@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -6,6 +7,9 @@ from typing import Optional
 from fastapi import UploadFile, HTTPException
 
 from app.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 ALLOWED_EXTENSIONS = {
@@ -43,12 +47,45 @@ def ensure_upload_dir():
     return upload_dir
 
 
-def validate_file(file: UploadFile) -> None:
-    if file.size and file.size > settings.MAX_FILE_SIZE:
+# 常见格式的文件头签名。客户端声明的 content_type 可伪造，
+# 落盘前用真实字节校验，避免把可执行内容伪装成图片存进 uploads/。
+_MAGIC_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".webp": (b"RIFF",),
+    ".bmp": (b"BM",),
+    ".pdf": (b"%PDF",),
+    # OOXML(docx/xlsx/pptx) 本质是 zip
+    ".docx": (b"PK\x03\x04",),
+    ".xlsx": (b"PK\x03\x04",),
+    ".zip": (b"PK\x03\x04", b"PK\x05\x06"),
+}
+
+
+def enforce_max_size(size: int) -> None:
+    if size > settings.MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
             detail=f"File too large. Max size is {settings.MAX_FILE_SIZE // 1024 // 1024}MB",
         )
+
+
+def enforce_magic_bytes(content: bytes, ext: str) -> None:
+    signatures = _MAGIC_SIGNATURES.get(ext.lower())
+    if not signatures:
+        return  # 纯文本等无稳定签名的格式跳过
+    if not any(content.startswith(sig) for sig in signatures):
+        raise HTTPException(
+            status_code=400,
+            detail="文件内容与扩展名不符，已拒绝",
+        )
+
+
+def validate_file(file: UploadFile) -> None:
+    if file.size:
+        enforce_max_size(file.size)
 
     ext = Path(file.filename).suffix.lower() if file.filename else ""
     if ext not in ALLOWED_EXTENSIONS:
@@ -78,6 +115,11 @@ async def save_upload_file(
     content = await file.read()
     file_size = len(content)
 
+    # 读取后按真实字节数复核：validate_file 依赖客户端声明的 file.size，
+    # 该值可能为 None 或被伪造，只有这里才是权威大小。
+    enforce_max_size(file_size)
+    enforce_magic_bytes(content, ext)
+
     with open(file_path, "wb") as f:
         f.write(content)
 
@@ -94,6 +136,7 @@ def delete_file(file_path: str) -> bool:
         if path.exists():
             path.unlink()
             return True
-    except Exception:
-        pass
+    except OSError as exc:
+        # 删除失败会留下孤儿文件占用磁盘；静默吞掉会让问题永远不可见。
+        logger.warning("删除文件失败: %s (%s)", file_path, exc)
     return False

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -24,6 +24,7 @@ from app.schemas import (
     InspectionRecordListQuery,
 )
 from app.utils.security import get_current_user, get_current_admin_user
+from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
 from app.services import AuditService
 from app.services.llm_service import llm_service
 
@@ -32,7 +33,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -56,90 +57,65 @@ async def get_records(
     current_user: User = Depends(get_current_user),
 ):
     """获取检查记录列表"""
+    # 筛选条件只构建一次，分页查询与计数查询共用，避免两边漂移
+    # （历史上正是因为两处各写一份，导致角色过滤条件不一致）。
+    conditions = [InspectionRecord.is_deleted == False]  # noqa: E712
+
+    # 仅检查员受限于「只看自己的记录」；管理员/超管/审核员（只读复核角色）可看全部
+    if current_user.role not in RECORD_VIEW_ALL_ROLES:
+        conditions.append(InspectionRecord.inspector_id == current_user.id)
+
+    if template_id:
+        conditions.append(InspectionRecord.template_id == template_id)
+    if enterprise_id:
+        conditions.append(InspectionRecord.enterprise_id == enterprise_id)
+    if inspector_id:
+        conditions.append(InspectionRecord.inspector_id == inspector_id)
+    if status:
+        conditions.append(InspectionRecord.status == status)
+    if overall_result:
+        conditions.append(InspectionRecord.overall_result == overall_result)
+    if enterprise_name:
+        # 搜索企业名称：检查手动输入的 enterprise_name 或关联的企业名称
+        conditions.append(
+            or_(
+                InspectionRecord.enterprise_name.ilike(f"%{enterprise_name}%"),
+                Enterprise.name.ilike(f"%{enterprise_name}%")
+            )
+        )
+    if start_date:
+        try:
+            conditions.append(
+                InspectionRecord.inspection_date
+                >= datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            )
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            conditions.append(
+                InspectionRecord.inspection_date
+                <= datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            )
+        except ValueError:
+            pass
+
     query = select(InspectionRecord).options(
         selectinload(InspectionRecord.template),
         selectinload(InspectionRecord.enterprise),
         selectinload(InspectionRecord.inspector),
-    ).where(InspectionRecord.is_deleted == False)  # noqa: E712
-
-    # 非管理员用户只能查看自己的记录
-    if current_user.role != "admin":
-        query = query.where(InspectionRecord.inspector_id == current_user.id)
-
-    # 如果需要按企业名称筛选，需要 join Enterprise 表
+    )
+    count_query = select(func.count(InspectionRecord.id))
+    # 按企业名称筛选时两个查询都需要 join Enterprise 表
     if enterprise_name:
         query = query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
+        count_query = count_query.outerjoin(
+            Enterprise, InspectionRecord.enterprise_id == Enterprise.id
+        )
 
-    # 筛选条件
-    if template_id:
-        query = query.where(InspectionRecord.template_id == template_id)
-    if enterprise_id:
-        query = query.where(InspectionRecord.enterprise_id == enterprise_id)
-    if inspector_id:
-        query = query.where(InspectionRecord.inspector_id == inspector_id)
-    if status:
-        query = query.where(InspectionRecord.status == status)
-    if overall_result:
-        query = query.where(InspectionRecord.overall_result == overall_result)
-    if enterprise_name:
-        # 搜索企业名称：检查手动输入的 enterprise_name 或关联的企业名称
-        query = query.where(
-            or_(
-                InspectionRecord.enterprise_name.ilike(f"%{enterprise_name}%"),
-                Enterprise.name.ilike(f"%{enterprise_name}%")
-            )
-        )
-    if start_date:
-        try:
-            start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            query = query.where(InspectionRecord.inspection_date >= start)
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-            query = query.where(InspectionRecord.inspection_date <= end)
-        except ValueError:
-            pass
+    query = query.where(*conditions)
+    count_query = count_query.where(*conditions)
 
-    # 计数（在筛选条件之后）
-    count_query = select(func.count(InspectionRecord.id))
-    # 如果需要按企业名称筛选，需要 join Enterprise 表
-    if enterprise_name:
-        count_query = count_query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
-    if current_user.role != "admin":
-        count_query = count_query.where(
-            InspectionRecord.inspector_id == current_user.id
-        )
-    if template_id:
-        count_query = count_query.where(InspectionRecord.template_id == template_id)
-    if enterprise_id:
-        count_query = count_query.where(InspectionRecord.enterprise_id == enterprise_id)
-    if inspector_id:
-        count_query = count_query.where(InspectionRecord.inspector_id == inspector_id)
-    if status:
-        count_query = count_query.where(InspectionRecord.status == status)
-    if overall_result:
-        count_query = count_query.where(InspectionRecord.overall_result == overall_result)
-    if enterprise_name:
-        count_query = count_query.where(
-            or_(
-                InspectionRecord.enterprise_name.ilike(f"%{enterprise_name}%"),
-                Enterprise.name.ilike(f"%{enterprise_name}%")
-            )
-        )
-    if start_date:
-        try:
-            start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            count_query = count_query.where(InspectionRecord.inspection_date >= start)
-        except ValueError:
-            pass
-    if end_date:
-        try:
-            end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-            count_query = count_query.where(InspectionRecord.inspection_date <= end)
-        except ValueError:
-            pass
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
@@ -228,7 +204,7 @@ async def create_record(
             raise HTTPException(status_code=404, detail="Enterprise not found")
 
     # 查找当天是否存在相同企业、相同模板的草稿（使用 UTC 时间）
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     today_start = datetime(now_utc.year, now_utc.month, now_utc.day)
     tomorrow_start = today_start + timedelta(days=1)
 
@@ -316,7 +292,7 @@ async def create_record(
         contact_person=record_data.contact_person,
         contact_phone=record_data.contact_phone,
         inspector_id=current_user.id,
-        inspection_date=record_data.inspection_date or datetime.utcnow(),
+        inspection_date=record_data.inspection_date or datetime.now(timezone.utc),
         remarks=record_data.remarks,
         status="draft",
         template_snapshot=template_snapshot,
@@ -803,7 +779,7 @@ async def submit_record(
         raise HTTPException(status_code=403, detail="Not authorized")
 
     record.status = "submitted"
-    record.inspection_date = datetime.utcnow()
+    record.inspection_date = datetime.now(timezone.utc)
     await db.commit()
 
     await AuditService.log_action(
@@ -898,7 +874,7 @@ async def create_or_update_record_item(
             value = getattr(item_data, field, None)
             if value is not None:
                 setattr(record_item, field, value)
-        record_item.updated_at = datetime.utcnow()
+        record_item.updated_at = datetime.now(timezone.utc)
     else:
         # 创建新记录
         record_item = InspectionRecordItem(
@@ -1443,7 +1419,10 @@ async def generate_final_judgment_stream(
             selectinload(InspectionRecord.template),
             selectinload(InspectionRecord.enterprise),
         )
-        .where(InspectionRecord.id == record_id)
+        .where(
+            InspectionRecord.id == record_id,
+            InspectionRecord.is_deleted == False,  # noqa: E712
+        )
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -1683,7 +1662,10 @@ async def get_report_data(
             selectinload(InspectionRecord.inspector),
             selectinload(InspectionRecord.items),
         )
-        .where(InspectionRecord.id == record_id)
+        .where(
+            InspectionRecord.id == record_id,
+            InspectionRecord.is_deleted == False,  # noqa: E712
+        )
     )
     record = result.scalar_one_or_none()
     if not record:
@@ -1717,7 +1699,10 @@ async def download_report_pdf(
             selectinload(InspectionRecord.enterprise),
             selectinload(InspectionRecord.inspector),
         )
-        .where(InspectionRecord.id == record_id)
+        .where(
+            InspectionRecord.id == record_id,
+            InspectionRecord.is_deleted == False,  # noqa: E712
+        )
     )
     record = result.scalar_one_or_none()
     if not record:

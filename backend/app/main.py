@@ -4,7 +4,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from contextlib import asynccontextmanager
 import os
-from datetime import datetime
+from datetime import datetime, timezone
+
+from sqlalchemy.exc import DBAPIError
 
 from app.config import settings
 from app.routers import (
@@ -29,10 +31,72 @@ from app.routers.project_agent import router as project_agent_router
 from app.middleware import AuditMiddleware
 
 
+async def recover_stale_artifact_jobs() -> None:
+    """将上次进程退出时残留的成果生成任务标记为失败。
+
+    成果生成走 FastAPI ``BackgroundTasks``，进程重启不会恢复执行，
+    残留任务会永远停在 ``generating``，用户既看不到结果也无法重试。
+    启动时统一回收，让前端能重新提交。
+    """
+    from sqlalchemy import update
+
+    from app.database import AsyncSessionLocal
+    from app.models.project_artifact import ProjectArtifact
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                update(ProjectArtifact)
+                .where(ProjectArtifact.status == "generating")
+                .values(
+                    status="failed",
+                    error_message="服务重启导致任务中断，请重新生成",
+                )
+            )
+            await db.commit()
+            if result.rowcount:
+                print(f"[startup] 回收中断的成果生成任务: {result.rowcount} 个")
+    except Exception as exc:  # 启动阶段不因回收失败而阻断服务
+        print(f"[startup] 回收成果生成任务失败: {exc}")
+
+
+async def _proactive_scan_loop():
+    """后台主动巡检循环（#6）。
+
+    每 PROACTIVE_SCAN_INTERVAL_SECONDS 扫描一次，生成主动提醒。
+    通知落库，因此进程重启不会丢失历史提醒；循环本身重启后自然重新开始。
+    """
+    import asyncio
+
+    from app.database import AsyncSessionLocal
+    from app.services.agent_proactive_service import agent_proactive_service
+
+    interval = settings.PROACTIVE_SCAN_INTERVAL_SECONDS
+    if interval <= 0:
+        return
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                await agent_proactive_service.scan(db)
+        except Exception as exc:
+            print(f"[Proactive] scan failed: {type(exc).__name__}: {exc}")
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    yield
+    await recover_stale_artifact_jobs()
+    scan_task = None
+    if settings.PROACTIVE_SCAN_INTERVAL_SECONDS > 0:
+        scan_task = asyncio.create_task(_proactive_scan_loop())
+    try:
+        yield
+    finally:
+        if scan_task:
+            scan_task.cancel()
 
 
 app = FastAPI(
@@ -48,7 +112,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGIN_LIST,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,53 +142,61 @@ app.include_router(project_agent_router, tags=["项目审核 Agent"])
 app.include_router(statistics_router, prefix="/api/statistics", tags=["审核统计"])
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    # 无效 UUID / 数据类型错误 → 404（资源不存在）
-    exc_msg = str(exc).lower()
-    if (
-        "invalid input syntax for type uuid" in exc_msg
-        or "invalid uuid" in exc_msg
-        or "badly formed hexadecimal uuid string" in exc_msg
-    ):
-        return JSONResponse(
-            status_code=404,
-            content={
-                "code": 404,
-                "message": "资源不存在",
-                "data": None,
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-        )
-
-    # 数据完整性错误（外键约束等）→ 409
-    if "foreign key constraint" in exc_msg or "unique constraint" in exc_msg:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "code": 409,
-                "message": "数据冲突，可能存在关联引用",
-                "data": None,
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-        )
-
-    print(f"[API] Unhandled error: {type(exc).__name__}: {exc}")
+def _error_response(status_code: int, message: str) -> JSONResponse:
     return JSONResponse(
-        status_code=500,
+        status_code=status_code,
         content={
-            "code": 500,
-            "message": "服务器暂时无法处理该请求，请稍后重试",
+            "code": status_code,
+            "message": message,
             "data": None,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+# PostgreSQL SQLSTATE → HTTP 状态码。
+# 依据错误码判断，而不是匹配驱动的英文错误文案：
+# 文案会随驱动版本、数据库 locale 变化，字符串匹配随时失效。
+_SQLSTATE_STATUS = {
+    "23503": (409, "数据冲突，可能存在关联引用"),  # foreign_key_violation
+    "23505": (409, "数据冲突，该记录已存在"),      # unique_violation
+    "23502": (400, "缺少必填字段"),                # not_null_violation
+    "22P02": (404, "资源不存在"),                  # invalid_text_representation(非法 UUID 等)
+}
+
+
+@app.exception_handler(DBAPIError)
+async def database_exception_handler(request: Request, exc: DBAPIError):
+    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None) or getattr(
+        getattr(exc, "orig", None), "pgcode", None
+    )
+    mapped = _SQLSTATE_STATUS.get(sqlstate)
+    if mapped:
+        return _error_response(*mapped)
+
+    print(f"[API] Database error [{sqlstate}]: {type(exc).__name__}: {exc}")
+    return _error_response(500, "服务器暂时无法处理该请求，请稍后重试")
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    # 非法 UUID 字符串在进入数据库前就会抛 ValueError
+    if "uuid" in str(exc).lower():
+        return _error_response(404, "资源不存在")
+    print(f"[API] ValueError: {exc}")
+    return _error_response(500, "服务器暂时无法处理该请求，请稍后重试")
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[API] Unhandled error: {type(exc).__name__}: {exc}")
+    return _error_response(500, "服务器暂时无法处理该请求，请稍后重试")
 
 
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 WEB_ADMIN_DIR = "/opt/efis/web-admin"
@@ -164,7 +236,7 @@ async def serve_spa_routes(full_path: str):
                 "code": 404,
                 "message": "API endpoint not found",
                 "data": None,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
     if full_path.startswith("h5/"):

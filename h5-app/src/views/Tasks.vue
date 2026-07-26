@@ -88,7 +88,12 @@
                 </svg>
                 {{ getStatusText(task.status) }}
               </div>
-              <span class="task-date">{{ formatDate(task.created_at) }}</span>
+              <div class="card-header-right">
+                <span v-if="cachedTaskIds.has(String(task.id))" class="offline-badge">
+                  <van-icon name="passed" size="11" /> 离线可用
+                </span>
+                <span class="task-date">{{ formatDate(task.created_at) }}</span>
+              </div>
             </div>
             
             <h3 class="task-title">{{ formatTaskDisplay(task).primary }}</h3>
@@ -146,10 +151,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getTasks } from '../api/tasks.js'
 import { formatTaskDisplay } from '../utils/display.js'
+import { CACHE_EVENT, listCachedEntries } from '@/utils/offlineCache.js'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
@@ -163,6 +169,15 @@ const finished = ref(false)
 const refreshing = ref(false)
 const page = ref(1)
 const pageSize = 10
+
+// 已缓存到本机的任务，列表上标「离线可用」
+const cachedTaskIds = ref(new Set())
+
+const syncCachedTasks = () => {
+  cachedTaskIds.value = new Set(
+    listCachedEntries().filter((e) => e.kind === 'task').map((e) => e.id),
+  )
+}
 
 const filterTabs = [
   { label: '全部', value: 'all' },
@@ -288,6 +303,12 @@ onMounted(() => {
     activeFilter.value = route.query.status
   }
   fetchTasks()
+  syncCachedTasks()
+  window.addEventListener(CACHE_EVENT, syncCachedTasks)
+})
+
+onUnmounted(() => {
+  window.removeEventListener(CACHE_EVENT, syncCachedTasks)
 })
 </script>
 
@@ -556,6 +577,24 @@ onMounted(() => {
 .task-status.cancelled {
   background: var(--error-bg);
   color: var(--error-color);
+}
+
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #dcfce7;
+  color: #15803d;
 }
 
 .task-date {

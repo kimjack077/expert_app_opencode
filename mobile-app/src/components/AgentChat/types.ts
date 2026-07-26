@@ -8,8 +8,16 @@ export type ActionProposalStatus = 'pending' | 'confirmed' | 'cancelled' | 'fail
 
 export interface ActionProposalState {
   type: ActionProposalType
+  /** 服务端动作名（apply_check_result / apply_final_verdict / ...），用于比对动作注册表。 */
+  action: string
   title: string
   status: ActionProposalStatus
+  /**
+   * 服务端持久化提案的坐标。确认时只回传这两个值，
+   * 执行内容完全由服务端决定。
+   */
+  messageId?: string
+  actionIndex: number
   data: {
     recordId?: string
     itemId?: string

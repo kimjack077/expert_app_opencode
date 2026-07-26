@@ -21,7 +21,9 @@ cd web-admin
 npm run dev
 ```
 
-浏览器打开 Web 管理端 `http://localhost:5173` 和 H5 端 `http://localhost:5174`（建议用 Chrome，语音输入功能依赖 Web Speech API，Chrome 支持最好）。
+浏览器打开 Web 管理端 `http://localhost:3000` 和 H5 端 `http://localhost:5174`（建议用 Chrome，语音输入功能依赖 Web Speech API，Chrome 支持最好）。
+
+> 端口以各自 `vite.config` 为准：Web 管理端 **3000**、H5 **5174**、mobile-app **3001**。
 
 ### 2. 演示账号
 
@@ -46,7 +48,7 @@ npm run dev
 
 ### 步骤 1：进入知识库管理
 
-1. 打开 Web 管理端 `http://localhost:5173`
+1. 打开 Web 管理端 `http://localhost:3000`
 2. 使用管理员账号 `admin` / `admin123` 登录
 3. 点击左侧菜单 **「知识库」**，进入 **「政策法规」** 页签
 4. 页面支持按分类和关键词查询，并可查看、编辑或删除已有知识文档

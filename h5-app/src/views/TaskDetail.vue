@@ -101,6 +101,41 @@
         </div>
       </div>
 
+      <div class="offline-card" :class="{ cached: !!cachedEntry }">
+        <div class="offline-main">
+          <div class="offline-icon">
+            <van-icon :name="cachedEntry ? 'passed' : 'down'" size="18" />
+          </div>
+          <div class="offline-text">
+            <span class="offline-title">{{ cachedEntry ? '离线可用' : '出发前缓存' }}</span>
+            <span class="offline-desc">
+              <template v-if="cachedEntry">
+                已缓存 {{ cachedEntry.itemCount }} 个检查项 · {{ formatCachedAt(cachedEntry.cachedAt) }}
+              </template>
+              <template v-else>
+                把检查项和企业信息存到手机，厂区没信号也能查看
+              </template>
+            </span>
+          </div>
+        </div>
+        <div class="offline-actions">
+          <van-button
+            size="small"
+            type="primary"
+            plain
+            round
+            :loading="caching"
+            :disabled="!online"
+            @click="cacheForOffline"
+          >
+            {{ cachedEntry ? '更新缓存' : '缓存到本地' }}
+          </van-button>
+          <van-button v-if="cachedEntry" size="small" plain round @click="dropCache">
+            清除
+          </van-button>
+        </div>
+      </div>
+
       <div class="action-bar">
         <div v-if="isAuditLinkedTask" class="path-hint">
           <van-icon name="info-o" />
@@ -166,7 +201,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
 import {
@@ -174,11 +209,62 @@ import {
   getTask,
   startTask as startTaskApi,
 } from '../api/tasks.js'
+import {
+  cacheTaskForOffline,
+  formatCachedAt,
+  getCachedEntry,
+  isOnline,
+  removeCachedEntry,
+} from '@/utils/offlineCache.js'
 
 const router = useRouter()
 const route = useRoute()
 const task = ref(null)
 const loading = ref(true)
+
+// 出发前离线缓存
+const cachedEntry = ref(null)
+const caching = ref(false)
+const online = ref(isOnline())
+
+const syncOnline = () => {
+  online.value = isOnline()
+}
+
+const refreshCachedEntry = () => {
+  cachedEntry.value = getCachedEntry('task', route.params.id)
+}
+
+const cacheForOffline = async () => {
+  if (caching.value) return
+  caching.value = true
+  try {
+    await cacheTaskForOffline(route.params.id)
+    refreshCachedEntry()
+    showToast({ type: 'success', message: '已缓存到本地，断网也能查看检查项' })
+  } catch (error) {
+    console.error('缓存到本地失败:', error)
+    showToast({ type: 'fail', message: error?.message || '缓存失败，请检查网络' })
+  } finally {
+    caching.value = false
+  }
+}
+
+const dropCache = async () => {
+  try {
+    await showConfirmDialog({
+      title: '清除离线缓存',
+      message: '清除后断网将无法查看这份检查表，确定继续吗？',
+    })
+    removeCachedEntry('task', route.params.id)
+    refreshCachedEntry()
+    showToast('已清除本地缓存')
+  } catch (error) {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
+      console.error('清除缓存失败:', error)
+    }
+  }
+}
 
 const getStatusIcon = (status) => {
   const icons = {
@@ -225,6 +311,16 @@ const formatDate = (dateStr) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
+/** 用本地缓存渲染任务详情，成功返回 true */
+const loadTaskFromCache = (taskId) => {
+  const cached = getCachedEntry('task', taskId)
+  if (!cached?.payload?.task) return false
+  task.value = cached.payload.task
+  cachedEntry.value = cached
+  showToast('离线模式：显示本地缓存的任务')
+  return true
+}
+
 const fetchTask = async () => {
   const taskId = route.params.id
   console.log('获取任务详情, ID:', taskId)
@@ -236,6 +332,12 @@ const fetchTask = async () => {
     return
   }
   
+  // 断网时直接用出发前缓存，别让审核员卡在空白页
+  if (!isOnline() && loadTaskFromCache(taskId)) {
+    loading.value = false
+    return
+  }
+
   try {
     const res = await getTask(taskId)
     console.log('任务详情响应:', res)
@@ -246,6 +348,9 @@ const fetchTask = async () => {
     }
   } catch (error) {
     console.error('获取任务详情失败:', error)
+    if (loadTaskFromCache(taskId)) {
+      return
+    }
     const errorMsg = error.response?.data?.detail || error.response?.data?.message || '获取任务详情失败'
     showToast({ type: 'fail', message: errorMsg })
   } finally {
@@ -321,6 +426,14 @@ const goToTodayAudit = () => {
 
 onMounted(() => {
   fetchTask()
+  refreshCachedEntry()
+  window.addEventListener('online', syncOnline)
+  window.addEventListener('offline', syncOnline)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('online', syncOnline)
+  window.removeEventListener('offline', syncOnline)
 })
 </script>
 
@@ -589,6 +702,74 @@ onMounted(() => {
 .timeline-time {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.offline-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 20px 0;
+  padding: 14px 16px;
+  background: var(--bg-white);
+  border: 1px solid var(--border-light);
+  border-left: 4px solid #0ea5e9;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.offline-card.cached {
+  border-left-color: #16a34a;
+}
+
+.offline-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.offline-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.offline-card.cached .offline-icon {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.offline-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.offline-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.offline-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.offline-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .action-bar {

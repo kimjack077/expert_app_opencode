@@ -15,9 +15,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -27,6 +29,11 @@ from app.config import settings
 
 
 logger = logging.getLogger("evidence_agent")
+
+# Prompt 版本号。审核结论具有法律效力，必须能回答「这条结论是哪版提示词
+# 在哪次模型调用下产生的」。语义版本手工维护；内容哈希由 _build_prompt 的
+# 模板实际内容派生，模板被改动但忘记升版本时可以据此发现。
+EVIDENCE_PROMPT_VERSION = "evidence-multiclause-v2"
 
 # 多条款分析输出较长（多条 reasoning + findings + citations），不可被全局 512 截断。
 # DeepSeek 最大输出可达 64K；此处取业务平衡值，避免超时与成本过高。
@@ -208,25 +215,45 @@ class EvidenceAgentService:
         evidence: str,
         candidates: list[EvidenceCandidate],
         citations: list[dict[str, Any]] | None = None,
+        db: Any = None,
+        user_id: str | None = None,
+        photo_findings: list[dict[str, Any]] | None = None,
+        feedback_hints: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
+        """分析证据并产出多条款草稿。
+
+        ``db``/``user_id`` 可选：传入时会把这次调用写入 ``LLMCallLog``，
+        并把 call log id 与 prompt 版本挂到每条结果上，
+        使「一条正式审核结论」可以反查到产生它的确切模型调用。
+        ``photo_findings``：现场照片的视觉分析结论，作为客观证据融入条款判定。
+        """
         if not candidates:
             return []
         citations = citations or []
-        prompt = self._build_prompt(evidence, candidates, citations)
+        prompt = self._build_prompt(evidence, candidates, citations, photo_findings)
         last_error: Exception | None = None
         max_tokens = self._analysis_max_tokens()
+        started_at = time.monotonic()
+        tokens_used = 0
+        raw_for_log = ""
         try:
             call_kwargs = self._structured_call_kwargs(max_tokens=max_tokens)
+            system_content = (
+                "你是认证审核证据分析 Agent。只能依据给出的现场证据、候选条款和项目资料判断，"
+                "不得虚构证据。一次证据可以命中多个条款。输出严格 JSON，不要输出思考过程。"
+            )
+            # 反馈回流（#1）：把最近被审核员拒绝的同类判定作为负面示例注入，
+            # 提示模型避免重蹈覆辙。这让 Agent 从自己被纠正的历史里学习。
+            if feedback_hints:
+                hint_lines = "\n".join(
+                    f"- 条款 {h.get('clause_no')}：AI 曾判 {h.get('ai_evaluation')} 但被审核员{h.get('outcome', '拒绝')}"
+                    for h in feedback_hints
+                )
+                system_content += f"\n\n注意，以下同类判定近期曾被人工否决，请审慎复核类似情况：\n{hint_lines}"
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是认证审核证据分析 Agent。只能依据给出的现场证据、候选条款和项目资料判断，"
-                            "不得虚构证据。一次证据可以命中多个条款。输出严格 JSON，不要输出思考过程。"
-                        ),
-                    },
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt},
                 ],
                 **call_kwargs,
@@ -234,6 +261,8 @@ class EvidenceAgentService:
             choice = response.choices[0] if response.choices else None
             message = choice.message if choice else None
             raw_content = self._message_text(message)
+            raw_for_log = raw_content
+            tokens_used = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
             finish_reason = getattr(choice, "finish_reason", None) if choice else None
             reasoning_len = len(str(getattr(message, "reasoning_content", None) or ""))
 
@@ -256,7 +285,16 @@ class EvidenceAgentService:
                             len(normalized),
                             max_tokens,
                         )
-                    return normalized
+                    call_log_id = await self._log_llm_call(
+                        db=db,
+                        user_id=user_id,
+                        prompt=prompt,
+                        response=raw_for_log,
+                        tokens_used=tokens_used,
+                        duration_ms=int((time.monotonic() - started_at) * 1000),
+                        error_text=None,
+                    )
+                    return self._attach_provenance(normalized, call_log_id)
 
                 # 无法规范化时给出可诊断原因
                 if finish_reason == "length":
@@ -300,14 +338,88 @@ class EvidenceAgentService:
                 exc,
             )
 
+        # 失败同样记账：否则成本统计与失败率完全看不到异常链路。
+        error_message = str(last_error) if last_error else "LLM 调用失败"
+        call_log_id = await self._log_llm_call(
+            db=db,
+            user_id=user_id,
+            prompt=prompt,
+            response=raw_for_log,
+            tokens_used=tokens_used,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            error_text=error_message,
+        )
+
         # 回退路径：不再静默生成"看似可信"的草稿，而是显式标记 model_status
         # 并基于 rank_candidates 的评分筛选候选，避免无关条款被强行匹配。
-        return self._fallback(
-            evidence,
-            candidates,
-            citations,
-            error_message=str(last_error) if last_error else "LLM 调用失败",
+        return self._attach_provenance(
+            self._fallback(
+                evidence,
+                candidates,
+                citations,
+                error_message=error_message,
+            ),
+            call_log_id,
         )
+
+    @classmethod
+    def prompt_fingerprint(cls) -> str:
+        """提示词模板的内容指纹，用于发现「模板改了但版本号没升」。"""
+        import inspect
+
+        template_source = inspect.getsource(cls._build_prompt)
+        digest = hashlib.sha256(template_source.encode("utf-8")).hexdigest()[:12]
+        return f"{EVIDENCE_PROMPT_VERSION}+{digest}"
+
+    @classmethod
+    def _attach_provenance(
+        cls, results: list[dict[str, Any]], call_log_id: str | None
+    ) -> list[dict[str, Any]]:
+        fingerprint = cls.prompt_fingerprint()
+        for item in results:
+            item["_prompt_version"] = fingerprint
+            if call_log_id:
+                item["_llm_call_log_id"] = call_log_id
+        return results
+
+    @staticmethod
+    async def _log_llm_call(
+        *,
+        db: Any,
+        user_id: str | None,
+        prompt: str,
+        response: str,
+        tokens_used: int,
+        duration_ms: int,
+        error_text: str | None,
+    ) -> str | None:
+        """把证据分析调用写入 LLMCallLog。
+
+        这条链路产出的是有法律效力的正式记录草稿，此前完全没有调用日志，
+        既无法核算成本，也无法在结论被质疑时复现当时的模型行为。
+        """
+        if db is None:
+            return None
+        try:
+            from app.models.audit import LLMCallLog
+
+            log = LLMCallLog(
+                user_id=user_id,
+                call_type="evidence_analysis",
+                prompt=prompt,
+                response=response,
+                model=settings.LLM_MODEL,
+                tokens_used=tokens_used or None,
+                duration_ms=duration_ms,
+                is_success="false" if error_text else "true",
+                error_msg=error_text,
+            )
+            db.add(log)
+            await db.flush()
+            return str(log.id)
+        except Exception as exc:  # 记账失败不能阻断审核主流程
+            logger.warning("[EvidenceAgent] failed to write LLMCallLog: %s", exc)
+            return None
 
     @staticmethod
     def _extract_results_list(payload: Any) -> list[Any]:
@@ -329,6 +441,7 @@ class EvidenceAgentService:
         evidence: str,
         candidates: list[EvidenceCandidate],
         citations: list[dict[str, Any]],
+        photo_findings: list[dict[str, Any]] | None = None,
     ) -> str:
         candidate_payload = [asdict(candidate) for candidate in candidates]
         citation_payload = [
@@ -341,9 +454,26 @@ class EvidenceAgentService:
             }
             for index, citation in enumerate(citations)
         ]
+        # 多模态融合：现场照片经视觉模型分析后的结论作为一等证据参与条款判定，
+        # 而不再只是旁挂的附件。审核员拍的照片能直接影响 AI 的评价与发现。
+        photo_block = ""
+        if photo_findings:
+            photo_payload = [
+                {
+                    "photo": f.get("filename") or f.get("media_file_id"),
+                    "description": (f.get("description") or "")[:500],
+                    "issues": f.get("issues") or [],
+                }
+                for f in photo_findings
+            ]
+            photo_block = (
+                "\n现场照片的视觉分析结论（由多模态模型识别，视为客观证据的一部分）：\n"
+                f"{json.dumps(photo_payload, ensure_ascii=False)}\n"
+                "如照片暴露出问题，应在相关条款的 audit_findings 中体现，并可据此下调 evaluation。\n"
+            )
         return f"""现场证据：
 {evidence}
-
+{photo_block}
 候选审核条款：
 {json.dumps(candidate_payload, ensure_ascii=False)}
 

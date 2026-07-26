@@ -8,9 +8,8 @@ import {
   DownOutline,
 } from 'antd-mobile-icons'
 import AgentMessage from './AgentMessage'
-import { chatWithAgent } from '../../services/agent'
+import { chatWithAgent, confirmAgentAction, fetchActionRegistry } from '../../services/agent'
 import type { ChatContext, ChatMessage as AgentChatMessage, ActionProposalEvent } from '../../services/agent'
-import { agentApi } from '../../services/api'
 import type { ActionProposalState, AgentChatContext, ChatMessageState } from './types'
 import './AgentChatPanel.css'
 
@@ -42,19 +41,22 @@ interface AgentChatPanelProps {
   visible: boolean
   onClose: () => void
   context: AgentChatContext
-  /**
-   * 页面走 task-flow（/api/tasks/*，TaskItemRecord）而非 record-flow
-   * （/api/records/*，InspectionRecord[Item]）时必须传 true。
-   * 此时 action_proposal 卡片仅展示建议内容 + 复制按钮，不提供"采纳并填写"，
-   * 避免把建议写到错误的表。
-   */
-  advisoryOnly?: boolean
   onResultApplied?: (payload: AgentResultAppliedPayload) => void
 }
 
-const buildActionProposal = (event: ActionProposalEvent): ActionProposalState => {
+const buildActionProposal = (
+  event: ActionProposalEvent,
+  fallbackMessageId?: string
+): ActionProposalState => {
+  const coords = {
+    action: event.action,
+    messageId: event.message_id || fallbackMessageId,
+    actionIndex: event.action_index ?? 0,
+  }
+
   if (event.action === 'apply_check_result') {
     return {
+      ...coords,
       type: 'judgment',
       title: event.title || '建议记录检查结果',
       status: 'pending',
@@ -70,6 +72,7 @@ const buildActionProposal = (event: ActionProposalEvent): ActionProposalState =>
   }
   if (event.action === 'apply_final_verdict') {
     return {
+      ...coords,
       type: 'final_verdict',
       title: event.title || '建议记录最终判定',
       status: 'pending',
@@ -81,11 +84,18 @@ const buildActionProposal = (event: ActionProposalEvent): ActionProposalState =>
     }
   }
   return {
+    ...coords,
     type: 'operation',
     title: event.title || '建议操作',
     status: 'pending',
     data: event.data || {},
   }
+}
+
+const appliedToastText = (action: string) => {
+  if (action === 'apply_check_result') return '已填写检查结果'
+  if (action === 'apply_final_verdict') return '已填写最终判定'
+  return '操作已执行'
 }
 
 let messageSeq = 0
@@ -95,19 +105,32 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
   visible,
   onClose,
   context,
-  advisoryOnly = false,
   onResultApplied,
 }) => {
   const [messages, setMessages] = useState<ChatMessageState[]>([])
   const [inputText, setInputText] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  // 服务端支持一键执行的动作；不在表内的提案只提供复制，不提供"采纳并填写"。
+  const [registeredActions, setRegisteredActions] = useState<string[]>([])
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const conversationIdRef = useRef<string | undefined>(undefined)
+  const serverMessageIdRef = useRef<string | undefined>(undefined)
   const recognizerRef = useRef<SpeechRecognitionLike | null>(null)
   const autoTriggeredMediaIdRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    void fetchActionRegistry().then((actions) => {
+      if (!cancelled) setRegisteredActions(actions)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [visible])
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -167,8 +190,9 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
             conversationId: conversationIdRef.current,
           },
           {
-            onConversation: (id) => {
+            onConversation: (id, serverMessageId) => {
               conversationIdRef.current = id
+              serverMessageIdRef.current = serverMessageId
             },
             onContent: (chunk) => {
               setMessages((prev) =>
@@ -199,10 +223,9 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
               )
             },
             onActionProposal: (event) => {
+              const proposal = buildActionProposal(event, serverMessageIdRef.current)
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, actionProposal: buildActionProposal(event) } : m
-                )
+                prev.map((m) => (m.id === assistantId ? { ...m, actionProposal: proposal } : m))
               )
             },
             onDone: () => {
@@ -308,32 +331,31 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
     return actions
   }, [context.mediaFileId, context.currentItemTitle, context.recordId])
 
+  /** 只有服务端注册表登记过的动作才允许一键写入，其余保持"复制后手填"。 */
+  const isActionWritable = useCallback(
+    (action: ActionProposalState) => !!action.messageId && registeredActions.includes(action.action),
+    [registeredActions]
+  )
+
+  /**
+   * 一键执行：只回传 (message_id, action_index)，由服务端动作注册表
+   * 决定写哪张表、写什么。页面走 task-flow 还是 record-flow 不再影响这里。
+   */
   const handleConfirmAction = async (messageId: string, action: ActionProposalState) => {
-    if (advisoryOnly) return
+    if (!isActionWritable(action) || !action.messageId) return
 
     try {
-      if (action.type === 'judgment' && action.data.recordId) {
-        await agentApi.applyCheckResult(action.data.recordId, {
-          id: action.data.itemId,
-          result: action.data.result,
-          problem_description: action.data.problemDescription || '',
-          rectification_suggestion: action.data.rectificationSuggestion || '',
-          ai_generated: true,
-        })
+      await confirmAgentAction(action.messageId, action.actionIndex)
+
+      if (action.type === 'judgment') {
         onResultApplied?.({
           itemId: action.data.itemId,
           result: action.data.result,
           problemDescription: action.data.problemDescription,
           rectificationSuggestion: action.data.rectificationSuggestion,
         })
-        Toast.show({ icon: 'success', content: '已填写检查结果' })
-      } else if (action.type === 'final_verdict' && action.data.recordId) {
-        await agentApi.applyFinalVerdict(action.data.recordId, {
-          overall_result: action.data.verdict,
-          remarks: action.data.comment || '',
-        })
-        Toast.show({ icon: 'success', content: '已填写最终判定' })
       }
+      Toast.show({ icon: 'success', content: appliedToastText(action.action) })
 
       setMessages((prev) =>
         prev.map((m) =>
@@ -342,8 +364,11 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
             : m
         )
       )
-    } catch {
-      Toast.show({ icon: 'fail', content: '填写失败，请手动填写' })
+    } catch (err) {
+      Toast.show({
+        icon: 'fail',
+        content: err instanceof Error && err.message ? err.message : '填写失败，请手动填写',
+      })
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId && m.actionProposal
@@ -409,7 +434,7 @@ const AgentChatPanel: React.FC<AgentChatPanelProps> = ({
             <AgentMessage
               key={message.id}
               message={message}
-              advisoryOnly={advisoryOnly}
+              advisoryOnly={!!message.actionProposal && !isActionWritable(message.actionProposal)}
               onConfirmAction={() => message.actionProposal && handleConfirmAction(message.id, message.actionProposal)}
               onCancelAction={() => handleCancelAction(message.id)}
             />

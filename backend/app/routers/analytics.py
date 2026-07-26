@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -17,7 +17,7 @@ router = APIRouter()
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -266,12 +266,12 @@ async def get_trends(
     if start_date:
         start = datetime.strptime(start_date, "%Y-%m-%d")
     else:
-        start = datetime.utcnow() - timedelta(days=30)
+        start = datetime.now(timezone.utc) - timedelta(days=30)
     
     if end_date:
         end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
     else:
-        end = datetime.utcnow() + timedelta(days=1)
+        end = datetime.now(timezone.utc) + timedelta(days=1)
     
     inspection_trend = []
     compliance_trend = []
@@ -422,12 +422,12 @@ async def export_data(
     if start_date:
         start = datetime.strptime(start_date, "%Y-%m-%d")
     else:
-        start = datetime.utcnow() - timedelta(days=30)
+        start = datetime.now(timezone.utc) - timedelta(days=30)
     
     if end_date:
         end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
     else:
-        end = datetime.utcnow() + timedelta(days=1)
+        end = datetime.now(timezone.utc) + timedelta(days=1)
     
     if current_user.role == "expert":
         tasks_query = await db.execute(
@@ -472,6 +472,6 @@ async def export_data(
     return make_response(
         data={
             "items": export_data,
-            "export_time": datetime.utcnow().isoformat(),
+            "export_time": datetime.now(timezone.utc).isoformat(),
         }
     )

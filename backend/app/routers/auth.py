@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -25,10 +25,13 @@ from app.services import AuditService
 
 router = APIRouter()
 
+# 公开自注册端点强制使用的角色。绝不使用客户端传入的 role。
+SELF_REGISTRATION_ROLE = "expert"
+
 
 def make_response(data=None, code=200, message="success"):
     return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.utcnow()
+        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -51,7 +54,7 @@ async def login(
     access_token = create_access_token(data={"sub": user.username})
     refresh_token = create_refresh_token(data={"sub": user.username})
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
     return make_response(
@@ -156,14 +159,17 @@ async def register(
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Email already registered")
 
+    # 安全：公开注册端点绝不信任客户端提供的 role / org_id。
+    # 否则任何人都能自注册为 super_admin 或挂入他人组织（提权 + 跨组织越权）。
+    # 提升角色、分配组织只能由管理员通过 /api/users 完成。
     user = User(
         username=user_data.username,
         email=user_data.email,
         phone=user_data.phone,
         full_name=user_data.full_name,
         hashed_password=get_password_hash(user_data.password),
-        role=user_data.role,
-        org_id=user_data.org_id,
+        role=SELF_REGISTRATION_ROLE,
+        org_id=None,
     )
     db.add(user)
     await db.commit()

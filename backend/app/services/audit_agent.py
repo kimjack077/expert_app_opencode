@@ -7,6 +7,8 @@ Audit AI Agent Service
 2. NVIDIA Mistral Large
 3. OpenAI GPT-4 (如果配置)
 """
+import logging
+import time
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 
@@ -24,28 +26,91 @@ from app.models.record import InspectionRecordItem
 from app.models.enterprise import Enterprise
 
 
+logger = logging.getLogger(__name__)
+
+
 class AuditAgent:
     """审核 AI Agent - 支持多模型"""
 
-    def __init__(self, db: AsyncSession, model_provider: str = "sensenova"):
+    def __init__(self, db: AsyncSession, user_id: Optional[str] = None):
         """
         初始化 AI Agent
-        
+
         Args:
             db: 数据库会话
-            model_provider: 模型提供商 ("qwen", "nvidia", "openai")
+            user_id: 触发本次调用的用户，用于 LLMCallLog 归属
+
+        注：原先接受 model_provider 参数但在函数体内被无条件覆盖为
+        "sensenova"，是个会误导调用方的死参数，已移除。模型统一取配置值。
         """
         self.db = db
+        self.user_id = user_id
         # Audit preparation, evidence evaluation, report writing and NC
         # drafting are text tasks.  Keep them on the configured primary text
         # model; the separate vision model is reserved for photo analysis.
-        self.model_provider = "sensenova"
+        self.model_provider = settings.LLM_PROVIDER
         self.client = AsyncOpenAI(
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             timeout=settings.LLM_TIMEOUT,
         )
         self.model = settings.LLM_MODEL
+
+    async def _chat_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        call_type: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+    ) -> str:
+        """统一的 JSON 调用入口，负责记账。
+
+        这四个能力此前每处各写一遍 create() 且完全不写 LLMCallLog，
+        导致审核准备/报告撰写这条链路的成本与失败率不可见。
+        """
+        started = time.monotonic()
+        content = ""
+        tokens_used = 0
+        error_text: Optional[str] = None
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or ""
+            tokens_used = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+            return content
+        except Exception as exc:
+            error_text = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            try:
+                from app.models.audit import LLMCallLog
+
+                self.db.add(
+                    LLMCallLog(
+                        user_id=self.user_id,
+                        call_type=call_type,
+                        prompt=user_prompt,
+                        response=content,
+                        model=self.model,
+                        tokens_used=tokens_used or None,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        is_success="false" if error_text else "true",
+                        error_msg=error_text,
+                    )
+                )
+                await self.db.flush()
+            except Exception as log_err:
+                logger.warning("[AuditAgent] failed to write LLMCallLog: %s", log_err)
 
     async def prepare_audit(self, project_id: UUID) -> Dict[str, Any]:
         """
@@ -124,19 +189,16 @@ class AuditAgent:
 """
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "你是一位资深的认证审核专家，擅长审核准备和风险评估。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
+            content = await self._chat_json(
+                system_prompt="你是一位资深的认证审核专家，擅长审核准备和风险评估。",
+                user_prompt=prompt,
+                call_type="audit_prepare",
                 max_tokens=2048,
-                response_format={"type": "json_object"} if self.model_provider != "nvidia" else None
+                temperature=0.7,
             )
 
             import json
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(content)
             return result
 
         except Exception as e:
@@ -182,19 +244,16 @@ class AuditAgent:
 """
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "你是一位资深的认证审核专家，擅长证据评估和标准解读。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
+            content = await self._chat_json(
+                system_prompt="你是一位资深的认证审核专家，擅长证据评估和标准解读。",
+                user_prompt=prompt,
+                call_type="audit_evidence_eval",
                 max_tokens=2048,
-                response_format={"type": "json_object"} if self.model_provider != "nvidia" else None
+                temperature=0.3,
             )
 
             import json
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(content)
             return result
 
         except Exception as e:
@@ -283,19 +342,16 @@ class AuditAgent:
 """
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "你是一位资深的认证审核专家，擅长撰写审核报告。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
+            content = await self._chat_json(
+                system_prompt="你是一位资深的认证审核专家，擅长撰写审核报告。",
+                user_prompt=prompt,
+                call_type="audit_report_narrative",
                 max_tokens=4096,
-                response_format={"type": "json_object"} if self.model_provider != "nvidia" else None
+                temperature=0.7,
             )
 
             import json
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(content)
             return result
 
         except Exception as e:
@@ -345,19 +401,16 @@ class AuditAgent:
 """
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "你是一位资深的认证审核专家，擅长不符合项管理。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5,
+            content = await self._chat_json(
+                system_prompt="你是一位资深的认证审核专家，擅长不符合项管理。",
+                user_prompt=prompt,
+                call_type="audit_nc_suggest",
                 max_tokens=2048,
-                response_format={"type": "json_object"} if self.model_provider != "nvidia" else None
+                temperature=0.5,
             )
 
             import json
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(content)
             return result
 
         except Exception as e:
@@ -374,10 +427,10 @@ class AuditAgent:
 async def prepare_audit_with_ai(
     db: AsyncSession, 
     project_id: UUID,
-    model_provider: str = "sensenova"
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """使用 AI 准备审核"""
-    agent = AuditAgent(db, model_provider=model_provider)
+    agent = AuditAgent(db, user_id=user_id)
     return await agent.prepare_audit(project_id)
 
 
@@ -386,20 +439,20 @@ async def evaluate_evidence_with_ai(
     evidence: str,
     clause_no: str,
     certification_system: str,
-    model_provider: str = "sensenova"
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """使用 AI 评估证据"""
-    agent = AuditAgent(db, model_provider=model_provider)
+    agent = AuditAgent(db, user_id=user_id)
     return await agent.evaluate_evidence(evidence, clause_no, certification_system)
 
 
 async def generate_report_with_ai(
     db: AsyncSession, 
     project_id: UUID,
-    model_provider: str = "sensenova"
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """使用 AI 生成报告"""
-    agent = AuditAgent(db, model_provider=model_provider)
+    agent = AuditAgent(db, user_id=user_id)
     return await agent.generate_report_narrative(project_id)
 
 
@@ -408,8 +461,8 @@ async def suggest_nc_with_ai(
     evidence: str,
     clause_no: str,
     certification_system: str,
-    model_provider: str = "sensenova"
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """使用 AI 建议不符合项"""
-    agent = AuditAgent(db, model_provider=model_provider)
+    agent = AuditAgent(db, user_id=user_id)
     return await agent.suggest_nonconformity(evidence, clause_no, certification_system)

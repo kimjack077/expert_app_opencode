@@ -100,6 +100,11 @@ export const getEnterprises = (params) => {
   })
 }
 
+// 获取企业详情
+export const getEnterprise = (enterpriseId) => {
+  return request.get(`/enterprises/${enterpriseId}`)
+}
+
 // 获取企业风险画像
 export const getEnterpriseRiskProfile = (enterpriseId) => {
   return request.get(`/enterprises/${enterpriseId}/risk-profile`)

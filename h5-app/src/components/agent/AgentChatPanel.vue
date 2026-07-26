@@ -112,7 +112,7 @@
 import { ref, watch, nextTick, computed } from 'vue'
 import { showToast, showSuccessToast, showFailToast } from 'vant'
 import AgentMessage from './AgentMessage.vue'
-import { createOrUpdateRecordItem, updateRecord } from '../../api/records'
+import { confirmAgentAction, getAgentActionRegistry } from '../../api/agent'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
@@ -151,6 +151,8 @@ const messagesRef = ref(null)
 const currentStreamContent = ref('')
 const abortController = ref(null)
 const conversationId = ref(null)
+// 服务端本轮助手消息的 ID：确认动作时只回传 (message_id, action_index)
+const currentMessageId = ref(null)
 
 // 语音输入（现场审核员戴手套/环境嘈杂时的降门槛入口）
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -249,6 +251,7 @@ const sendMessage = async () => {
 const streamChat = async (message) => {
   isThinking.value = true
   currentStreamContent.value = ''
+  currentMessageId.value = null
 
   const messageIndex = messages.value.length
   messages.value.push({
@@ -313,6 +316,7 @@ const streamChat = async (message) => {
 
             if (data.type === 'conversation') {
               conversationId.value = data.conversation_id
+              currentMessageId.value = data.message_id || null
             } else if (data.type === 'content') {
               // Use reactive update by assigning to the array element
               messages.value[messageIndex] = {
@@ -386,9 +390,38 @@ const stopGeneration = () => {
   }
 }
 
+// 服务端动作注册表尚未收录的动作，仍走旧的直连写入路径。
+// 注册表取不到时用这份兜底名单。
+const LEGACY_ACTIONS = ['submit_audit_evidence']
+
+const registryActions = ref(null)
+
+/** 懒加载服务端动作注册表：注册表收录的动作走统一确认接口 */
+const loadActionRegistry = async () => {
+  if (registryActions.value) return registryActions.value
+  try {
+    const res = await getAgentActionRegistry()
+    const actions = res?.data?.actions
+    if (Array.isArray(actions)) {
+      registryActions.value = actions
+    }
+  } catch (error) {
+    console.warn('获取动作注册表失败，按兜底名单处理', error)
+  }
+  return registryActions.value
+}
+
 const buildActionProposal = (data) => {
+  // 动作提案的执行凭据：服务端持久化了提案内容，前端只记住「哪一条」
+  const ref_ = {
+    action: data.action || '',
+    messageId: data.message_id || currentMessageId.value || '',
+    actionIndex: typeof data.action_index === 'number' ? data.action_index : 0
+  }
+
   if (data.action === 'apply_check_result') {
     return {
+      ...ref_,
       type: 'judgment',
       title: '建议记录检查结果',
       status: 'pending',
@@ -404,6 +437,7 @@ const buildActionProposal = (data) => {
   }
   if (data.action === 'apply_final_verdict') {
     return {
+      ...ref_,
       type: 'final_verdict',
       title: '建议记录最终判定',
       status: 'pending',
@@ -415,6 +449,7 @@ const buildActionProposal = (data) => {
     }
   }
   return {
+    ...ref_,
     type: 'operation',
     title: data.title || '建议操作',
     status: 'pending',
@@ -422,18 +457,87 @@ const buildActionProposal = (data) => {
   }
 }
 
+/**
+ * 审核员在卡片上确认的内容。服务端只接受这几个可覆写字段，
+ * 保证「写到哪条记录」由服务端提案决定，前端改不了定位字段。
+ */
+const buildOverrides = (action) => {
+  const data = action.data || {}
+  if (action.type === 'judgment') {
+    return {
+      result: data.result,
+      problem_description: data.problemDescription || '',
+      rectification_suggestion: data.rectificationSuggestion || ''
+    }
+  }
+  if (action.type === 'final_verdict') {
+    return {
+      verdict: data.verdict,
+      comment: data.comment || ''
+    }
+  }
+  return {}
+}
+
+/**
+ * 旧路径：submit_audit_evidence 尚未进入服务端动作注册表，
+ * 暂时保留受当前项目约束的直连写入。其余动作一律走 /api/agent/actions/confirm。
+ */
+const executeLegacyProjectAction = async (action) => {
+  const data = action.data || {}
+  const projectId = String(data.project_id || props.context.projectId || '')
+  const endpoint = String(data.confirm_endpoint || data.endpoint || '')
+  const method = String(data.confirm_method || data.method || 'POST').toUpperCase()
+  const expectedPrefix = `/api/audit-projects/${projectId}/`
+
+  if (!projectId || projectId !== String(props.context.projectId || '') || !endpoint.startsWith(expectedPrefix) || !['POST', 'PUT', 'PATCH'].includes(method)) {
+    throw new Error('该确认卡缺少受当前项目约束的写入协议')
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+    },
+    body: JSON.stringify(data.confirm_payload || {})
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || (payload && payload.code && payload.code >= 400)) {
+    throw new Error(payload?.detail?.message || payload?.detail || payload?.message || '确认写入失败')
+  }
+  return payload?.data || payload
+}
+
 const handleConfirmAction = async (messageIndex, action) => {
   const currentMsg = messages.value[messageIndex]
 
   try {
-    if (action.type === 'judgment') {
-      await createOrUpdateRecordItem(action.data.recordId, {
-        id: action.data.itemId,
-        radio_value: action.data.result,
-        problem_description: action.data.problemDescription || '',
-        rectification_suggestion: action.data.rectificationSuggestion || '',
-        ai_generated: true
+    let result = null
+
+    const registry = await loadActionRegistry()
+    const serverExecutable = registry
+      ? registry.includes(action.action)
+      : !LEGACY_ACTIONS.includes(action.action)
+
+    if (!serverExecutable) {
+      result = await executeLegacyProjectAction(action)
+    } else {
+      if (!action.messageId) {
+        throw new Error('该确认卡缺少服务端动作标识，无法执行')
+      }
+      const res = await confirmAgentAction({
+        messageId: action.messageId,
+        actionIndex: action.actionIndex,
+        overrides: buildOverrides(action)
       })
+      if (res?.code && res.code >= 400) {
+        throw new Error(res.detail || res.message || '确认写入失败')
+      }
+      result = res?.data || null
+    }
+
+    if (action.type === 'judgment') {
       emit('result-applied', {
         itemId: action.data.itemId,
         result: action.data.result,
@@ -442,39 +546,13 @@ const handleConfirmAction = async (messageIndex, action) => {
       })
       showSuccessToast('已填写检查结果')
     } else if (action.type === 'final_verdict') {
-      await updateRecord(action.data.recordId, {
-        overall_result: action.data.verdict,
-        remarks: action.data.comment || ''
-      })
       emit('verdict-applied', {
         verdict: action.data.verdict,
         comment: action.data.comment
       })
       showSuccessToast('已填写最终判定')
     } else {
-      const data = action.data || {}
-      const projectId = String(data.project_id || props.context.projectId || '')
-      const endpoint = String(data.confirm_endpoint || data.endpoint || '')
-      const method = String(data.confirm_method || data.method || 'POST').toUpperCase()
-      const expectedPrefix = `/api/audit-projects/${projectId}/`
-
-      if (!projectId || projectId !== String(props.context.projectId || '') || !endpoint.startsWith(expectedPrefix) || !['POST', 'PUT', 'PATCH'].includes(method)) {
-        throw new Error('该确认卡缺少受当前项目约束的写入协议')
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
-        },
-        body: JSON.stringify(data.confirm_payload || {})
-      })
-      const payload = await response.json().catch(() => null)
-      if (!response.ok || (payload && payload.code && payload.code >= 400)) {
-        throw new Error(payload?.detail?.message || payload?.detail || payload?.message || '确认写入失败')
-      }
-      emit('project-action-applied', { action: data, result: payload?.data || payload })
+      emit('project-action-applied', { action: action.data || {}, result })
       showSuccessToast('已确认并写入当前审核项目')
     }
 

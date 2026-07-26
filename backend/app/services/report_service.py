@@ -1,5 +1,6 @@
 import os
 import io
+import logging
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from reportlab.lib import colors
@@ -18,6 +19,9 @@ from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import InspectionTemplate, TemplateItem
 from app.models.enterprise import Enterprise
 from app.models.user import User
+
+
+logger = logging.getLogger(__name__)
 
 
 class ReportService:
@@ -44,8 +48,12 @@ class ReportService:
                     self.font_name = font_name
                     self.font_name_cn = font_name
                     break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # 字体注册失败会静默退回 Helvetica，导致 PDF 中文变方块。
+                    # 必须留痕，否则线上只能看到"报告乱码"却找不到原因。
+                    logger.warning(
+                        "注册中文字体失败，将回退到 Helvetica: %s (%s)", path, exc
+                    )
 
     def _setup_styles(self):
         self.styles.add(ParagraphStyle(

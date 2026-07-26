@@ -76,24 +76,8 @@ export const aiApi = {
     api.post('/llm/legal-basis', { record_id: recordId }),
 }
 
-// AI 助手写回操作（对应 record-flow：InspectionRecord / InspectionRecordItem）
-// 仅供 AgentActionCard 在用户点击"采纳"后调用，写入 /api/records/* 而非
-// /api/tasks/* —— 与本项目 task-flow（InspectionTask/TaskItemRecord）是不同的表。
-export const agentApi = {
-  applyCheckResult: (
-    recordId: string,
-    data: {
-      id?: string
-      result?: string
-      problem_description?: string
-      rectification_suggestion?: string
-      ai_generated?: boolean
-    }
-  ) => api.post(`/records/${recordId}/items`, data),
-  applyFinalVerdict: (
-    recordId: string,
-    data: { overall_result?: string; remarks?: string }
-  ) => api.put(`/records/${recordId}`, data),
-}
+// 注：AI 助手的写回不再由前端翻译成具体业务接口。
+// 提案确认统一走 POST /api/agent/actions/confirm（见 services/agent.ts），
+// 由服务端动作注册表校验参数、重新鉴权后执行。
 
 export default api

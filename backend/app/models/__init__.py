@@ -41,8 +41,10 @@ from .evidence_agent import (
     AiDraftRecord,
 )
 from .project_artifact import ProjectArtifact
+from .agent_runtime import AgentNotification
 
 __all__ = [
+    "AgentNotification",
     "Base",
     "Industry",
     "User",
