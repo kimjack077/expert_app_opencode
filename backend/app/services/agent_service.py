@@ -747,22 +747,37 @@ class AgentService:
         call_type: str = "agent_chat",
         model: Optional[str] = None,
     ) -> None:
+        from app.database import AsyncSessionLocal
         from app.models.audit import LLMCallLog
 
-        log = LLMCallLog(
-            user_id=user_id,
-            record_id=record_id or None,
-            call_type=call_type,
-            prompt=prompt,
-            response=response,
-            model=model or self.model,
-            tokens_used=tokens_used or None,
-            duration_ms=duration_ms,
-            is_success="false" if error_text else "true",
-            error_msg=error_text,
-        )
-        db.add(log)
-        await db.commit()
+        def _build() -> LLMCallLog:
+            return LLMCallLog(
+                user_id=user_id,
+                record_id=record_id or None,
+                call_type=call_type,
+                prompt=prompt,
+                response=response,
+                model=model or self.model,
+                tokens_used=tokens_used or None,
+                duration_ms=duration_ms,
+                is_success="false" if error_text else "true",
+                error_msg=error_text,
+            )
+
+        # 记账发生在流式响应收尾阶段。此时 BaseHTTPMiddleware 可能已取消内部任务，
+        # 请求级 session 会处于 PendingRollbackError 而静默丢日志（成本统计因此失真）。
+        # 优先用请求级 session；一旦不可用就退回独立会话，保证调用日志不丢。
+        try:
+            db.add(_build())
+            await db.commit()
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            async with AsyncSessionLocal() as fresh:
+                fresh.add(_build())
+                await fresh.commit()
 
     @staticmethod
     def _compact_tool_result(tool_name: str, tool_result: Any) -> Any:

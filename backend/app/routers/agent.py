@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from typing import Optional, List
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,7 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.models.agent_conversation import AgentConversation, AgentMessage
 from app.models.record import InspectionRecord, InspectionRecordItem
@@ -18,6 +20,8 @@ from app.services.agent_service import agent_service
 from app.services.project_access_service import ensure_project_access
 from app.utils.security import get_current_user
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,6 +50,37 @@ class ChatRequest(BaseModel):
 
 
 from app.utils.response import make_response  # noqa: E402  统一响应封装
+
+
+async def _persist_assistant_message(
+    message_id: UUID,
+    conversation_id: UUID,
+    content: str,
+    tool_calls: list,
+    proposals: list,
+) -> None:
+    """幂等 upsert 助手消息（含动作提案）。
+
+    永远使用独立会话：调用点位于 SSE 流中/收尾，请求级 session 可能已被
+    中间件取消而不可用。可重复调用——流中每产生一条提案就调一次。
+    """
+    async with AsyncSessionLocal() as sdb:
+        existing = await sdb.get(AgentMessage, message_id)
+        extra = {"action_proposals": proposals} if proposals else None
+        if existing:
+            existing.content = content
+            existing.tool_calls = tool_calls or None
+            existing.extra_data = extra
+        else:
+            sdb.add(AgentMessage(
+                id=message_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=content,
+                tool_calls=tool_calls or None,
+                extra_data=extra,
+            ))
+        await sdb.commit()
 
 
 async def _authorize_chat_context(
@@ -186,6 +221,14 @@ async def chat(
                     event = {**event, "action_index": len(action_proposals),
                              "message_id": str(assistant_message_id)}
                     action_proposals.append(event)
+                    # 关键：**流进行中立即落库**，不能留到 finally。
+                    # SSE 收尾时 BaseHTTPMiddleware 会取消内部任务，届时
+                    # finally 里的任何 await 都会被取消，提案将永远写不进去，
+                    # 导致 /actions/confirm 返回 404（曾经的真实故障）。
+                    await _persist_assistant_message(
+                        assistant_message_id, conversation.id,
+                        assistant_text, tool_call_log, action_proposals,
+                    )
 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -198,19 +241,15 @@ async def chat(
             yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
 
         finally:
-            assistant_message = AgentMessage(
-                id=assistant_message_id,
-                conversation_id=conversation.id,
-                role="assistant",
-                content=assistant_text,
-                tool_calls=tool_call_log or None,
-                extra_data={"action_proposals": action_proposals} if action_proposals else None,
-            )
-            db.add(assistant_message)
+            # 收尾补写完整正文/工具记录。用 shield 抵御任务取消；
+            # 即便这里失败，动作提案在流中已落库，确认链路不受影响。
             try:
-                await db.commit()
+                await asyncio.shield(_persist_assistant_message(
+                    assistant_message_id, conversation.id,
+                    assistant_text, tool_call_log, action_proposals,
+                ))
             except Exception as persist_err:
-                print(f"[Agent] Failed to persist assistant message: {persist_err}")
+                print(f"[Agent] Failed to finalize assistant message: {persist_err}")
 
     return StreamingResponse(
         event_generator(),

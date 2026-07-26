@@ -24,6 +24,7 @@ from app.schemas import (
     InspectionSummary,
 )
 from app.utils.security import get_current_user, get_current_admin_user
+from app.utils.roles import RECORD_VIEW_ALL_ROLES
 from app.services import AuditService
 from app.services.formal_audit_sync_service import (
     can_access_linked_task,

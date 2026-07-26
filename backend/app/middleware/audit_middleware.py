@@ -1,9 +1,6 @@
 import asyncio
 import logging
 
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import StreamingResponse
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
@@ -55,36 +52,65 @@ async def _write_audit_log(
         logger.exception("AuditMiddleware failed to write audit log")
 
 
-class AuditMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
+class AuditMiddleware:
+    """写操作审计中间件（**纯 ASGI**，不要改回 BaseHTTPMiddleware）。
 
-        # 跳过流式响应的请求，避免阻塞
-        if isinstance(response, StreamingResponse):
-            return response
+    历史故障：本中间件曾继承 ``BaseHTTPMiddleware``。该基类会在响应体消费完毕后
+    取消内部任务——对 SSE 流式端点是致命的：流收尾阶段（generator 的 finally）
+    里的任何 await 都会被取消，请求级 DB session 进入 PendingRollbackError。
+    真实后果是 Agent 的动作提案永远写不进 ``agent_messages``，
+    导致 ``/api/agent/actions/confirm`` 一律 404。
 
-        if request.method not in _AUDITED_METHODS:
-            return response
-        if not (200 <= response.status_code < 300):
-            return response
+    纯 ASGI 实现不包装/取消内部任务，流式响应（对话、简报、规划器、AI 判定流）
+    得以正常收尾。
+    """
 
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "")
+        if method not in _AUDITED_METHODS:
+            await self.app(scope, receive, send)
+            return
+
+        status_code: int | None = None
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message.get("type") == "http.response.start":
+                status_code = message.get("status")
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+        if status_code is None or not (200 <= status_code < 300):
+            return
+
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers") or []
+        }
         username = None
-        auth_header = request.headers.get("authorization")
+        auth_header = headers.get("authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
             payload = decode_token(auth_header[7:].strip())
             if payload and payload.get("type") == "access":
                 username = payload.get("sub")
 
-        # 后台执行：审计写入不再串行阻塞响应返回。
+        client = scope.get("client")
+        # 后台执行：审计写入不串行阻塞响应返回。
         asyncio.create_task(
             _write_audit_log(
                 username=username,
-                method=request.method,
-                path=request.url.path,
-                status_code=response.status_code,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
+                method=method,
+                path=scope.get("path", ""),
+                status_code=status_code,
+                ip_address=client[0] if client else None,
+                user_agent=headers.get("user-agent"),
             )
         )
-
-        return response
