@@ -1,7 +1,6 @@
 import time
 import re
 from typing import Optional, Union, AsyncGenerator
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -10,6 +9,7 @@ from app.models.task import TaskItemRecord
 from app.models.record import InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.audit import LLMCallLog
+from app.utils.llm_fallback import create_main_llm_client
 
 
 SUGGESTION_PROMPT = """
@@ -69,11 +69,7 @@ class LLMService:
     def __init__(self):
         print(f"[LLM] Initializing with base_url={settings.LLM_BASE_URL}, model={settings.LLM_MODEL}")
         print(f"[LLM] API key configured: {bool(settings.LLM_API_KEY)}")
-        self.client = AsyncOpenAI(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
 
     async def get_suggestion(

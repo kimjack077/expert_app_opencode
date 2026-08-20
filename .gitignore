@@ -121,5 +121,9 @@ backend/test_*.py
 # Documents (sample inspection forms, etc.)
 *.pdf
 
+# Backend runtime logs
+backend/backend.log
+backend/backend.err
+
 # Screenshots walkthrough notes
 screenshots/walkthrough.md

@@ -12,11 +12,11 @@ import time
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.utils.llm_fallback import create_main_llm_client
 from app.models.audit_project import (
     AuditProject,
     AuditAreaRecord,
@@ -49,11 +49,7 @@ class AuditAgent:
         # drafting are text tasks.  Keep them on the configured primary text
         # model; the separate vision model is reserved for photo analysis.
         self.model_provider = settings.LLM_PROVIDER
-        self.client = AsyncOpenAI(
-            api_key=settings.LLM_API_KEY,
-            base_url=settings.LLM_BASE_URL,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
 
     async def _chat_json(

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.utils.llm_fallback import create_main_llm_client
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.enterprise import Enterprise
@@ -405,11 +406,7 @@ FORCE_FINAL_USER_PROMPT = (
 
 class AgentService:
     def __init__(self):
-        self.client = AsyncOpenAI(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
         self.vision_client = AsyncOpenAI(
             base_url=settings.VISION_LLM_BASE_URL,

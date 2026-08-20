@@ -4,11 +4,10 @@ import re
 import time
 from typing import Optional, List, AsyncGenerator
 
-import httpx
-from openai import AsyncOpenAI
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
+from app.utils.llm_fallback import create_ai_extract_llm_client
 
 
 EXTRACT_TEMPLATE_ITEMS_PROMPT = """
@@ -129,11 +128,8 @@ class AIExtractService:
     def _init_clients(self):
         # AI 文档解析专用模型：SenseNova sensenova-6.8-flash-lite
         # （edgefn DeepSeek-V4-Flash 思考过长且网关易断连，实测 SenseNova 流式稳定）
-        self.client = AsyncOpenAI(
-            base_url=settings.AI_EXTRACT_LLM_BASE_URL,
-            api_key=settings.AI_EXTRACT_LLM_API_KEY,
-            timeout=httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=15.0),
-        )
+        # 配置了备用模型时自动启用降级（主 429/超时/断连 → 备用 + reasoning_effort=none）
+        self.client = create_ai_extract_llm_client()
         self.model = settings.AI_EXTRACT_LLM_MODEL
 
     async def _parse_file_bytes(self, file_content: bytes, filename: str) -> str:

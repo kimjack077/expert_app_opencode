@@ -23,9 +23,8 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from openai import AsyncOpenAI
-
 from app.config import settings
+from app.utils.llm_fallback import create_main_llm_client
 
 
 logger = logging.getLogger("evidence_agent")
@@ -79,11 +78,7 @@ class EvidenceAgentError(RuntimeError):
 
 class EvidenceAgentService:
     def __init__(self) -> None:
-        self.client = AsyncOpenAI(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
 
     @staticmethod

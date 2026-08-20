@@ -10,12 +10,12 @@ This service provides:
 
 import json
 from typing import Optional, List, Dict, Any
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.utils.llm_fallback import create_main_llm_client
 from app.models.template import InspectionTemplate
 from app.models.enterprise import Enterprise
 from app.models.industry import Industry
@@ -56,11 +56,7 @@ class TemplateRecommendationService:
     """Service for intelligent template recommendation"""
 
     def __init__(self):
-        self.client = AsyncOpenAI(
-            base_url=settings.LLM_BASE_URL,
-            api_key=settings.LLM_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
 
     async def recommend_templates(

@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
 
+    # 备用 LLM（主模型 429/超时自动降级用，edgefn 网关 + DeepSeek-V4-Flash-0731）
+    LLM_BACKUP_BASE_URL: str = ""
+    LLM_BACKUP_MODEL: str = ""
+    LLM_BACKUP_API_KEY: str = ""
+
+    @property
+    def has_llm_backup(self) -> bool:
+        """是否配置了备用 LLM。"""
+        return bool(self.LLM_BACKUP_BASE_URL and self.LLM_BACKUP_MODEL and self.LLM_BACKUP_API_KEY)
+
     # 模型分层（共享 Agent 运行时使用）。
     # cheap：简单意图（列任务、意图分类、规划步骤）——可指向更小/更快的模型；
     # standard：常规推理（对话、报告）；vision：多模态。
@@ -119,6 +129,21 @@ class Settings(BaseSettings):
     # - 非推理模型（DeepSeek-V3.2）：留空或 none，不传 reasoning_effort
     # - DeepSeek 思考模式默认开启无法关闭；none/空时不传 reasoning_effort，走 DeepSeek 默认 medium
     AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
+
+    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级）
+    # edgefn 网关 + DeepSeek-V4-Flash-0731，强制 reasoning_effort=none 快速响应
+    AI_EXTRACT_LLM_BACKUP_BASE_URL: str = ""
+    AI_EXTRACT_LLM_BACKUP_MODEL: str = ""
+    AI_EXTRACT_LLM_BACKUP_API_KEY: str = ""
+
+    @property
+    def has_ai_extract_llm_backup(self) -> bool:
+        """是否配置了 AI 解析备用 LLM。"""
+        return bool(
+            self.AI_EXTRACT_LLM_BACKUP_BASE_URL
+            and self.AI_EXTRACT_LLM_BACKUP_MODEL
+            and self.AI_EXTRACT_LLM_BACKUP_API_KEY
+        )
 
     @property
     def ai_extract_is_thinking_model(self) -> bool:
