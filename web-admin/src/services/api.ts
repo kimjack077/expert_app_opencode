@@ -201,47 +201,56 @@ export const aiExtractApi = {
     formData.append('file', file)
 
     const token = useAuthStore.getState().token
-    const response = await fetch('/api/ai-extract/extract/stream', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-      body: formData,
-    })
+    // 总超时兜底：15 分钟（覆盖整个流式读取过程）
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000)
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
+    try {
+      const response = await fetch('/api/ai-extract/extract/stream', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+        signal: controller.signal,
+      })
 
-    const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
 
-    if (!reader) {
-      throw new Error('No reader available')
-    }
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
 
-    let buffer = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      if (!reader) {
+        throw new Error('No reader available')
+      }
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            if (data.type === 'status' && onStatus) {
-              onStatus(data.message)
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.type === 'status' && onStatus) {
+                onStatus(data.message)
+              }
+              yield data
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e)
             }
-            yield data
-          } catch (e) {
-            console.error('Failed to parse SSE data:', e)
           }
         }
       }
+    } finally {
+      clearTimeout(timeoutId)
     }
   },
   previewItems: (items: any[]) =>

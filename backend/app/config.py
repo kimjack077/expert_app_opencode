@@ -55,14 +55,13 @@ class Settings(BaseSettings):
     def CORS_ORIGIN_LIST(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
-    # DeepSeek V4 (via SenseNova): 1M context, up to 64K output, JSON Output / Tool Calls.
-    # Thinking mode is optional; structured JSON agents should disable thinking for speed.
-    LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
-    LLM_PROVIDER: str = "sensenova"
-    LLM_MODEL: str = "deepseek-v4-flash"
-    LLM_API_KEY: str = ""
-    LLM_MAX_TOKENS: int = 8192
-    LLM_TEMPERATURE: float = 1.0
+    # DeepSeek V4 (via EdgeFN / SenseNova): up to 1024K context, JSON Output / Tool Calls.
+    LLM_BASE_URL: str = "https://api.edgefn.net/v1"
+    LLM_PROVIDER: str = "edgefn"
+    LLM_MODEL: str = "DeepSeek-V4-Flash-0731"
+    LLM_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+    LLM_MAX_TOKENS: int = 128000
+    LLM_TEMPERATURE: float = 0.3
     LLM_TOP_P: float = 0.95
     LLM_TIMEOUT: int = 180
     # When True, DeepSeek-compatible calls may use thinking mode (slower, reasoning_content).
@@ -110,6 +109,45 @@ class Settings(BaseSettings):
     VISION_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
     VISION_LLM_MODEL: str = "sensenova-6.7-flash-lite"
     VISION_LLM_API_KEY: str = ""
+
+    # AI 文档解析辅助录入专用模型（SenseNova 网关，流式稳定、速度快）
+    AI_EXTRACT_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
+    AI_EXTRACT_LLM_MODEL: str = "sensenova-6.8-flash-lite"
+    AI_EXTRACT_LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    # 推理力度：low/medium/high/none/空（仅推理模型生效）
+    # - sensenova-6.8-flash-lite / DeepSeek-V4-Flash：设 low/medium/high 控制思考深度
+    # - 非推理模型（DeepSeek-V3.2）：留空或 none，不传 reasoning_effort
+    # - DeepSeek 思考模式默认开启无法关闭；none/空时不传 reasoning_effort，走 DeepSeek 默认 medium
+    AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
+
+    @property
+    def ai_extract_is_thinking_model(self) -> bool:
+        """判断当前 AI_EXTRACT 模型是否为推理模型（需要 thinking 开关控制）。"""
+        model = (self.AI_EXTRACT_LLM_MODEL or "").lower()
+        # DeepSeek-V4 / DeepSeek-R1 等带 reasoning_content 的推理模型
+        return "v4" in model or "r1" in model or "reasoning" in model
+
+    @property
+    def ai_extract_is_sensenova_reasoning_model(self) -> bool:
+        """判断是否为 SenseNova 6.x 推理模型（用 reasoning_effort 直接控制）。"""
+        model = (self.AI_EXTRACT_LLM_MODEL or "").lower()
+        return "sensenova" in model and "6.8" in model
+
+    @property
+    def ai_extract_reasoning_kwargs(self) -> dict:
+        """返回给 OpenAI SDK create() 的推理相关参数。
+
+        - sensenova-6.8-flash-lite / DeepSeek-V4-Flash: 传 reasoning_effort=low/medium/high
+          （none 时不传，DeepSeek 默认 medium，sensenova 也默认 medium）
+        - 非推理模型（DeepSeek-V3.2）: 返回空 dict
+        - DeepSeek 关思考：官方未暴露关闭接口，思考模式默认开启无法关闭
+        """
+        effort = (self.AI_EXTRACT_LLM_REASONING_EFFORT or "").strip().lower()
+        if not effort or effort == "none":
+            return {}
+        if self.ai_extract_is_sensenova_reasoning_model or self.ai_extract_is_thinking_model:
+            return {"reasoning_effort": effort}
+        return {}
 
     UPLOAD_DIR: str = "./uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024

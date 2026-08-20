@@ -1,156 +1,263 @@
 <template>
-  <div class="login-page">
-    <div class="login-header">
-      <div class="header-bg"></div>
-      <div class="logo-container">
-        <div class="logo-glow"></div>
-        <div class="logo">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <path d="m9 12 2 2 4-4"/>
-          </svg>
+  <div class="efis-h5-login">
+    <!-- 顶部科技流光 Header -->
+    <div class="h5-login-hero">
+      <div class="hero-mesh"></div>
+      <div class="hero-ambient-glow"></div>
+
+      <!-- 品牌 Shield Logo -->
+      <div class="hero-brand">
+        <div class="brand-shield-wrapper">
+          <div class="shield-pulse"></div>
+          <div class="brand-shield">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="brand-text">
+          <div class="brand-tag">EFIS ENTERPRISE MOBILE</div>
+          <h1 class="brand-title">专家现场工作台</h1>
+          <p class="brand-desc">数智化认证审核 · 现场采证与分析</p>
         </div>
       </div>
-      <h1 class="title">专家现场审核平台</h1>
-      <p class="subtitle">EFIS · 认证审核与现场检查</p>
-      <div class="badges">
-        <span class="badge">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-          审核员用手机端
-        </span>
-        <span class="badge accent">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-          管理员用 Web 端
-        </span>
+
+      <!-- 业务能力亮点标签 -->
+      <div class="hero-features">
+        <div class="feature-chip">
+          <span class="chip-dot"></span>
+          <span>AI 审查助手</span>
+        </div>
+        <div class="feature-chip">
+          <span class="chip-dot dot-green"></span>
+          <span>现场智能采证</span>
+        </div>
+        <div class="feature-chip">
+          <span class="chip-dot dot-amber"></span>
+          <span>移动检查单</span>
+        </div>
       </div>
     </div>
 
-    <div class="login-form-container">
-      <div class="form-card">
-        <div class="form-header">
-          <h2 class="form-title">欢迎登录</h2>
-          <p class="form-subtitle">审核员登录后进入「今日审核」；日常检查可在任务页处理</p>
+    <!-- 登录主体卡片 -->
+    <div class="h5-form-wrapper">
+      <div class="h5-login-card">
+        <!-- 身份快捷切换 Tabs -->
+        <div class="role-selector-header">
+          <div class="role-selector-label">快速选择登录身份</div>
+          <div class="role-pills">
+            <button
+              type="button"
+              class="role-pill"
+              :class="{ active: currentRole === 'expert' }"
+              @click="selectRole('expert')"
+            >
+              <div class="role-pill-icon icon-expert">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+              </div>
+              <div class="role-pill-text">
+                <span class="pill-title">审核专家</span>
+                <span class="pill-sub">expert</span>
+              </div>
+              <div v-if="currentRole === 'expert'" class="role-check">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="role-pill"
+              :class="{ active: currentRole === 'admin' }"
+              @click="selectRole('admin')"
+            >
+              <div class="role-pill-icon icon-admin">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <div class="role-pill-text">
+                <span class="pill-title">管理员</span>
+                <span class="pill-sub">admin</span>
+              </div>
+              <div v-if="currentRole === 'admin'" class="role-check">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+            </button>
+          </div>
         </div>
-        
-        <van-form class="login-form">
-          <div class="input-group">
-            <van-field
-              v-model="form.username"
-              name="username"
-              placeholder="请输入用户名"
-              :rules="[{ required: true, message: '请填写用户名' }]"
-              class="custom-field"
-            >
-              <template #left-icon>
-                <div class="input-icon">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                    <circle cx="12" cy="7" r="4"/>
-                  </svg>
-                </div>
-              </template>
-            </van-field>
-          </div>
-          
-          <div class="input-group">
-            <van-field
-              v-model="form.password"
-              type="password"
-              name="password"
-              placeholder="请输入密码"
-              :rules="[{ required: true, message: '请填写密码' }]"
-              class="custom-field"
-              @keyup.enter="onSubmit"
-            >
-              <template #left-icon>
-                <div class="input-icon">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                  </svg>
-                </div>
-              </template>
-            </van-field>
+
+        <!-- 登录表单 -->
+        <van-form class="h5-actual-form" @submit.prevent="onSubmit">
+          <div class="form-item-group">
+            <label class="field-label">账号 / 用户名</label>
+            <div class="input-box">
+              <span class="field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+              </span>
+              <input
+                v-model="form.username"
+                type="text"
+                class="native-input"
+                placeholder="请输入用户名"
+                autocomplete="username"
+              />
+            </div>
           </div>
 
-          <div class="form-options">
-            <van-checkbox v-model="rememberMe" shape="round" icon-size="16">
-              记住我
+          <div class="form-item-group">
+            <label class="field-label">登录密码</label>
+            <div class="input-box">
+              <span class="field-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </span>
+              <input
+                v-model="form.password"
+                :type="showPassword ? 'text' : 'password'"
+                class="native-input"
+                placeholder="请输入密码"
+                autocomplete="current-password"
+                @keyup.enter="onSubmit"
+              />
+              <button
+                type="button"
+                class="pwd-toggle"
+                @click="showPassword = !showPassword"
+              >
+                <svg v-if="showPassword" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- 选项栏 -->
+          <div class="form-sub-options">
+            <van-checkbox v-model="rememberMe" shape="square" icon-size="15px">
+              <span class="checkbox-text">记住我的账号</span>
             </van-checkbox>
-            <a href="#" class="forgot-link">忘记密码?</a>
+            <span class="help-text" @click="onHelpClick">需要帮助?</span>
           </div>
 
+          <!-- 登录按钮 -->
           <van-button
             block
             type="primary"
             :loading="loading"
-            loading-text="登录中..."
-            class="submit-btn"
+            loading-text="正在进入工作台..."
+            class="h5-submit-button"
             @click="onSubmit"
           >
-            <span class="btn-text">登录</span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
-              <path d="M5 12h14"/>
-              <path d="m12 5 7 7-7 7"/>
+            <span class="btn-title">登录工作台</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="arrow-icon">
+              <line x1="5" y1="12" x2="19" y2="12"/>
+              <polyline points="12 5 19 12 12 19"/>
             </svg>
           </van-button>
         </van-form>
       </div>
     </div>
 
-    <div class="login-footer">
-      <div class="security-info">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <!-- 底部安全与合规标识 -->
+    <div class="h5-login-footer">
+      <div class="footer-security">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <polyline points="9 12 11 14 15 10"/>
         </svg>
-        <span>SSL 安全加密传输</span>
+        <span>SSL 256-bit 加密传输 · 现场数据安全保障</span>
       </div>
-      <p class="copyright">© 2024 专家检查系统 · 专业现场工作辅助平台</p>
+      <div class="footer-copy">
+        EFIS 专家现场工作辅助系统 · 移动端 v2.4
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showToast, showDialog } from 'vant'
 import { login } from '../api/auth.js'
 
 const router = useRouter()
 const loading = ref(false)
-const rememberMe = ref(false)
+const rememberMe = ref(true)
+const showPassword = ref(false)
+const currentRole = ref('expert')
 
 const form = reactive({
-  username: '',
-  password: '',
+  username: 'expert',
+  password: 'expert123',
 })
+
+onMounted(() => {
+  const savedUser = localStorage.getItem('rememberedUsername')
+  if (savedUser) {
+    form.username = savedUser
+    if (savedUser === 'admin') {
+      currentRole.value = 'admin'
+      form.password = 'admin123'
+    } else if (savedUser === 'expert') {
+      currentRole.value = 'expert'
+      form.password = 'expert123'
+    }
+  }
+})
+
+const selectRole = (role) => {
+  currentRole.value = role
+  if (role === 'expert') {
+    form.username = 'expert'
+    form.password = 'expert123'
+  } else if (role === 'admin') {
+    form.username = 'admin'
+    form.password = 'admin123'
+  }
+}
+
+const onHelpClick = () => {
+  showDialog({
+    title: '系统登录提示',
+    message: '现场专家请使用分配的专家账号登录。如忘记密码，请联系机构管理中心或管理员 (admin) 重置。',
+    theme: 'round-button',
+    confirmButtonColor: '#0284c7',
+  })
+}
 
 const onSubmit = async () => {
   if (!form.username || !form.password) {
     showToast({ type: 'fail', message: '请填写用户名和密码' })
     return
   }
-  
+
   loading.value = true
   try {
-    console.log('开始登录，用户名:', form.username)
-    console.log('请求数据:', JSON.stringify({ username: form.username, password: '***' }))
-    
     const res = await login(form)
-    
-    console.log('登录响应完整数据:', JSON.stringify(res))
-    console.log('响应状态码:', res.code)
-    console.log('响应消息:', res.message)
-    
     const token = res.data?.access_token
     const refreshToken = res.data?.refresh_token
-    console.log('获取到的 token:', token ? token.substring(0, 50) + '...' : 'null')
-    
+
     if (token) {
       localStorage.setItem('token', token)
       if (refreshToken) {
@@ -158,33 +265,27 @@ const onSubmit = async () => {
       }
       if (rememberMe.value) {
         localStorage.setItem('rememberedUsername', form.username)
+      } else {
+        localStorage.removeItem('rememberedUsername')
       }
+
       showToast({ type: 'success', message: '登录成功', duration: 1000 })
-      console.log('页面跳转开始')
       setTimeout(() => {
         router.push('/today-audit')
-        console.log('页面跳转完成')
-      }, 500)
+      }, 400)
     } else {
-      console.error('未获取到 token，响应数据:', res)
-      throw new Error('登录失败：未获取到 token')
+      throw new Error('未获取到有效认证凭据')
     }
   } catch (error) {
     console.error('登录失败:', error)
-    console.error('错误详情:', error.response?.data || error.message)
-    
-    let errorMsg = '登录失败'
-    if (error.response) {
-      errorMsg = error.response.data?.detail || error.response.data?.message || errorMsg
-      console.error('后端错误:', error.response.data)
-    } else if (error.request) {
-      console.error('网络错误：请求已发送但未收到响应')
-      console.error('请求配置:', error.config)
-      errorMsg = '网络连接失败，请检查后端服务是否启动'
-    } else {
-      errorMsg = error.message || errorMsg
+    let errorMsg = '登录失败，请检查账号密码'
+    if (error.response?.data?.detail) {
+      errorMsg = error.response.data.detail
+    } else if (error.response?.data?.message) {
+      errorMsg = error.response.data.message
+    } else if (error.message) {
+      errorMsg = error.message
     }
-    
     showToast({ type: 'fail', message: errorMsg, duration: 2000 })
   } finally {
     loading.value = false
@@ -193,327 +294,386 @@ const onSubmit = async () => {
 </script>
 
 <style scoped>
-.login-page {
+.efis-h5-login {
   min-height: 100vh;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background: var(--bg-white);
+  display: flex;
+  flex-direction: column;
+  background-color: #f1f5f9;
   position: relative;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* 顶部科技 Hero 区域 */
+.h5-login-hero {
+  position: relative;
+  background: linear-gradient(155deg, #09172a 0%, #0d2547 55%, #0369a1 100%);
+  padding: calc(env(safe-area-inset-top) + 24px) 20px 48px;
+  color: #ffffff;
   overflow: hidden;
+  border-bottom-left-radius: 28px;
+  border-bottom-right-radius: 28px;
 }
 
-.login-page::before {
-  content: '';
+.hero-mesh {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 156px;
-  background: var(--primary-gradient-dark);
+  inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
   pointer-events: none;
-}
-
-.login-page::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 156px;
-  background: 
-    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 90% 70%, rgba(56, 189, 248, 0.15) 0%, transparent 40%);
-  pointer-events: none;
-}
-
-.login-header {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  align-items: center;
-  column-gap: 12px;
-  padding: calc(env(safe-area-inset-top) + 18px) 20px 28px;
-  color: var(--bg-white);
-  position: relative;
-  z-index: 1;
-}
-
-.header-bg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: 
-    radial-gradient(circle at 30% 40%, rgba(56, 189, 248, 0.1) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-.logo-container {
-  position: relative;
-  grid-column: 1;
-  grid-row: 1 / 3;
-  margin: 0;
-}
-
-.logo-glow {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 76px;
-  height: 76px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.25) 0%, transparent 70%);
-  border-radius: 50%;
-  animation: pulse 3s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { 
-    transform: translate(-50%, -50%) scale(1); 
-    opacity: 0.5; 
-  }
-  50% { 
-    transform: translate(-50%, -50%) scale(1.12); 
-    opacity: 0.25; 
-  }
-}
-
-.logo {
-  width: 52px;
-  height: 52px;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  position: relative;
-  z-index: 1;
-  backdrop-filter: blur(10px);
-}
-
-.logo svg {
-  color: var(--primary-color);
-  width: 30px;
-  height: 30px;
-}
-
-.title {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: end;
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0 0 2px;
-  letter-spacing: 1px;
-  font-family: var(--font-primary);
-}
-
-.subtitle {
-  grid-column: 2;
-  grid-row: 2;
-  align-self: start;
-  font-size: 11px;
-  opacity: 0.75;
-  margin: 0;
-  letter-spacing: 0.5px;
-  font-weight: 400;
-}
-
-.badges {
-  grid-column: 1 / 3;
-  grid-row: 3;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-top: 10px;
-}
-
-.badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 10px;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
-
-.badge.accent {
-  background: rgba(14, 165, 233, 0.18);
-  border-color: rgba(14, 165, 233, 0.3);
-}
-
-.login-form-container {
-  position: relative;
-  z-index: 2;
-  padding: 0 20px;
-  margin-top: -18px;
-}
-
-.form-card {
-  background: var(--bg-white);
-  border-radius: 24px;
-  padding: 32px 24px;
-  box-shadow: var(--shadow-xl);
-  border: 1px solid var(--border-light);
-}
-
-.form-header {
-  text-align: center;
-  margin-bottom: 28px;
-}
-
-.form-title {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 6px;
-  font-family: var(--font-primary);
-  letter-spacing: -0.5px;
-}
-
-.form-subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-
-.input-group {
-  margin-bottom: 14px;
-}
-
-.custom-field {
-  background: var(--bg-light);
-  border-radius: 14px;
-  overflow: hidden;
-  border: 2px solid transparent;
-  transition: all var(--transition-base);
-}
-
-.custom-field:focus-within {
-  border-color: var(--primary-color);
-  background: var(--bg-white);
-}
-
-.custom-field :deep(.van-field__body) {
-  padding: 6px 0;
-}
-
-.custom-field :deep(.van-field__control) {
-  font-size: 15px;
-  color: var(--text-primary);
-}
-
-.input-icon {
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--primary-color);
-  background: rgba(100, 116, 139, 0.08);
-  border-radius: 12px;
-  margin-right: 10px;
-  transition: all var(--transition-base);
-}
-
-.custom-field:focus-within .input-icon {
-  background: rgba(100, 116, 139, 0.12);
-}
-
-.form-options {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 20px 0;
-  font-size: 14px;
-}
-
-.forgot-link {
-  color: var(--primary-color);
-  text-decoration: none;
-  font-weight: 500;
-  transition: opacity var(--transition-base);
-}
-
-.forgot-link:hover {
   opacity: 0.8;
 }
 
-.submit-btn {
+.hero-ambient-glow {
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.3) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: relative;
+  z-index: 2;
+  margin-bottom: 20px;
+}
+
+.brand-shield-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.shield-pulse {
+  position: absolute;
+  inset: -6px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.4) 0%, transparent 70%);
+  border-radius: 50%;
+  animation: pulseLogo 3s infinite ease-in-out;
+}
+
+@keyframes pulseLogo {
+  0%, 100% { transform: scale(0.95); opacity: 0.5; }
+  50% { transform: scale(1.15); opacity: 0.9; }
+}
+
+.brand-shield {
+  width: 54px;
   height: 54px;
-  border-radius: 14px;
-  background: var(--primary-gradient);
-  border: none;
-  font-size: 16px;
-  font-weight: 600;
+  background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  box-shadow: var(--shadow-primary);
-  transition: all var(--transition-base);
-  font-family: var(--font-primary);
-}
-
-.submit-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.25);
-}
-
-.btn-text {
-  font-size: 16px;
-}
-
-.btn-icon {
-  transition: transform var(--transition-base);
-}
-
-.submit-btn:active .btn-icon {
-  transform: translateX(4px);
-}
-
-.login-footer {
-  padding: 28px 20px;
-  text-align: center;
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(2, 132, 199, 0.4);
   position: relative;
   z-index: 1;
 }
 
-.security-info {
+.brand-text {
+  flex: 1;
+}
+
+.brand-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #38bdf8;
+  margin-bottom: 2px;
+}
+
+.brand-title {
+  font-size: 21px;
+  font-weight: 800;
+  margin: 0 0 3px 0;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+}
+
+.brand-desc {
+  font-size: 12px;
+  color: #cbd5e1;
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* 亮点标签 */
+.hero-features {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.feature-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  font-size: 11px;
+  color: #e2e8f0;
+  backdrop-filter: blur(10px);
+}
+
+.chip-dot {
+  width: 6px;
+  height: 6px;
+  background: #38bdf8;
+  border-radius: 50%;
+}
+
+.dot-green {
+  background: #4ade80;
+}
+
+.dot-amber {
+  background: #fbbf24;
+}
+
+/* 表单主体卡片 */
+.h5-form-wrapper {
+  padding: 0 16px;
+  margin-top: -24px;
+  position: relative;
+  z-index: 10;
+  flex: 1;
+}
+
+.h5-login-card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 22px 18px 24px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+/* 角色快速选择 Pill */
+.role-selector-header {
+  margin-bottom: 20px;
+}
+
+.role-selector-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.role-pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.role-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.role-pill.active {
+  background: #f0f9ff;
+  border-color: #0284c7;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.12);
+}
+
+.role-pill-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.icon-expert {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.icon-admin {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.role-pill-text {
+  flex: 1;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+}
+
+.pill-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.pill-sub {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.role-check {
+  color: #0284c7;
+  display: flex;
+  align-items: center;
+}
+
+/* 输入框 */
+.form-item-group {
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
+.input-box {
+  display: flex;
+  align-items: center;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0 12px;
+  height: 48px;
+  transition: all 0.2s ease;
+}
+
+.input-box:focus-within {
+  border-color: #0284c7;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.field-icon {
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  margin-right: 10px;
+}
+
+.input-box:focus-within .field-icon {
+  color: #0284c7;
+}
+
+.native-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 15px;
+  color: #0f172a;
+  height: 100%;
+}
+
+.native-input::placeholder {
+  color: #94a3b8;
+}
+
+.pwd-toggle {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+/* 选项栏 */
+.form-sub-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 20px;
+}
+
+.checkbox-text {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.help-text {
+  font-size: 13px;
+  color: #0284c7;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* 提交按钮 */
+.h5-submit-button {
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
+  border: none !important;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 8px 20px rgba(2, 132, 199, 0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  margin-bottom: 8px;
+  transition: transform 0.15s ease;
 }
 
-.copyright {
-  color: var(--text-muted);
+.h5-submit-button:active {
+  transform: scale(0.98);
+}
+
+.arrow-icon {
+  transition: transform 0.2s ease;
+}
+
+.h5-submit-button:active .arrow-icon {
+  transform: translateX(3px);
+}
+
+/* 底部声明 */
+.h5-login-footer {
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.footer-security {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
 }
 
-:deep(.van-checkbox__label) {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-:deep(.van-checkbox__icon--checked .van-icon) {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .logo-glow {
-    animation: none;
-  }
+.footer-copy {
+  font-size: 11px;
+  color: #94a3b8;
 }
 </style>

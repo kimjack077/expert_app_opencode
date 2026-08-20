@@ -114,3 +114,12 @@ test_upload.png
 main_new.py
 *.service
 *.conf
+
+# Temporary LLM/API diagnostic scripts
+backend/test_*.py
+
+# Documents (sample inspection forms, etc.)
+*.pdf
+
+# Screenshots walkthrough notes
+screenshots/walkthrough.md

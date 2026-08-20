@@ -1,435 +1,291 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Form, Input, Button, Checkbox, message } from 'antd'
+import { Form, Input, Button, Checkbox, Segmented, message } from 'antd'
 import {
-  SafetyCertificateOutlined,
+  SafetyCertificateFilled,
   UserOutlined,
   LockOutlined,
-  FieldTimeOutlined,
-  TeamOutlined,
+  RobotOutlined,
+  FileProtectOutlined,
+  BarChartOutlined,
+  ArrowRightOutlined,
+  CheckCircleFilled,
+  CrownOutlined,
+  AuditOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
+import './Login.css'
 
 export default function Login() {
   const navigate = useNavigate()
   const login = useAuthStore((state) => state.login)
   const [loading, setLoading] = useState(false)
+  const [selectedRole, setSelectedRole] = useState<'admin' | 'expert' | 'custom'>('admin')
   const [form] = Form.useForm()
 
   const onFinish = async (values: { username: string; password: string }) => {
     setLoading(true)
     try {
       await login(values.username, values.password)
-      message.success('登录成功')
+      message.success('登录成功，正在进入系统...')
       navigate('/dashboard')
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '登录失败，请检查用户名和密码')
+      message.error(error.response?.data?.detail || error.response?.data?.message || '登录失败，请检查用户名和密码')
     } finally {
       setLoading(false)
     }
   }
 
-  const quickLogin = (username: string, password: string) => {
+  const handleRoleChange = (value: string | number) => {
+    const role = value as 'admin' | 'expert' | 'custom'
+    setSelectedRole(role)
+    if (role === 'admin') {
+      form.setFieldsValue({ username: 'admin', password: 'admin123' })
+    } else if (role === 'expert') {
+      form.setFieldsValue({ username: 'expert', password: 'expert123' })
+    } else {
+      form.setFieldsValue({ username: '', password: '' })
+    }
+  }
+
+  const quickLogin = (username: string, password: string, role: 'admin' | 'expert') => {
+    setSelectedRole(role)
     form.setFieldsValue({ username, password })
     form.submit()
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', overflow: 'hidden' }}>
-      {/* 左侧视觉区域 */}
-      <div
-        style={{
-          flex: '0 0 58.33%',
-          position: 'relative',
-          overflow: 'hidden',
-          background: '#0b1c30',
-          display: 'flex',
-        }}
-        className="login-left-panel"
-      >
-        {/* 背景渐变 */}
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background:
-              'linear-gradient(135deg, rgba(11,28,48,0.85) 0%, rgba(0,102,137,0.4) 50%, rgba(28,169,223,0.2) 100%)',
-            zIndex: 1,
-          }}
-        />
-        {/* 装饰图案 */}
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 0,
-            opacity: 0.08,
-            backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-          }}
-        />
-        {/* 内容 */}
-        <div
-          style={{
-            position: 'relative',
-            zIndex: 2,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            padding: 64,
-            width: '100%',
-          }}
-        >
-          {/* 顶部Logo */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 48 }}>
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  background: '#1ca9df',
-                  borderRadius: 8,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <SafetyCertificateOutlined style={{ fontSize: 20, color: '#fff' }} />
-              </div>
-              <span
-                style={{
-                  fontSize: 22,
-                  fontWeight: 900,
-                  color: '#fff',
-                  letterSpacing: '-0.02em',
-                }}
-              >
-                专家现场工作辅助系统
-              </span>
-            </div>
-            <div style={{ maxWidth: 520 }}>
-              <h1
-                style={{
-                  fontSize: '3rem',
-                  lineHeight: 1.15,
-                  fontWeight: 800,
-                  color: '#fff',
-                  marginBottom: 24,
-                  letterSpacing: '-0.02em',
-                }}
-              >
-                企业现场
-                <br />
-                <span style={{ color: '#1ca9df' }}>检查管理平台</span>
-              </h1>
-              <p
-                style={{
-                  fontSize: 17,
-                  color: 'rgba(255,255,255,0.7)',
-                  fontWeight: 400,
-                  maxWidth: 420,
-                  lineHeight: 1.7,
-                }}
-              >
-                面向专家审查员的专业级现场检查系统，支持检查模板管理、任务分配、现场记录与智能分析。
-              </p>
-            </div>
+    <div className="efis-login-page">
+      {/* 左侧 Hero 品牌展示面板 */}
+      <div className="efis-hero-panel">
+        <div className="efis-grid-pattern" />
+
+        <div className="efis-hero-content">
+          {/* 系统标识 Badge */}
+          <div className="efis-brand-badge">
+            <span className="efis-brand-badge-icon">
+              <SafetyCertificateFilled />
+            </span>
+            <span>EFIS 专家现场工作辅助系统 · Enterprise Suite</span>
           </div>
-          {/* 底部数据 */}
-          <div style={{ display: 'flex', gap: 48 }}>
-            <div>
-              <div style={{ color: '#fff', fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em' }}>
-                v1.0.0
+
+          {/* 标题 & 副标 */}
+          <h1 className="efis-hero-title">
+            数智化现场审核
+            <br />
+            <span className="efis-gradient-text">全要素合规把控</span>
+          </h1>
+
+          <p className="efis-hero-desc">
+            深度融合大模型与专业合规知识库，覆盖现场审核全生命周期。为审查专家与机构管理人员提供任务编排、智能采证、AI 对比分析与自动化报告交付能力。
+          </p>
+
+          {/* 核心能力亮点卡片 */}
+          <div className="efis-feature-cards">
+            <div className="efis-feature-card">
+              <div className="efis-feature-icon-box efis-icon-ai">
+                <RobotOutlined />
               </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  fontWeight: 600,
-                  color: 'rgba(255,255,255,0.45)',
-                  marginTop: 4,
-                }}
-              >
-                系统版本
+              <div className="efis-feature-info">
+                <h4>
+                  <span>AI Agent 智能辅助审核</span>
+                  <CheckCircleFilled style={{ color: '#38bdf8', fontSize: 13 }} />
+                </h4>
+                <p>内置标准规程 RAG 检索、现场核查提问建议与证据链符合性智能研判</p>
               </div>
             </div>
-            <div>
-              <div style={{ color: '#fff', fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em' }}>
-                多角色
+
+            <div className="efis-feature-card">
+              <div className="efis-feature-icon-box efis-icon-shield">
+                <FileProtectOutlined />
               </div>
-              <div
-                style={{
-                  fontSize: 11,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.1em',
-                  fontWeight: 600,
-                  color: 'rgba(255,255,255,0.45)',
-                  marginTop: 4,
-                }}
-              >
-                权限管理
+              <div className="efis-feature-info">
+                <h4>
+                  <span>多模态证据链与质量门禁</span>
+                  <CheckCircleFilled style={{ color: '#4ade80', fontSize: 13 }} />
+                </h4>
+                <p>现场照片智能打标、防篡改留痕，执行 6 重全要素质量门禁把关</p>
+              </div>
+            </div>
+
+            <div className="efis-feature-card">
+              <div className="efis-feature-icon-box efis-icon-report">
+                <BarChartOutlined />
+              </div>
+              <div className="efis-feature-info">
+                <h4>
+                  <span>智能报告与成果一键交付</span>
+                  <CheckCircleFilled style={{ color: '#fbbf24', fontSize: 13 }} />
+                </h4>
+                <p>一键生成合规审核报告、不符合项清单与完整交付归档包</p>
               </div>
             </div>
           </div>
         </div>
+
+        {/* 底部系统状态 */}
+        <div className="efis-hero-footer">
+          <div className="efis-status-indicator">
+            <span className="efis-pulse-dot" />
+            <span>核心服务在线 · 数据库正常联机</span>
+          </div>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <span>安全加密: TLS 1.3 / AES-256</span>
+            <span>系统版本: v2.4 Pro</span>
+          </div>
+        </div>
       </div>
 
-      {/* 右侧登录表单 */}
-      <div
-        style={{
-          flex: '0 0 41.67%',
-          background: '#eff4ff',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: '0 96px',
-          position: 'relative',
-        }}
-        className="login-right-panel"
-      >
-        <div style={{ width: '100%', maxWidth: 400 }}>
-          {/* 标题 */}
-          <div style={{ marginBottom: 48 }}>
-            <h2
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: '#0b1c30',
-                marginBottom: 8,
-              }}
-            >
-              专家检查系统
-            </h2>
-            <p style={{ color: '#3e484f', fontSize: 14, fontWeight: 500, margin: 0 }}>
-              请登录以访问检查管理平台
-            </p>
+      {/* 右侧登录表单面板 */}
+      <div className="efis-auth-panel">
+        <div className="efis-auth-card">
+          {/* 表单头部 */}
+          <div className="efis-auth-header">
+            <div className="efis-auth-logo-badge">
+              <GlobalOutlined />
+              <span>管理控制台</span>
+            </div>
+            <h2 className="efis-auth-title">欢迎登录 EFIS</h2>
+            <p className="efis-auth-subtitle">请选择身份或输入账号以访问管理系统</p>
           </div>
+
+          {/* 角色快捷分段选择器 */}
+          <Segmented
+            className="efis-role-selector"
+            block
+            value={selectedRole}
+            onChange={handleRoleChange}
+            options={[
+              {
+                label: '管理员',
+                value: 'admin',
+                icon: <CrownOutlined />,
+              },
+              {
+                label: '审核专家',
+                value: 'expert',
+                icon: <AuditOutlined />,
+              },
+              {
+                label: '其他账号',
+                value: 'custom',
+                icon: <UserOutlined />,
+              },
+            ]}
+          />
 
           {/* 登录表单 */}
           <Form
             form={form}
-            name="login"
+            name="efis_login"
+            initialValues={{
+              username: 'admin',
+              password: 'admin123',
+              remember: true,
+            }}
             onFinish={onFinish}
             autoComplete="off"
-            size="large"
+            layout="vertical"
           >
             <Form.Item
               name="username"
               rules={[{ required: true, message: '请输入用户名' }]}
-              style={{ marginBottom: 24 }}
+              style={{ marginBottom: 18 }}
             >
               <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    fontWeight: 700,
-                    color: '#6e7980',
-                    display: 'block',
-                    marginBottom: 4,
-                  }}
-                >
-                  用户名
-                </label>
+                <label className="efis-input-label">账号 / 用户名</label>
                 <Input
-                  prefix={<UserOutlined style={{ color: '#bdc8d0', marginRight: 8 }} />}
+                  prefix={<UserOutlined className="efis-input-icon" />}
                   placeholder="请输入用户名"
-                  bordered={false}
-                  style={{
-                    borderBottom: '2px solid #bdc8d0',
-                    borderRadius: 0,
-                    padding: '8px 0',
-                    fontSize: 15,
-                    color: '#0b1c30',
-                  }}
-                  className="login-input"
+                  className="efis-input-wrapper"
+                  size="large"
                 />
               </div>
             </Form.Item>
 
             <Form.Item
               name="password"
-              rules={[{ required: true, message: '请输入密码' }]}
-              style={{ marginBottom: 24 }}
+              rules={[{ required: true, message: '请输入登录密码' }]}
+              style={{ marginBottom: 18 }}
             >
               <div>
-                <label
-                  style={{
-                    fontSize: 11,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    fontWeight: 700,
-                    color: '#6e7980',
-                    display: 'block',
-                    marginBottom: 4,
-                  }}
-                >
-                  密码
-                </label>
+                <label className="efis-input-label">登录密码</label>
                 <Input.Password
-                  prefix={<LockOutlined style={{ color: '#bdc8d0', marginRight: 8 }} />}
+                  prefix={<LockOutlined className="efis-input-icon" />}
                   placeholder="请输入密码"
-                  bordered={false}
-                  style={{
-                    borderBottom: '2px solid #bdc8d0',
-                    borderRadius: 0,
-                    padding: '8px 0',
-                    fontSize: 15,
-                  }}
-                  className="login-input"
+                  className="efis-input-wrapper"
+                  size="large"
                 />
               </div>
             </Form.Item>
 
-            {/* 记住我 & 忘记密码 */}
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: 32,
+                marginBottom: 24,
               }}
             >
-              <Checkbox
-                style={{
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: '#3e484f',
-                }}
-              >
-                记住我
-              </Checkbox>
+              <Form.Item name="remember" valuePropName="checked" noStyle>
+                <Checkbox style={{ color: '#94a3b8', fontSize: 13 }}>记住登录状态</Checkbox>
+              </Form.Item>
               <a
                 href="#"
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: '#006689',
-                  textDecoration: 'none',
+                onClick={(e) => {
+                  e.preventDefault()
+                  message.info('请联系系统超级管理员 (admin) 重置密码')
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = '#1ca9df')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = '#006689')}
+                style={{ color: '#38bdf8', fontSize: 13, textDecoration: 'none' }}
               >
                 忘记密码？
               </a>
             </div>
 
-            {/* 登录按钮 */}
             <Form.Item style={{ marginBottom: 0 }}>
               <Button
                 type="primary"
                 htmlType="submit"
                 block
                 loading={loading}
-                style={{
-                  height: 52,
-                  fontSize: 16,
-                  fontWeight: 700,
-                  borderRadius: 12,
-                  background: 'linear-gradient(135deg, #006689 0%, #1ca9df 100%)',
-                  border: 'none',
-                  boxShadow: '0 8px 24px rgba(0,102,137,0.25)',
-                  letterSpacing: '0.02em',
-                }}
-                className="login-btn"
+                className="efis-submit-btn"
               >
-                登录系统
+                <span>立即登录</span>
+                <ArrowRightOutlined />
               </Button>
             </Form.Item>
           </Form>
 
-          {/* 快速登录 */}
-          <div
-            style={{
-              marginTop: 64,
-              paddingTop: 32,
-              borderTop: '1px solid rgba(110,121,128,0.15)',
-            }}
-          >
-            <p
-              style={{
-                fontSize: 11,
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-                fontWeight: 700,
-                color: '#6e7980',
-                marginBottom: 16,
-                textAlign: 'center',
-              }}
-            >
-              快速登录
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {/* 快捷登录卡片 */}
+          <div className="efis-quick-login-box">
+            <div className="efis-quick-header">快捷体验账号</div>
+            <div className="efis-quick-chips">
               <button
-                onClick={() => quickLogin('admin', 'admin123')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: 12,
-                  borderRadius: 12,
-                  background: '#fff',
-                  border: '1px solid rgba(110,121,128,0.1)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s',
-                }}
-                className="quick-login-btn"
+                type="button"
+                className="efis-quick-chip"
+                onClick={() => quickLogin('admin', 'admin123', 'admin')}
               >
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '50%',
-                    background: 'rgba(195,192,255,0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <TeamOutlined style={{ fontSize: 16, color: '#0f0069' }} />
+                <div className="efis-chip-avatar efis-chip-admin">
+                  <CrownOutlined />
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#0b1c30' }}>管理员</div>
-                  <div style={{ fontSize: 11, color: '#3e484f' }}>admin / admin123</div>
+                <div className="efis-chip-info">
+                  <div className="chip-name">管理员</div>
+                  <div className="chip-account">admin / admin123</div>
                 </div>
               </button>
+
               <button
-                onClick={() => quickLogin('expert', 'expert123')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  padding: 12,
-                  borderRadius: 12,
-                  background: '#fff',
-                  border: '1px solid rgba(110,121,128,0.1)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'all 0.2s',
-                }}
-                className="quick-login-btn"
+                type="button"
+                className="efis-quick-chip"
+                onClick={() => quickLogin('expert', 'expert123', 'expert')}
               >
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: '50%',
-                    background: 'rgba(255,182,144,0.3)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <FieldTimeOutlined style={{ fontSize: 16, color: '#5c2400' }} />
+                <div className="efis-chip-avatar efis-chip-expert">
+                  <AuditOutlined />
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#0b1c30' }}>检查专家</div>
-                  <div style={{ fontSize: 11, color: '#3e484f' }}>expert / expert123</div>
+                <div className="efis-chip-info">
+                  <div className="chip-name">审核专家</div>
+                  <div className="chip-account">expert / expert123</div>
                 </div>
               </button>
             </div>

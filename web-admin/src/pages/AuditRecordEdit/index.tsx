@@ -58,6 +58,7 @@ export default function AuditRecordEdit() {
   const [planItem, setPlanItem] = useState<any>(null)
   const [record, setRecord] = useState<any>(null)
   const [template, setTemplate] = useState<any>(null)
+  const [templates, setTemplates] = useState<any[]>([])
   const [items, setItems] = useState<RecordItem[]>([])
   const [flatItems, setFlatItems] = useState<RecordItem[]>([])
   const [selectedItem, setSelectedItem] = useState<RecordItem | null>(null)
@@ -75,17 +76,24 @@ export default function AuditRecordEdit() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      // 获取项目信息
+      // 1. 获取项目信息
       const projectRes = await auditProjectApi.get(projectId!)
       setProject(projectRes.data)
 
-      // 如果有计划项ID，获取计划项详情
+      // 2. 获取模板列表
+      const templatesRes: any = await templateApi.getTemplates({ limit: 100 })
+      const availableTemplates = templatesRes.data?.items || templatesRes.data || []
+      setTemplates(availableTemplates)
+
+      // 3. 如果有计划项ID，获取计划项详情
+      let loadedPlanItem: any = null
       if (planItemId) {
         const planRes = await auditPlanApi.get(planItemId)
-        setPlanItem(planRes.data)
+        loadedPlanItem = planRes.data
+        setPlanItem(loadedPlanItem)
       }
 
-      // 如果有记录ID，获取记录详情
+      // 4. 如果有记录ID，获取记录详情
       if (recordId && recordId !== 'new') {
         const recordRes = await auditRecordApi.get(recordId!)
         setRecord(recordRes.data)
@@ -109,6 +117,27 @@ export default function AuditRecordEdit() {
             }
           }
           flattenTemplateItems(templateRes.data.items || [], [], recordItemsByTemplateId)
+        }
+      } else {
+        // 新建记录时，自动带入计划项信息或默认模板
+        const defaultTemplateId = loadedPlanItem?.template_id || (availableTemplates.length > 0 ? availableTemplates[0].id : undefined)
+        const initialFormData = {
+          audit_date: loadedPlanItem?.plan_date ? dayjs(loadedPlanItem.plan_date) : dayjs(),
+          audit_time_start: loadedPlanItem?.start_time || '09:00',
+          audit_time_end: loadedPlanItem?.end_time || '12:00',
+          certification_systems: loadedPlanItem?.certification_systems || (loadedPlanItem?.certification_system ? [loadedPlanItem.certification_system] : []),
+          template_id: defaultTemplateId,
+        }
+        form.setFieldsValue(initialFormData)
+
+        if (defaultTemplateId) {
+          try {
+            const templateRes = await templateApi.getTemplate(defaultTemplateId)
+            setTemplate(templateRes.data)
+            flattenTemplateItems(templateRes.data.items || [])
+          } catch (e) {
+            console.error('加载初始模板详情失败:', e)
+          }
         }
       }
     } catch (error: any) {
@@ -152,7 +181,7 @@ export default function AuditRecordEdit() {
         ...values,
         audit_date: values.audit_date?.format('YYYY-MM-DD'),
         plan_item_id: planItemId,
-        template_id: template?.id,
+        template_id: values.template_id || template?.id,
       }
 
       if (recordId && recordId !== 'new') {
@@ -171,12 +200,21 @@ export default function AuditRecordEdit() {
     }
   }
 
-  const handleSelectTemplate = async (templateId: string) => {
+  const handleSelectTemplate = async (templateId?: string) => {
     if (readOnly) return
+
+    if (!templateId) {
+      setTemplate(null)
+      setItems([])
+      setFlatItems([])
+      form.setFieldsValue({ template_id: undefined })
+      return
+    }
 
     try {
       const res = await templateApi.getTemplate(templateId)
       setTemplate(res.data)
+      form.setFieldsValue({ template_id: templateId })
       flattenTemplateItems(res.data.items || [])
     } catch (error) {
       message.error('获取模板失败')
@@ -424,9 +462,13 @@ export default function AuditRecordEdit() {
                     placeholder="选择检查模板"
                     onChange={handleSelectTemplate}
                     allowClear
-                  >
-                    {/* 这里需要从项目或计划项获取模板列表 */}
-                  </Select>
+                    showSearch
+                    optionFilterProp="label"
+                    options={templates.map((t: any) => ({
+                      value: t.id,
+                      label: `${t.name} (v${t.version || '1.0'}${t.category ? ` · ${t.category}` : ''})`,
+                    }))}
+                  />
                 </Form.Item>
 
                 <Form.Item
