@@ -308,18 +308,31 @@ export const projectDocumentApi = {
   list: (projectId: string) =>
     api.get(`${PROJECT_AGENT_BASE}/${projectId}/documents`),
 
-  upload: (projectId: string, file: File, category?: string) => {
+  upload: (projectId: string, file: File, category?: string, forceIndex?: boolean) => {
     const formData = new FormData()
     formData.append('file', file)
     if (category) {
       formData.append('document_type', category)
       formData.append('category', category)
     }
+    if (forceIndex) {
+      formData.append('force_index', 'true')
+    }
     return api.post(`${PROJECT_AGENT_BASE}/${projectId}/documents`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 180000,
     })
   },
+
+  confirmIndex: (
+    projectId: string,
+    documentId: string,
+    action: 'index' | 'archive_only' = 'index'
+  ) =>
+    api.post(
+      `${PROJECT_AGENT_BASE}/${projectId}/documents/${documentId}/confirm_index`,
+      { action }
+    ),
 
   remove: (projectId: string, documentId: string) =>
     api.delete(`${PROJECT_AGENT_BASE}/${projectId}/documents/${documentId}`),
@@ -401,9 +414,49 @@ export const saveDownloadedBlob = (
 // ==================== AI Agent API ====================
 
 export const auditAIApi = {
-  // AI 审核准备建议
+  // AI 审核准备建议（普通）
   prepareAudit: (projectId: string) => 
     api.post(`/api/audit-projects/${projectId}/ai/prepare`),
+
+  // AI 审核准备建议（流式 SSE）
+  prepareAuditStream: async function* (
+    projectId: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; content?: string; full_content?: string }> {
+    const token = useAuthStore.getState().token
+    const response = await fetch(
+      `${API_BASE_URL}/api/audit-projects/${projectId}/ai/prepare/stream`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      }
+    )
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('无法读取响应流')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            yield JSON.parse(line.slice(6))
+          } catch {
+            // ignore JSON parse error
+          }
+        }
+      }
+    }
+  },
   
   // AI 证据充分性评估
   evaluateEvidence: (projectId: string, data: {
@@ -415,9 +468,49 @@ export const auditAIApi = {
       params: data
     }),
   
-  // AI 生成审核报告
+  // AI 生成审核报告（普通）
   generateReport: (projectId: string) => 
     api.post(`/api/audit-projects/${projectId}/ai/generate-report`),
+
+  // AI 生成审核报告（流式 SSE）
+  generateReportStream: async function* (
+    projectId: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<{ type: string; content?: string; full_content?: string }> {
+    const token = useAuthStore.getState().token
+    const response = await fetch(
+      `${API_BASE_URL}/api/audit-projects/${projectId}/ai/generate-report/stream`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      }
+    )
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('无法读取响应流')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            yield JSON.parse(line.slice(6))
+          } catch {
+            // ignore JSON parse error
+          }
+        }
+      }
+    }
+  },
   
   // AI 建议不符合项
   suggestNC: (projectId: string, data: {
@@ -429,3 +522,4 @@ export const auditAIApi = {
       params: data
     }),
 }
+

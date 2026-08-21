@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { Button, Card, Descriptions, Input, Space, Tag, Typography } from 'antd'
+import { Button, Card, Descriptions, Input, Space, Table, Tag, Typography } from 'antd'
 import {
+  CalendarOutlined,
   CheckOutlined,
   CloseOutlined,
   EditOutlined,
   FileTextOutlined,
   SafetyCertificateOutlined,
+  UserAddOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
 
@@ -43,13 +45,149 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
   const [editing, setEditing] = useState(false)
   const [editedData, setEditedData] = useState<Record<string, unknown>>(action.data)
 
+  const isTeamMemberAction =
+    action.serverAction === 'add_team_member' ||
+    (action.type === 'operation' && !!action.data.member_name)
+
+  const isPlanAction =
+    action.serverAction === 'create_audit_plan' ||
+    (action.type === 'operation' && Array.isArray(action.data.plan_items))
+
   const icon = action.type === 'create_task'
     ? <FileTextOutlined />
     : action.type === 'final_verdict'
       ? <SafetyCertificateOutlined />
-      : <WarningOutlined />
+      : isTeamMemberAction
+        ? <UserAddOutlined />
+        : isPlanAction
+          ? <CalendarOutlined />
+          : <WarningOutlined />
 
-  const color = action.type === 'judgment' ? '#d46b08' : '#1677ff'
+  const color = action.type === 'judgment'
+    ? '#d46b08'
+    : isTeamMemberAction
+      ? '#13c2c2'
+      : isPlanAction
+        ? '#722ed1'
+        : '#1677ff'
+
+  const renderAuditPlan = () => {
+    const planItems = (Array.isArray(action.data.plan_items) ? action.data.plan_items : []) as any[]
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {Boolean(action.data.project_title) && (
+          <div style={{ fontSize: 12, color: '#666' }}>
+            <Text type="secondary">项目：</Text>
+            <Text strong>{String(action.data.project_title)}</Text>
+          </div>
+        )}
+        <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6 }}>
+          <Table
+            size="small"
+            pagination={false}
+            dataSource={planItems.map((item, idx) => ({ ...item, key: idx }))}
+            columns={[
+              {
+                title: '时间安排',
+                key: 'time',
+                width: 120,
+                render: (_: any, r: any) => (
+                  <div style={{ fontSize: 12 }}>
+                    <div style={{ fontWeight: 500 }}>{r.plan_date || '-'}</div>
+                    <Text type="secondary">{r.time_start || '08:30'}~{r.time_end || '12:00'}</Text>
+                  </div>
+                ),
+              },
+              {
+                title: '审核区域 / 活动',
+                dataIndex: 'area_name',
+                key: 'area_name',
+                render: (val: string, r: any) => (
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 12 }}>{val || '-'}</div>
+                    <Space size={2} wrap style={{ marginTop: 2 }}>
+                      {(r.certification_systems || []).map((sys: string) => (
+                        <Tag
+                          key={sys}
+                          color={sys === 'Q' ? 'blue' : sys === 'E' ? 'green' : sys === 'S' ? 'orange' : 'cyan'}
+                          style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
+                        >
+                          {sys}
+                        </Tag>
+                      ))}
+                      {(r.clauses || []).slice(0, 3).map((cl: string) => (
+                        <Tag key={cl} style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                          {cl}
+                        </Tag>
+                      ))}
+                      {(r.clauses || []).length > 3 && (
+                        <Text type="secondary" style={{ fontSize: 10 }}>+{r.clauses.length - 3}</Text>
+                      )}
+                    </Space>
+                  </div>
+                ),
+              },
+              {
+                title: '审核员',
+                key: 'auditor',
+                width: 75,
+                render: (_: any, r: any) => {
+                  const names = r.assigned_member_names || []
+                  return (
+                    <Space size={2} wrap>
+                      {names.map((name: string) => (
+                        <Tag key={name} color="purple" style={{ margin: 0, fontSize: 11, padding: '0 4px' }}>
+                          {name}
+                        </Tag>
+                      ))}
+                    </Space>
+                  )
+                },
+              },
+            ]}
+          />
+        </div>
+        <div style={{ fontSize: 11, color: '#52c41a' }}>
+          💡 点击确认后将自动创建对应现场检查任务，并批量写入本项目的【审核计划】。
+        </div>
+      </div>
+    )
+  }
+
+  const renderTeamMember = () => {
+    const systems = Array.isArray(action.data.responsible_systems)
+      ? (action.data.responsible_systems as string[])
+      : []
+    const roleText = String(action.data.role_display || action.data.role || '组员')
+
+    return (
+      <Descriptions column={1} size="small">
+        <Descriptions.Item label="审核员姓名">
+          <Text strong>{String(action.data.member_name || '-')}</Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="担任角色">
+          <Tag color="blue">{roleText}</Tag>
+        </Descriptions.Item>
+        {systems.length > 0 && (
+          <Descriptions.Item label="负责体系">
+            <Space size={4} wrap>
+              {systems.map((sys) => (
+                <Tag key={sys} color="cyan">{sys}</Tag>
+              ))}
+            </Space>
+          </Descriptions.Item>
+        )}
+        {action.data.project_title ? (
+          <Descriptions.Item label="所属项目">
+            {String(action.data.project_title)}
+          </Descriptions.Item>
+        ) : null}
+        <Descriptions.Item label="操作说明">
+          确认后将该成员加入当前项目的审核组。
+        </Descriptions.Item>
+      </Descriptions>
+    )
+  }
 
   const renderJudgment = () => {
     const result = String(action.data.result || '')
@@ -120,6 +258,8 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
     )
   }
 
+  const planItemsCount = Array.isArray(action.data.plan_items) ? action.data.plan_items.length : 0
+
   return (
     <Card
       className="agent-action-confirm"
@@ -130,7 +270,9 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
       {action.type === 'judgment' && renderJudgment()}
       {action.type === 'final_verdict' && renderFinalVerdict()}
       {action.type === 'create_task' && renderTask()}
-      {action.type === 'operation' && (
+      {action.type === 'operation' && isPlanAction && renderAuditPlan()}
+      {action.type === 'operation' && isTeamMemberAction && renderTeamMember()}
+      {action.type === 'operation' && !isTeamMemberAction && !isPlanAction && (
         <Descriptions column={1} size="small">
           <Descriptions.Item label="项目ID">
             {String(action.data.project_id || '-')}
@@ -167,7 +309,13 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
           loading={applying}
           onClick={() => onConfirm(editing ? editedData : undefined)}
         >
-          {editing ? '保存并确认' : '确认执行'}
+          {editing
+            ? '保存并确认'
+            : isPlanAction
+              ? `确认录入计划表 (${planItemsCount}项)`
+              : isTeamMemberAction
+                ? '确认加入审核组'
+                : '确认执行'}
         </Button>
         {action.type === 'create_task' && !editing && (
           <Button icon={<EditOutlined />} disabled={applying} onClick={() => setEditing(true)}>修改</Button>

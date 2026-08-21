@@ -62,6 +62,11 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
     const [refineModal, setRefineModal] = useState(false);
     const [refineInstruction, setRefineInstruction] = useState('');
     const [refineLoading, setRefineLoading] = useState(false);
+    const [refineStatus, setRefineStatus] = useState('');
+    const [refineReasoning, setRefineReasoning] = useState('');
+    const [refineContent, setRefineContent] = useState('');
+    const [refineElapsed, setRefineElapsed] = useState<number>(0);
+    const refineBoxRef = useRef<HTMLDivElement>(null);
 
     // 抽屉状态（用于单条编辑/查看详情）
     const [drawerVisible, setDrawerVisible] = useState(false);
@@ -95,11 +100,24 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
         return () => clearInterval(timer);
     }, [extractLoading]);
 
+    // 精修中计时器
+    useEffect(() => {
+        if (!refineLoading) return;
+        const timer = setInterval(() => setRefineElapsed(prev => prev + 1), 1000);
+        return () => clearInterval(timer);
+    }, [refineLoading]);
+
     // 思考/输出过程自动滚动到底部
     useEffect(() => {
         const el = reasoningBoxRef.current;
         if (el) el.scrollTop = el.scrollHeight;
     }, [reasoningText, contentText]);
+
+    // 精修思考/输出过程自动滚动到底部
+    useEffect(() => {
+        const el = refineBoxRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [refineReasoning, refineContent]);
 
     // 处理流式提取
     const handleExtract = async (file: File) => {
@@ -215,7 +233,7 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
         }
     };
 
-    // AI 优化
+    // AI 优化（流式：实时显示思考过程与结构化输出）
     const handleRefine = async () => {
         if (!refineInstruction.trim()) {
             message.warning('请输入优化指令');
@@ -223,24 +241,47 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
         }
 
         setRefineLoading(true);
+        setRefineStatus('正在组织精修请求...');
+        setRefineReasoning('');
+        setRefineContent('');
+        setRefineElapsed(0);
+
         try {
             const currentItems = items.map(({ temp_id, ...rest }) => rest);
-            const res: any = await aiExtractApi.refineItems(currentItems, refineInstruction);
-            if (res.code === 200 && res.data?.items) {
-                const refinedItems = res.data.items.map((it: any, idx: number) => ({
-                    ...it,
-                    temp_id: `temp_${Date.now()}_refine_${idx}`,
-                }));
-                setItems(refinedItems);
-                setSelectedIds(refinedItems.map((it: any) => it.temp_id));
-                setRefineModal(false);
-                setRefineInstruction('');
-                message.success('优化完成');
-            } else {
-                message.error(res.message || '优化失败');
+            const generator = aiExtractApi.refineItemsStream(currentItems, refineInstruction);
+
+            for await (const chunk of generator) {
+                if (chunk.type === 'status') {
+                    if (chunk.message) {
+                        setRefineStatus(chunk.message);
+                    }
+                    if (chunk.reasoning_delta) {
+                        setRefineReasoning(prev => prev + chunk.reasoning_delta);
+                    }
+                    if (chunk.content_delta) {
+                        setRefineContent(prev => prev + chunk.content_delta);
+                    }
+                } else if (chunk.type === 'done') {
+                    const refinedItems = (chunk.items || []).map((it: any, idx: number) => ({
+                        ...it,
+                        temp_id: `temp_${Date.now()}_refine_${idx}`,
+                    }));
+                    setItems(refinedItems);
+                    setSelectedIds(refinedItems.map((it: any) => it.temp_id));
+                    setRefineModal(false);
+                    setRefineInstruction('');
+                    message.success(`精修完成，共 ${refinedItems.length} 项`);
+                } else if (chunk.type === 'error') {
+                    message.error(`精修失败: ${chunk.content}`);
+                    setRefineStatus(`精修失败: ${chunk.content}`);
+                }
             }
         } catch (error: any) {
-            message.error(error?.response?.data?.message || '优化失败');
+            const msg = error?.name === 'AbortError'
+                ? '精修超时（已超过 15 分钟），请稍后重试'
+                : (error.message || '优化失败，请重试');
+            message.error(msg);
+            setRefineStatus(`精修失败: ${msg}`);
         } finally {
             setRefineLoading(false);
         }
@@ -735,6 +776,7 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
                 confirmLoading={refineLoading}
                 okText="执行智能精修"
                 okButtonProps={{ style: { background: '#722ed1', borderColor: '#722ed1' } }}
+                width={720}
             >
                 <Alert
                     message="输入您的修改要求，AI 会自动批量理解并调整当前所有提取项。"
@@ -761,7 +803,60 @@ export default function AiExtractModal({ open, onCancel, templateId, onSuccess }
                     onChange={(e) => setRefineInstruction(e.target.value)}
                     placeholder="例如：补充所有检查项的现场检查方法 / 把带有*号的标题统一设为高风险..."
                     style={{ borderRadius: 8 }}
+                    disabled={refineLoading}
                 />
+
+                {/* 精修执行状态 + 思考/输出实时面板 */}
+                {refineLoading && (
+                    <div style={{ marginTop: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                            <Spin indicator={<SyncOutlined spin style={{ fontSize: 16, color: '#722ed1' }} />} />
+                            <span style={{ fontSize: 13, color: '#475569', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {refineStatus || '正在处理...'}
+                            </span>
+                            <Tag color="purple" style={{ margin: 0 }}>
+                                已耗时 {refineElapsed >= 60 ? `${Math.floor(refineElapsed / 60)}分${refineElapsed % 60}秒` : `${refineElapsed}秒`}
+                            </Tag>
+                        </div>
+                        <div
+                            ref={refineBoxRef}
+                            style={{
+                                maxHeight: 200, overflowY: 'auto', textAlign: 'left',
+                                background: '#f8fafc', borderRadius: 10,
+                                border: '1px solid #e2e8f0', padding: '12px 16px',
+                            }}
+                        >
+                            {refineReasoning && (
+                                <div style={{
+                                    fontSize: 12, lineHeight: 1.8, color: '#64748b', fontStyle: 'italic',
+                                    whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                }}>
+                                    {refineReasoning}
+                                </div>
+                            )}
+                            {refineContent && (
+                                <>
+                                    <div style={{
+                                        color: '#94a3b8', fontSize: 11, margin: '10px 0',
+                                        borderTop: '1px dashed #e2e8f0', paddingTop: 10,
+                                    }}>
+                                        ———— 思考完成，以下为结构化输出 ————
+                                    </div>
+                                    <div style={{
+                                        fontSize: 12, lineHeight: 1.7, color: '#722ed1',
+                                        fontFamily: 'Consolas, Monaco, monospace',
+                                        whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                                    }}>
+                                        {refineContent}
+                                    </div>
+                                </>
+                            )}
+                            {!refineContent && (
+                                <span style={{ color: '#722ed1' }}>▍</span>
+                            )}
+                        </div>
+                    </div>
+                )}
             </Modal>
 
             {/* 详细编辑抽屉 */}

@@ -1,9 +1,13 @@
 import asyncio
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
+from app.models.audit_project import AuditProject, AuditPlanItem, AuditTeamMember
+from app.models.user import User
 from app.services.agent_service import agent_service
+from app.services.agent_actions import execute_action
 from app.services.template_recommendation_service import (
     template_recommendation_service,
 )
@@ -244,3 +248,360 @@ def test_chat_stream_recovers_when_model_returns_empty_after_tools():
     assert "引用来源" in content_events[0]["content"] or "知识检索" in content_events[0]["content"]
     assert events[-1]["type"] == "done"
     assert not any(e["type"] == "error" for e in events)
+
+
+def test_get_audit_team_members():
+    project_id = uuid4()
+    member_user_id = uuid4()
+
+    project = SimpleNamespace(
+        id=project_id,
+        title="三体系认证审核项目",
+        certification_systems=["Q", "E", "S"],
+        is_deleted=False,
+    )
+    user = SimpleNamespace(
+        id=member_user_id,
+        username="auditor_zhang",
+        full_name="张三",
+        is_deleted=False,
+    )
+    member = SimpleNamespace(
+        id=uuid4(),
+        project_id=project_id,
+        member_id=member_user_id,
+        role="leader",
+        responsible_systems=["Q", "E"],
+        registration_no="2022-N1QMS-001",
+        registration_level="senior",
+        qualification_codes=["10.01"],
+        assigned_areas=["管理层", "质检部"],
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    execute_result = Mock()
+    execute_result.all.return_value = [(member, user)]
+    db.execute.return_value = execute_result
+
+    result = asyncio.run(
+        agent_service._tool_get_audit_team_members(
+            {"project_id": str(project_id)},
+            {"project_id": str(project_id)},
+            db,
+        )
+    )
+
+    assert result["project_id"] == str(project_id)
+    assert result["total_members"] == 1
+    assert result["members"][0]["name"] == "张三"
+    assert result["members"][0]["role_display"] == "组长"
+    assert result["members"][0]["responsible_systems"] == ["Q", "E"]
+
+
+def test_propose_add_team_member():
+    project_id = uuid4()
+    user_id = uuid4()
+
+    project = SimpleNamespace(
+        id=project_id,
+        title="三体系认证审核项目",
+        certification_systems=["Q", "E", "S"],
+        is_deleted=False,
+    )
+    user = SimpleNamespace(
+        id=user_id,
+        username="auditor_li",
+        full_name="李四",
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    # User search mock
+    user_res = Mock()
+    user_res.scalar_one_or_none.return_value = user
+
+    # Existing member check mock (empty -> not in team)
+    existing_res = Mock()
+    existing_res.scalar_one_or_none.return_value = None
+
+    db.execute.side_effect = [user_res, existing_res]
+
+    result = asyncio.run(
+        agent_service._tool_propose_add_team_member(
+            {
+                "member_name": "李四",
+                "role": "member",
+                "responsible_systems": ["Q"],
+            },
+            {"project_id": str(project_id)},
+            db,
+        )
+    )
+
+    assert result["type"] == "action_proposal"
+    assert result["action"] == "add_team_member"
+    assert result["data"]["member_name"] == "李四"
+    assert result["data"]["role"] == "member"
+    assert result["data"]["role_display"] == "组员"
+    assert result["data"]["responsible_systems"] == ["Q"]
+
+
+def test_execute_action_add_team_member():
+    from app.services.agent_actions import execute_action
+
+    project_id = uuid4()
+    user_id = uuid4()
+
+    project = SimpleNamespace(
+        id=project_id,
+        title="三体系认证审核项目",
+        certification_systems=["Q", "E", "S"],
+        is_deleted=False,
+    )
+    admin_user = SimpleNamespace(
+        id=uuid4(),
+        role="super_admin",
+        is_deleted=False,
+    )
+    target_user = SimpleNamespace(
+        id=user_id,
+        username="auditor_wang",
+        full_name="王五",
+        auditor_registration_no="2022-N1-002",
+        auditor_level="intermediate",
+        qualified_industry_codes=["12.01"],
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    # db.get is called for AuditProject and User
+    db.get.side_effect = lambda model, id_: project if str(id_) == str(project_id) else target_user
+
+    # Mock db.execute for get_project_or_404 and existing member check
+    project_res = Mock()
+    project_res.scalar_one_or_none.return_value = project
+
+    existing_res = Mock()
+    existing_res.scalar_one_or_none.return_value = None
+
+    db.execute.side_effect = [project_res, existing_res]
+
+    result = asyncio.run(
+        execute_action(
+            db,
+            admin_user,
+            "add_team_member",
+            {
+                "project_id": str(project_id),
+                "member_id": str(user_id),
+                "member_name": "王五",
+                "role": "expert",
+                "responsible_systems": ["E", "S"],
+            },
+        )
+    )
+
+    assert result["applied"] == "add_team_member"
+    assert result["member_name"] == "王五"
+    assert result["role"] == "expert"
+    assert result["responsible_systems"] == ["E", "S"]
+    assert db.add.called
+    assert db.commit.called
+
+
+def test_get_audit_plan_items():
+    project_id = uuid4()
+    plan_item_id = uuid4()
+    auditor_id = uuid4()
+
+    project = AuditProject(
+        id=project_id,
+        title="国投检测三体系审核",
+        certification_systems=["Q", "E", "S"],
+        is_deleted=False,
+    )
+    plan_item = AuditPlanItem(
+        id=plan_item_id,
+        project_id=project_id,
+        plan_date=date(2026, 8, 25),
+        time_start="08:30",
+        time_end="12:00",
+        area_name="首次会议及最高管理层",
+        area_type="leadership",
+        group_no="ABCDE",
+        assigned_member_ids=[auditor_id],
+        certification_systems=["Q", "E", "S"],
+        clauses=["4.1", "4.2", "5.1", "5.2"],
+        activity_type="opening_meeting",
+        status="pending",
+        is_deleted=False,
+    )
+    team_member = AuditTeamMember(
+        id=uuid4(),
+        project_id=project_id,
+        member_id=auditor_id,
+        role="leader",
+        is_deleted=False,
+    )
+    user = User(
+        id=auditor_id,
+        username="zhangjg",
+        full_name="张建国",
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    team_res = Mock()
+    team_res.all.return_value = [(team_member, user)]
+
+    plan_res = Mock()
+    plan_res.scalars.return_value.all.return_value = [plan_item]
+
+    db.execute.side_effect = [team_res, plan_res]
+
+    result = asyncio.run(
+        agent_service._tool_get_audit_plan_items(
+            {"project_id": str(project_id)},
+            {},
+            db,
+        )
+    )
+
+    assert result["total_items"] == 1
+    assert result["plan_items"][0]["area_name"] == "首次会议及最高管理层"
+    assert result["plan_items"][0]["assigned_member_names"] == ["张建国"]
+    assert result["plan_items"][0]["certification_systems"] == ["Q", "E", "S"]
+
+
+def test_propose_create_audit_plan():
+    project_id = uuid4()
+    auditor_id = uuid4()
+
+    project = AuditProject(
+        id=project_id,
+        title="国投检测三体系审核",
+        certification_systems=["Q", "E", "S"],
+        is_deleted=False,
+    )
+    team_member = AuditTeamMember(
+        id=uuid4(),
+        project_id=project_id,
+        member_id=auditor_id,
+        role="leader",
+        is_deleted=False,
+    )
+    user = User(
+        id=auditor_id,
+        username="zhangjg",
+        full_name="张建国",
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    team_res = Mock()
+    team_res.all.return_value = [(team_member, user)]
+    db.execute.return_value = team_res
+
+    plan_items = [
+        {
+            "plan_date": "2026-08-25",
+            "time_start": "08:30",
+            "time_end": "12:00",
+            "area_name": "首次会议及高层访谈",
+            "assigned_member_names": ["张建国"],
+            "certification_systems": ["Q", "S"],
+            "clauses": ["4.1", "5.1"],
+        },
+        {
+            "plan_date": "2026-08-25",
+            "time_start": "13:30",
+            "time_end": "17:00",
+            "area_name": "环境安全科",
+            "assigned_member_names": ["王芳"],
+            "certification_systems": ["E"],
+            "clauses": ["6.1", "8.1"],
+        },
+    ]
+
+    proposal = asyncio.run(
+        agent_service._tool_propose_create_audit_plan(
+            {"project_id": str(project_id), "plan_items": plan_items},
+            {},
+            db,
+        )
+    )
+
+    assert proposal["type"] == "action_proposal"
+    assert proposal["action"] == "create_audit_plan"
+    assert proposal["data"]["total_items"] == 2
+    assert len(proposal["data"]["plan_items"]) == 2
+    assert proposal["data"]["plan_items"][0]["area_name"] == "首次会议及高层访谈"
+
+
+def test_execute_action_create_audit_plan():
+    project_id = uuid4()
+    user_id = uuid4()
+
+    admin_user = User(
+        id=user_id,
+        username="admin",
+        full_name="系统管理员",
+        role="admin",
+        is_deleted=False,
+    )
+    project = AuditProject(
+        id=project_id,
+        title="国投检测三体系审核",
+        certification_systems=["Q", "E", "S"],
+        enterprise_id=None,
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    team_res = Mock()
+    team_res.all.return_value = []
+    db.execute.return_value = team_res
+
+    plan_items = [
+        {
+            "plan_date": "2026-08-25",
+            "time_start": "08:30",
+            "time_end": "12:00",
+            "area_name": "首次会议及管理层",
+            "assigned_member_names": ["张建国"],
+            "certification_systems": ["Q"],
+            "clauses": ["4.1", "5.1"],
+        }
+    ]
+
+    result = asyncio.run(
+        execute_action(
+            db,
+            admin_user,
+            "create_audit_plan",
+            {
+                "project_id": str(project_id),
+                "plan_items": plan_items,
+            },
+        )
+    )
+
+    assert result["applied"] == "create_audit_plan"
+    assert result["created_count"] == 1
+    assert result["plan_items"][0]["area_name"] == "首次会议及管理层"
+    assert db.add.called
+    assert db.commit.called
+
+
+

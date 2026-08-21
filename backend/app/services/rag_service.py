@@ -41,7 +41,7 @@ class RAGService:
         self.embedding_client = AsyncOpenAI(
             base_url=settings.EMBEDDING_BASE_URL,
             api_key=settings.EMBEDDING_API_KEY,
-            timeout=60,
+            timeout=10,
         )
         self.embedding_model = settings.EMBEDDING_MODEL
 

@@ -1,11 +1,40 @@
 import { useState, useEffect } from 'react'
-import { Card, Button, Space, Modal, Form, Input, DatePicker, TimePicker, Select, message, Table, Tag } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, CalendarOutlined, EyeOutlined } from '@ant-design/icons'
+import {
+  Card,
+  Button,
+  Space,
+  Modal,
+  Form,
+  Input,
+  DatePicker,
+  TimePicker,
+  Select,
+  message,
+  Table,
+  Tag,
+  Segmented,
+  Badge,
+  Tooltip,
+  Empty,
+  Typography,
+} from 'antd'
+import {
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  AppstoreOutlined,
+  TableOutlined,
+  ClockCircleOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { auditPlanApi, auditTeamApi, auditProjectApi } from '@/services/auditProjectApi'
 import { templateApi } from '@/services/api'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
+
+const { Text } = Typography
 
 interface Props {
   projectId: string
@@ -58,7 +87,7 @@ export default function PlanEditor({ projectId }: Props) {
   const [teamMembers, setTeamMembers] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [project, setProject] = useState<ProjectDetail | null>(null)
-  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table')
+  const [viewMode, setViewMode] = useState<'matrix' | 'table'>('matrix')
   const [form] = Form.useForm()
 
   useEffect(() => {
@@ -318,21 +347,76 @@ export default function PlanEditor({ projectId }: Props) {
     return false
   }
 
+  const getWeekdayName = (dateStr: string) => {
+    const d = dayjs(dateStr)
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return weekdays[d.day()]
+  }
+
+  const handleAddForDate = async (dateStr: string) => {
+    await Promise.all([fetchTeamMembers(), fetchTemplates()])
+    setEditingItem(null)
+    form.resetFields()
+    form.setFieldsValue({
+      plan_date: dayjs(dateStr),
+      time_start: dayjs('09:00', 'HH:mm'),
+      time_end: dayjs('12:00', 'HH:mm'),
+      group_no: 'A',
+      activity_type: 'normal',
+      certification_systems: project?.certification_systems || ['Q', 'E', 'S'],
+    })
+    setModalVisible(true)
+  }
+
+  const getAllDates = () => {
+    const datesSet = new Set<string>()
+    if (project?.scheduled_start && project?.scheduled_end) {
+      let curr = dayjs(project.scheduled_start)
+      const end = dayjs(project.scheduled_end)
+      while (curr.isBefore(end) || curr.isSame(end, 'day')) {
+        datesSet.add(curr.format('YYYY-MM-DD'))
+        curr = curr.add(1, 'day')
+      }
+    }
+    planItems.forEach((item) => {
+      if (item.plan_date) datesSet.add(item.plan_date)
+    })
+    if (datesSet.size === 0) {
+      datesSet.add(dayjs().format('YYYY-MM-DD'))
+    }
+    return Array.from(datesSet).sort()
+  }
+
+  const allDates = getAllDates()
+
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          添加计划项
-        </Button>
-        <Button
-          icon={<CalendarOutlined />}
-          onClick={() => setViewMode(viewMode === 'table' ? 'calendar' : 'table')}
-        >
-          {viewMode === 'table' ? '日历视图' : '表格视图'}
-        </Button>
-      </Space>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+        <Space wrap>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+            添加计划项
+          </Button>
+          {project?.scheduled_start && project?.scheduled_end && (
+            <Tag color="cyan" style={{ fontSize: 13, padding: '4px 8px' }}>
+              📅 审核排期：{project.scheduled_start} ~ {project.scheduled_end}
+            </Tag>
+          )}
+          <Tag color="purple" style={{ fontSize: 13, padding: '4px 8px' }}>
+            📋 共 {planItems.length} 个审核计划项
+          </Tag>
+        </Space>
 
-      {viewMode === 'table' ? (
+        <Segmented
+          value={viewMode}
+          onChange={(val) => setViewMode(val as 'matrix' | 'table')}
+          options={[
+            { label: '多日日程看板', value: 'matrix', icon: <AppstoreOutlined /> },
+            { label: '表格明细', value: 'table', icon: <TableOutlined /> },
+          ]}
+        />
+      </div>
+
+      {viewMode === 'table' && (
         <Table
           columns={columns}
           dataSource={planItems}
@@ -341,44 +425,272 @@ export default function PlanEditor({ projectId }: Props) {
           pagination={false}
           scroll={{ x: 1200 }}
         />
-      ) : (
-        <div className="calendar-view">
-          {Object.keys(groupedByDate).sort().map((date) => (
-            <Card
-              key={date}
-              title={date}
-              size="small"
-              style={{ marginBottom: 16 }}
-            >
-              <Space direction="vertical" style={{ width: '100%' }}>
-                {groupedByDate[date].map((item) => (
-                  <Card
-                    key={item.id}
-                    size="small"
-                    hoverable
-                    onClick={() => handleEdit(item)}
-                    style={{ cursor: 'pointer' }}
+      )}
+
+      {viewMode === 'matrix' && (
+        <div style={{ width: '100%', overflowX: 'auto', paddingBottom: 16 }}>
+          {allDates.length === 0 ? (
+            <Empty description="暂无审核计划项，点击上方【添加计划项】或让侧边栏 AI 助手为您一键生成计划" />
+          ) : (
+            <div style={{ display: 'flex', gap: 16, minWidth: 'min-content' }}>
+              {allDates.map((dateStr, colIdx) => {
+                const itemsForDate = groupedByDate[dateStr] || []
+                const d = dayjs(dateStr)
+                const weekday = getWeekdayName(dateStr)
+                const isToday = d.isSame(dayjs(), 'day')
+
+                return (
+                  <div
+                    key={dateStr}
+                    style={{
+                      width: 320,
+                      minWidth: 320,
+                      backgroundColor: '#f8fafc',
+                      borderRadius: 10,
+                      border: isToday ? '2px solid #1677ff' : '1px solid #e2e8f0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                    }}
                   >
-                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                    {/* 日期列标题 */}
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        backgroundColor: isToday ? '#e6f4ff' : '#ffffff',
+                        borderTopLeftRadius: 8,
+                        borderTopRightRadius: 8,
+                        borderBottom: '1px solid #e2e8f0',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
                       <div>
-                        <Tag color="blue">{item.group_no}</Tag>
-                        <Tag>{item.time_start} - {item.time_end}</Tag>
-                        <Tag color={statusColorMap[item.status]}>{item.status}</Tag>
-                      </div>
-                      <div style={{ fontWeight: 'bold' }}>{item.area_name}</div>
-                      <div>
-                        <Space size={4}>
-                          {item.certification_systems?.map((sys) => (
-                            <Tag key={sys}>{sys}</Tag>
-                          ))}
+                        <Space size={6} align="center">
+                          <span style={{ fontSize: 16, fontWeight: 700, color: '#1e293b' }}>
+                            第 {colIdx + 1} 天 · {d.format('MM月DD日')}
+                          </span>
+                          <Tag color={isToday ? 'blue' : 'default'} style={{ margin: 0 }}>
+                            {weekday}
+                          </Tag>
                         </Space>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                          {dateStr}
+                        </div>
                       </div>
-                    </Space>
-                  </Card>
-                ))}
-              </Space>
-            </Card>
-          ))}
+                      <Badge
+                        count={itemsForDate.length}
+                        overflowCount={99}
+                        style={{ backgroundColor: itemsForDate.length > 0 ? '#1677ff' : '#94a3b8' }}
+                      />
+                    </div>
+
+                    {/* 日程卡片流 */}
+                    <div
+                      style={{
+                        padding: '12px 10px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 10,
+                        flex: 1,
+                        minHeight: 180,
+                      }}
+                    >
+                      {itemsForDate.length === 0 ? (
+                        <div
+                          style={{
+                            textAlign: 'center',
+                            padding: '30px 10px',
+                            color: '#94a3b8',
+                            fontSize: 12,
+                          }}
+                        >
+                          当日暂无排期
+                        </div>
+                      ) : (
+                        itemsForDate.map((item) => {
+                          const isCompleted = item.status === 'completed'
+                          const isProgress = item.status === 'in_progress'
+                          const isOpeningOrClosing = item.activity_type === 'opening_meeting' || item.activity_type === 'closing_meeting'
+
+                          return (
+                            <Card
+                              key={item.id}
+                              size="small"
+                              hoverable
+                              style={{
+                                borderRadius: 8,
+                                borderLeft: `4px solid ${
+                                  isCompleted
+                                    ? '#52c41a'
+                                    : isProgress
+                                      ? '#1677ff'
+                                      : isOpeningOrClosing
+                                        ? '#722ed1'
+                                        : '#3b82f6'
+                                }`,
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                              }}
+                              bodyStyle={{ padding: '10px 12px' }}
+                            >
+                              {/* 顶部时间与组 */}
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  marginBottom: 6,
+                                }}
+                              >
+                                <Space size={4}>
+                                  <Tag
+                                    color={item.group_no === 'A' ? 'blue' : item.group_no === 'B' ? 'cyan' : 'purple'}
+                                    style={{ margin: 0, fontWeight: 600, fontSize: 11 }}
+                                  >
+                                    {item.group_no}组
+                                  </Tag>
+                                  <span style={{ fontSize: 12, fontWeight: 600, color: '#334155', fontFamily: 'monospace' }}>
+                                    <ClockCircleOutlined style={{ marginRight: 3, color: '#64748b' }} />
+                                    {item.time_start} ~ {item.time_end}
+                                  </span>
+                                </Space>
+                                <Tag
+                                  color={statusColorMap[item.status]}
+                                  style={{ margin: 0, fontSize: 10, lineHeight: '18px', padding: '0 6px' }}
+                                >
+                                  {item.status === 'completed' ? '已完成' : item.status === 'in_progress' ? '进行中' : '待开始'}
+                                </Tag>
+                              </div>
+
+                              {/* 区域与活动名称 */}
+                              <div
+                                style={{
+                                  fontSize: 14,
+                                  fontWeight: 600,
+                                  color: '#0f172a',
+                                  marginBottom: 6,
+                                  lineHeight: 1.4,
+                                }}
+                              >
+                                {item.area_name}
+                              </div>
+
+                              {/* 活动类型与体系/条款 */}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                                {item.activity_type && item.activity_type !== 'normal' && (
+                                  <Tag color="purple" style={{ margin: 0, fontSize: 10 }}>
+                                    {activityTypeMap[item.activity_type] || item.activity_type}
+                                  </Tag>
+                                )}
+                                {(item.certification_systems || []).map((sys) => (
+                                  <Tag
+                                    key={sys}
+                                    color={sys === 'Q' ? 'blue' : sys === 'E' ? 'green' : sys === 'S' ? 'orange' : 'cyan'}
+                                    style={{ margin: 0, fontSize: 10, fontWeight: 600, padding: '0 4px' }}
+                                  >
+                                    {sys}
+                                  </Tag>
+                                ))}
+                                {(item.clauses || []).slice(0, 3).map((cl) => (
+                                  <Tag key={cl} style={{ margin: 0, fontSize: 10, padding: '0 4px' }}>
+                                    {cl}
+                                  </Tag>
+                                ))}
+                                {(item.clauses || []).length > 3 && (
+                                  <span style={{ fontSize: 10, color: '#64748b' }}>
+                                    +{item.clauses.length - 3}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 审核员 */}
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  paddingTop: 6,
+                                  borderTop: '1px dashed #e2e8f0',
+                                  fontSize: 12,
+                                  color: '#475569',
+                                }}
+                              >
+                                <Space size={4}>
+                                  <UserOutlined style={{ color: '#94a3b8' }} />
+                                  <span style={{ fontWeight: 500 }}>
+                                    {(item.assigned_member_ids || [])
+                                      .map((id) => getMemberName(id))
+                                      .join('、') || '未分配'}
+                                  </span>
+                                </Space>
+
+                                <Space size={0}>
+                                  {item.inspection_task_id && (
+                                    <Tooltip title={item.status === 'completed' ? '查看检查记录' : '前往执行现场检查'}>
+                                      <Button
+                                        type="link"
+                                        size="small"
+                                        style={{ padding: '0 4px', height: 20 }}
+                                        icon={<EyeOutlined />}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          navigate(`/inspection/${item.inspection_task_id}`)
+                                        }}
+                                      />
+                                    </Tooltip>
+                                  )}
+                                  <Tooltip title="编辑计划">
+                                    <Button
+                                      type="link"
+                                      size="small"
+                                      style={{ padding: '0 4px', height: 20 }}
+                                      icon={<EditOutlined />}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleEdit(item)
+                                      }}
+                                    />
+                                  </Tooltip>
+                                  <Tooltip title="删除计划">
+                                    <Button
+                                      type="link"
+                                      danger
+                                      size="small"
+                                      style={{ padding: '0 4px', height: 20 }}
+                                      icon={<DeleteOutlined />}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleDelete(item.id)
+                                      }}
+                                    />
+                                  </Tooltip>
+                                </Space>
+                              </div>
+                            </Card>
+                          )
+                        })
+                      )}
+                    </div>
+
+                    {/* 底部快速添加按钮 */}
+                    <div style={{ padding: '8px 10px', borderTop: '1px solid #e2e8f0', backgroundColor: '#ffffff', borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }}>
+                      <Button
+                        type="dashed"
+                        block
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => handleAddForDate(dateStr)}
+                        style={{ fontSize: 12, color: '#475569' }}
+                      >
+                        添加当日计划
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

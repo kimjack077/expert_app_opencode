@@ -286,3 +286,31 @@ async def refine_extracted_items(
             message=f"优化失败: {result.get('error', '未知错误')}",
             data={"items": request.items}
         )
+
+
+@router.post("/refine/stream")
+async def refine_extracted_items_stream(
+    request: RefineRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """AI 优化检查项列表（SSE 流式：推送思考过程与结构化输出）"""
+    async def generate():
+        try:
+            async for chunk in ai_extract_service.refine_items_stream(
+                items=request.items,
+                instruction=request.instruction,
+            ):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )

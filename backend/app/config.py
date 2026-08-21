@@ -68,10 +68,10 @@ class Settings(BaseSettings):
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
 
-    # 备用 LLM（主模型 429/超时自动降级用，edgefn 网关 + DeepSeek-V4-Flash-0731）
-    LLM_BACKUP_BASE_URL: str = ""
-    LLM_BACKUP_MODEL: str = ""
-    LLM_BACKUP_API_KEY: str = ""
+    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + DeepSeek-V3.2 非推理模型）
+    LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
+    LLM_BACKUP_MODEL: str = "DeepSeek-V3.2"
+    LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
     def has_llm_backup(self) -> bool:
@@ -130,11 +130,10 @@ class Settings(BaseSettings):
     # - DeepSeek 思考模式默认开启无法关闭；none/空时不传 reasoning_effort，走 DeepSeek 默认 medium
     AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
 
-    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级）
-    # edgefn 网关 + DeepSeek-V4-Flash-0731，强制 reasoning_effort=none 快速响应
-    AI_EXTRACT_LLM_BACKUP_BASE_URL: str = ""
-    AI_EXTRACT_LLM_BACKUP_MODEL: str = ""
-    AI_EXTRACT_LLM_BACKUP_API_KEY: str = ""
+    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级，edgefn 网关 + DeepSeek-V3.2 非推理模型）
+    AI_EXTRACT_LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
+    AI_EXTRACT_LLM_BACKUP_MODEL: str = "DeepSeek-V3.2"
+    AI_EXTRACT_LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
     def has_ai_extract_llm_backup(self) -> bool:

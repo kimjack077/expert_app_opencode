@@ -4,17 +4,18 @@ from uuid import UUID
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.utils.llm_fallback import create_main_llm_client
+from app.models.user import User
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.enterprise import Enterprise
 from app.models.task import TaskItemRecord
 from app.models.media import MediaFile
-from app.models.audit_project import AuditPlanItem, AuditProject
+from app.models.audit_project import AuditPlanItem, AuditProject, AuditTeamMember
 from app.models.evidence_agent import AiAuditSession, AiDraftRecord
 from app.services.rag_service import rag_service
 from app.services.template_recommendation_service import template_recommendation_service
@@ -40,6 +41,7 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 - 计划项ID：{plan_item_id}
 - 审核会话ID：{audit_session_id}
 - 认证体系：{certification_systems}
+- 审核组成员：{team_members_summary}
 
 你可以调用以下工具：
 1. list_check_items - 列出所有检查项及其ID、标题和判定结果。当用户询问"第一个检查项"或"某项检查"时，**必须先调用此工具**获取检查项ID
@@ -53,17 +55,29 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 9. fill_check_result - 分析用户描述的检查发现，给出判定建议（仅建议文本，不生成操作卡片）
 10. apply_check_result - 当用户已明确给出判定意见并希望记录时，生成"检查结果确认卡片"，审核员点击确认后才会真正写入
 11. apply_final_verdict - 当用户要求生成并记录最终判定时，生成"最终判定确认卡片"，审核员点击确认后才会真正写入
-12. get_audit_project_context - 获取当前正式审核项目、区域、计划项和会话上下文
+12. get_audit_project_context - 获取当前正式审核项目、区域、计划项和会话上下文（含审核组成员）
 13. search_audit_knowledge - 同时检索全局法规和当前项目资料，项目资料严格按 project_id 隔离
 14. propose_audit_evidence - 为当前正式审核会话生成证据提交确认卡片
 15. propose_audit_draft_confirmation - 为当前会话的 AI 草稿生成批量确认卡片，确认后写入正式区域记录
+16. get_audit_team_members - 获取当前审核项目的完整审核组成员、角色分工、负责体系及专业资质
+17. list_available_auditors - 检索系统中可用于分配审核任务的用户/审核员
+18. propose_add_team_member - 为当前审核项目生成添加审核组成员的确认卡片，审核员在卡片上点击确认后真正加入审核组
+19. get_audit_plan_items - 获取当前审核项目已排期的审核计划项列表（日期、时间、部门/区域、审核员、条款）
+20. propose_create_audit_plan - 为当前审核项目批量生成或更新审核计划项的确认卡片。审核员在卡片上点击确认后，系统将自动把计划项与对应检查任务批量录入到正式审核计划表中
 
 重要规则：
 - 当用户询问某个检查项（如"第一个检查项"、"第二项"等）时，**必须先调用 list_check_items 获取检查项列表和ID**，然后再调用 get_check_item_details 获取详情
 - 当用户询问检查汇总时，你应该**主动调用** get_inspection_summary 工具来获取数据，不要询问用户！
+- 当用户询问当前审核项目的审核组成员、有哪些审核员、谁负责什么体系时，**优先参考上下文中的审核组成员或调用 get_audit_team_members** 获取详情并准确回复
+- 当用户希望向审核组添加成员时，**必须调用 propose_add_team_member** 生成待确认卡片；若需要先找人可调用 list_available_auditors
+- 当用户要求"制定审核计划"、"生成审核计划"、"录入审核计划"或询问排期安排时：
+  1. 参考项目的体系（如 Q/E/S）、审核组成员（如张建国负责 Q/S、王芳负责 E）及排期；
+  2. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片（包含 plan_date、time_start、time_end、area_name、assigned_member_names、certification_systems、clauses 等）；
+  3. 在回复中列出清晰完整的 Markdown 审核计划方案，并明确提示审核员"点击下方卡片即可一键将该计划批量录入到系统的审核计划表中"
+- 当用户询问当前项目的审核计划时，**调用 get_audit_plan_items** 查询并展示
 - 当用户明确表达了判定意见（如"这项不合格，问题是缺少校验记录"）时，**必须调用 apply_check_result** 生成确认卡片，而不是只用文字描述——审核员需要能一键采纳
 - 当用户要求"生成最终判定"且希望记录结论时，**调用 apply_final_verdict** 生成确认卡片；如果只是想预览判定思路，用 generate_final_verdict
-- 任何写入类工具（apply_check_result / apply_final_verdict）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
+- 任何写入类工具（apply_check_result / apply_final_verdict / propose_add_team_member / propose_create_audit_plan）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
 - 当用户需要法规依据时，调用 search_knowledge_base 搜索知识库
 - 如果"待分析照片"不为"无"，说明用户刚拍了照片等待你分析，**必须主动调用 analyze_photo**（无需用户再说"帮我看看"），分析后如发现问题应直接调用 apply_check_result 生成确认卡片
 - 主动提供帮助，不要被动等待用户请求
@@ -386,6 +400,176 @@ TOOLS.extend(
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_audit_team_members",
+                "description": "获取当前正式审核项目的审核组成员列表，包含姓名、角色（组长/组员/专家等）、负责体系、专业代码与分工",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "审核项目ID（可选，默认使用当前项目）",
+                        }
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_available_auditors",
+                "description": "搜索或列出系统中可用于分配审核任务的用户/审核员列表",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {
+                            "type": "string",
+                            "description": "姓名或用户名搜索关键词（可选）",
+                        },
+                        "system": {
+                            "type": "string",
+                            "description": "具备的认证体系资格过滤，如 Q/E/S（可选）",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "返回数量上限",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_add_team_member",
+                "description": "为当前审核项目生成添加审核组成员的确认卡片。本工具生成待确认的操作卡片，审核员在界面上点击确认后才会真正写入审核组",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "member_name": {
+                            "type": "string",
+                            "description": "要添加的审核员姓名或用户名",
+                        },
+                        "member_id": {
+                            "type": "string",
+                            "description": "审核员用户ID（UUID，若已知）",
+                        },
+                        "role": {
+                            "type": "string",
+                            "enum": ["leader", "member", "expert", "trainee", "observer"],
+                            "default": "member",
+                            "description": "在审核组中担任的角色：leader(组长)/member(组员)/expert(技术专家)/trainee(见习)/observer(观察员)",
+                        },
+                        "responsible_systems": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "负责的认证体系列表，如 ['Q', 'E']",
+                        },
+                        "assigned_areas": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "负责的区域或部门列表（可选）",
+                        },
+                    },
+                    "required": ["member_name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_audit_plan_items",
+                "description": "获取当前审核项目的审核计划表（已安排的审核日期、时间段、区域/部门、负责审核员、条款和活动类型）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "审核项目ID（UUID，默认自动使用当前项目）",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_create_audit_plan",
+                "description": "为当前审核项目批量生成或更新审核计划项（日程安排、审核区域/部门、负责审核员、审核体系、审核条款）的确认卡片。审核员在界面上点击确认后，系统将自动把计划项批量录入到正式审核计划表中",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "审核项目ID（UUID，默认自动使用当前项目）",
+                        },
+                        "plan_items": {
+                            "type": "array",
+                            "description": "计划项列表",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "plan_date": {
+                                        "type": "string",
+                                        "description": "审核日期，格式 YYYY-MM-DD，如 '2026-08-25' 或 '第1天'",
+                                    },
+                                    "time_start": {
+                                        "type": "string",
+                                        "description": "开始时间，如 '08:30'",
+                                    },
+                                    "time_end": {
+                                        "type": "string",
+                                        "description": "结束时间，如 '12:00'",
+                                    },
+                                    "area_name": {
+                                        "type": "string",
+                                        "description": "区域或部门名称，如 '首次会议及管理层'、'质检部'、'生产车间' 等",
+                                    },
+                                    "area_type": {
+                                        "type": "string",
+                                        "enum": ["department", "workshop", "office", "site", "leadership"],
+                                        "description": "区域类型",
+                                    },
+                                    "group_no": {
+                                        "type": "string",
+                                        "description": "工作组编号，如 'A'、'B' 或 'ABCDE'",
+                                    },
+                                    "assigned_member_names": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "分配的审核员姓名列表，如 ['张建国']",
+                                    },
+                                    "certification_systems": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "本次审核的体系，如 ['Q', 'S']",
+                                    },
+                                    "clauses": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "description": "涉及的条款号列表，如 ['4.1', '4.2', '5.1', '5.2']",
+                                    },
+                                    "activity_type": {
+                                        "type": "string",
+                                        "enum": ["normal", "opening_meeting", "closing_meeting", "night_inspection", "internal_meeting"],
+                                        "description": "活动类型",
+                                    },
+                                    "remarks": {
+                                        "type": "string",
+                                        "description": "备注说明",
+                                    },
+                                },
+                                "required": ["area_name"],
+                            },
+                        },
+                    },
+                    "required": ["plan_items"],
+                },
+            },
+        },
     ]
 )
 
@@ -468,6 +652,7 @@ class AgentService:
             certification_systems="、".join(
                 context_info.get("certification_systems") or []
             ) or "未指定",
+            team_members_summary=context_info.get("team_members_summary", "未配置"),
             media_hint=(
                 f"照片ID {context.get('media_file_id')}（用户刚拍摄/上传，尚未分析）"
                 if context.get("media_file_id") else "无"
@@ -540,6 +725,7 @@ class AgentService:
                 tool_calls_buffer: dict[int, dict] = {}
                 had_tool_calls = False
                 assistant_text = ""
+                streamed_any_content = False
 
                 async for chunk in response:
                     if not chunk.choices:
@@ -548,9 +734,6 @@ class AgentService:
                         continue
 
                     delta = chunk.choices[0].delta
-
-                    if delta.content:
-                        assistant_text += delta.content
 
                     if delta.tool_calls and not force_final:
                         had_tool_calls = True
@@ -575,6 +758,12 @@ class AgentService:
                                         "arguments"
                                     ] += tool_call_delta.function.arguments
 
+                    if delta.content:
+                        assistant_text += delta.content
+                        if force_final or not had_tool_calls:
+                            streamed_any_content = True
+                            yield {"type": "content", "content": delta.content}
+
                 if not had_tool_calls:
                     # Only surface text once the turn is a final answer.
                     if not assistant_text.strip():
@@ -596,7 +785,8 @@ class AgentService:
                         return
 
                     full_response_text += assistant_text
-                    yield {"type": "content", "content": assistant_text}
+                    if not streamed_any_content:
+                        yield {"type": "content", "content": assistant_text}
                     break
 
                 # Replay the assistant turn (with tool calls) into history, then
@@ -712,7 +902,7 @@ class AgentService:
             error_text = str(e)
             yield {
                 "type": "error",
-                "content": "AI 助手暂时无法完成这次请求，请换一种说法或稍后重试。",
+                "content": f"AI 服务暂时遇到异常（{type(e).__name__}: {str(e)[:120]}）。系统已尝试自动切换备用模型，请稍后重试或检查模型网关连通性。",
             }
 
         finally:
@@ -954,6 +1144,8 @@ class AgentService:
             "plan_item_id": "",
             "audit_session_id": "",
             "certification_systems": [],
+            "team_members": [],
+            "team_members_summary": "无",
         }
 
         project_id = self._normalize_uuid(context.get("project_id"))
@@ -987,6 +1179,45 @@ class AgentService:
                 if project.enterprise:
                     result["enterprise_name"] = project.enterprise.name
                     result["enterprise_id"] = str(project.enterprise.id)
+
+                # 关联加载审核组成员
+                team_rows = await db.execute(
+                    select(AuditTeamMember, User)
+                    .join(User, AuditTeamMember.member_id == User.id)
+                    .where(
+                        AuditTeamMember.project_id == project.id,
+                        AuditTeamMember.is_deleted == False,
+                        User.is_deleted == False,
+                    )
+                    .order_by(AuditTeamMember.created_at)
+                )
+                team_list = []
+                team_summaries = []
+                role_display_map = {
+                    "leader": "组长",
+                    "member": "组员",
+                    "expert": "技术专家",
+                    "trainee": "见习审核员",
+                    "observer": "观察员",
+                }
+                for member, user in team_rows.all():
+                    role_str = role_display_map.get(member.role, member.role or "组员")
+                    systems_str = "、".join(member.responsible_systems or []) or "全体系"
+                    name = user.full_name or user.username
+                    team_summaries.append(f"{name}（{role_str}，负责: {systems_str}）")
+                    team_list.append({
+                        "id": str(member.id),
+                        "member_id": str(member.member_id),
+                        "name": name,
+                        "username": user.username,
+                        "role": member.role,
+                        "role_display": role_str,
+                        "responsible_systems": member.responsible_systems or [],
+                        "qualification_codes": member.qualification_codes or [],
+                        "registration_no": member.registration_no,
+                    })
+                result["team_members"] = team_list
+                result["team_members_summary"] = "；".join(team_summaries) if team_summaries else "暂未配置审核组成员"
 
         if plan_item_id:
             plan_item = await db.get(AuditPlanItem, plan_item_id)
@@ -1091,6 +1322,11 @@ class AgentService:
             "search_audit_knowledge": self._tool_search_audit_knowledge,
             "propose_audit_evidence": self._tool_propose_audit_evidence,
             "propose_audit_draft_confirmation": self._tool_propose_audit_draft_confirmation,
+            "get_audit_team_members": self._tool_get_audit_team_members,
+            "list_available_auditors": self._tool_list_available_auditors,
+            "propose_add_team_member": self._tool_propose_add_team_member,
+            "get_audit_plan_items": self._tool_get_audit_plan_items,
+            "propose_create_audit_plan": self._tool_propose_create_audit_plan,
         }
 
         handler = tool_handlers.get(tool_name)
@@ -1820,6 +2056,8 @@ class AgentService:
             "area_name": context_info.get("audit_area_name"),
             "audit_session_id": context_info.get("audit_session_id"),
             "certification_systems": context_info.get("certification_systems"),
+            "team_members": context_info.get("team_members", []),
+            "team_members_summary": context_info.get("team_members_summary", "未配置"),
             "pending_drafts": pending_drafts,
         }
 
@@ -2000,6 +2238,406 @@ class AgentService:
                 "record_id": str(record_id),
                 "verdict": verdict,
                 "comment": comment,
+            },
+        }
+        return proposal
+
+    async def _tool_get_audit_team_members(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """获取当前正式审核项目的审核组成员列表及分工详情。"""
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        team_rows = await db.execute(
+            select(AuditTeamMember, User)
+            .join(User, AuditTeamMember.member_id == User.id)
+            .where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.is_deleted == False,
+                User.is_deleted == False,
+            )
+            .order_by(AuditTeamMember.created_at)
+        )
+
+        role_map = {
+            "leader": "组长",
+            "member": "组员",
+            "expert": "技术专家",
+            "trainee": "见习审核员",
+            "observer": "观察员",
+        }
+        members = []
+        for member, user in team_rows.all():
+            members.append({
+                "id": str(member.id),
+                "member_id": str(member.member_id),
+                "name": user.full_name or user.username,
+                "username": user.username,
+                "role": member.role,
+                "role_display": role_map.get(member.role, member.role or "组员"),
+                "responsible_systems": member.responsible_systems or [],
+                "registration_no": member.registration_no,
+                "registration_level": member.registration_level,
+                "qualification_codes": member.qualification_codes or [],
+                "assigned_areas": member.assigned_areas or [],
+            })
+
+        return {
+            "project_id": str(project.id),
+            "project_title": project.title,
+            "certification_systems": project.certification_systems or [],
+            "total_members": len(members),
+            "members": members,
+        }
+
+    async def _tool_list_available_auditors(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """搜索或列出系统中可用于分配审核任务的用户/审核员列表。"""
+        keyword = str(args.get("keyword") or "").strip()
+        system = str(args.get("system") or "").strip()
+        limit = max(1, min(50, int(args.get("limit") or 10)))
+
+        query = select(User).where(
+            User.is_active == True,
+            User.is_deleted == False,
+        )
+        if keyword:
+            query = query.where(
+                or_(
+                    User.full_name.ilike(f"%{keyword}%"),
+                    User.username.ilike(f"%{keyword}%"),
+                )
+            )
+        query = query.order_by(User.full_name, User.username).limit(limit)
+
+        rows = (await db.execute(query)).scalars().all()
+        auditors = []
+        for u in rows:
+            qualified_systems = u.qualified_systems or []
+            if system and system not in qualified_systems:
+                continue
+            auditors.append({
+                "id": str(u.id),
+                "name": u.full_name or u.username,
+                "username": u.username,
+                "role": u.role,
+                "registration_no": u.auditor_registration_no,
+                "auditor_level": u.auditor_level,
+                "qualified_systems": qualified_systems,
+                "qualified_industry_codes": u.qualified_industry_codes or [],
+            })
+
+        return {
+            "total": len(auditors),
+            "auditors": auditors,
+        }
+
+    async def _tool_propose_add_team_member(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """为当前审核项目生成添加审核组成员的确认卡片。"""
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        member_name = str(args.get("member_name") or "").strip()
+        member_id_str = self._normalize_uuid(args.get("member_id"))
+        target_user: Optional[User] = None
+
+        if member_id_str:
+            target_user = await db.get(User, UUID(member_id_str))
+
+        if not target_user and member_name:
+            res = await db.execute(
+                select(User).where(
+                    or_(User.full_name == member_name, User.username == member_name),
+                    User.is_deleted == False,
+                )
+            )
+            target_user = res.scalar_one_or_none()
+
+        if not target_user and member_name:
+            # 模糊搜索候选人
+            res = await db.execute(
+                select(User).where(
+                    or_(
+                        User.full_name.ilike(f"%{member_name}%"),
+                        User.username.ilike(f"%{member_name}%"),
+                    ),
+                    User.is_deleted == False,
+                ).limit(5)
+            )
+            candidates = res.scalars().all()
+            if len(candidates) == 1:
+                target_user = candidates[0]
+            elif len(candidates) > 1:
+                candidate_names = "、".join(c.full_name or c.username for c in candidates)
+                return {"error": f"匹配到多名审核员（{candidate_names}），请指定更精确的姓名"}
+            else:
+                return {"error": f"未在系统中找到名为'{member_name}'的审核员用户"}
+
+        if not target_user:
+            return {"error": "缺少审核员信息，请输入要添加的审核员姓名"}
+
+        # 检查是否已在审核组中
+        existing = await db.execute(
+            select(AuditTeamMember).where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.member_id == target_user.id,
+                AuditTeamMember.is_deleted == False,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return {"error": f"审核员 {target_user.full_name or target_user.username} 已经在当前审核组中"}
+
+        role = str(args.get("role") or "member")
+        role_display = {
+            "leader": "组长",
+            "member": "组员",
+            "expert": "技术专家",
+            "trainee": "见习审核员",
+            "observer": "观察员",
+        }.get(role, "组员")
+
+        responsible_systems = args.get("responsible_systems")
+        if not responsible_systems:
+            responsible_systems = project.certification_systems or []
+        elif not isinstance(responsible_systems, list):
+            responsible_systems = [str(responsible_systems)]
+
+        assigned_areas = args.get("assigned_areas") or []
+
+        proposal = {
+            "type": "action_proposal",
+            "action": "add_team_member",
+            "status": "pending",
+            "title": f"添加审核组成员：{target_user.full_name or target_user.username}",
+            "data": {
+                "project_id": str(project.id),
+                "project_title": project.title,
+                "member_id": str(target_user.id),
+                "member_name": target_user.full_name or target_user.username,
+                "role": role,
+                "role_display": role_display,
+                "responsible_systems": responsible_systems,
+                "assigned_areas": assigned_areas,
+            },
+        }
+        return proposal
+
+    async def _tool_get_audit_plan_items(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """获取当前正式审核项目的审核计划表列表。"""
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        # 加载项目成员映射
+        team_rows = await db.execute(
+            select(AuditTeamMember, User)
+            .join(User, AuditTeamMember.member_id == User.id)
+            .where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.is_deleted == False,
+                User.is_deleted == False,
+            )
+        )
+        user_id_to_name: dict[UUID, str] = {}
+        for tm, u in team_rows.all():
+            user_id_to_name[u.id] = u.full_name or u.username
+
+        # 加载计划项
+        plan_rows = await db.execute(
+            select(AuditPlanItem)
+            .where(
+                AuditPlanItem.project_id == UUID(project_id),
+                AuditPlanItem.is_deleted == False,
+            )
+            .order_by(AuditPlanItem.plan_date, AuditPlanItem.time_start)
+        )
+        items = plan_rows.scalars().all()
+        plan_list = []
+        for p in items:
+            assigned_names = [
+                user_id_to_name.get(mid, str(mid))
+                for mid in (p.assigned_member_ids or [])
+            ]
+            plan_list.append({
+                "id": str(p.id),
+                "plan_date": str(p.plan_date),
+                "time_start": p.time_start,
+                "time_end": p.time_end,
+                "group_no": p.group_no,
+                "area_name": p.area_name,
+                "area_type": p.area_type,
+                "assigned_member_names": assigned_names,
+                "certification_systems": p.certification_systems or [],
+                "clauses": p.clauses or [],
+                "activity_type": p.activity_type,
+                "status": p.status,
+                "remarks": p.remarks,
+            })
+
+        return {
+            "project_id": str(project.id),
+            "project_title": project.title,
+            "total_items": len(plan_list),
+            "plan_items": plan_list,
+        }
+
+    async def _tool_propose_create_audit_plan(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """为当前审核项目生成批量录入审核计划表的确认卡片。"""
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        raw_items = args.get("plan_items") or []
+        if not raw_items or not isinstance(raw_items, list):
+            return {"error": "缺少有效的计划项列表"}
+
+        # 加载项目成员映射
+        team_rows = await db.execute(
+            select(AuditTeamMember, User)
+            .join(User, AuditTeamMember.member_id == User.id)
+            .where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.is_deleted == False,
+                User.is_deleted == False,
+            )
+        )
+        name_to_user: dict[str, User] = {}
+        for tm, u in team_rows.all():
+            if u.full_name:
+                name_to_user[u.full_name] = u
+            if u.username:
+                name_to_user[u.username] = u
+
+        from datetime import date, timedelta
+        base_date = project.scheduled_start or date.today()
+
+        clean_items = []
+        for idx, item in enumerate(raw_items):
+            if not isinstance(item, dict):
+                continue
+
+            raw_date = str(item.get("plan_date") or "").strip()
+            date_str = str(base_date)
+            if raw_date and len(raw_date) >= 10 and "-" in raw_date:
+                date_str = raw_date[:10]
+            elif "2" in raw_date or "二" in raw_date:
+                date_str = str(base_date + timedelta(days=1))
+            elif "3" in raw_date or "三" in raw_date:
+                date_str = str(base_date + timedelta(days=2))
+            elif "4" in raw_date or "四" in raw_date:
+                date_str = str(base_date + timedelta(days=3))
+            elif "5" in raw_date or "五" in raw_date:
+                date_str = str(base_date + timedelta(days=4))
+
+            time_start = str(item.get("time_start") or "08:30").strip()
+            time_end = str(item.get("time_end") or "12:00").strip()
+            area_name = str(item.get("area_name") or f"审核区域-{idx+1}").strip()
+            area_type = str(item.get("area_type") or "department")
+            group_no = str(item.get("group_no") or "A")
+
+            assigned_names = []
+            raw_names = (
+                item.get("assigned_member_names")
+                or item.get("assigned_members")
+                or []
+            )
+            if isinstance(raw_names, str):
+                raw_names = [raw_names]
+            for n in raw_names:
+                n_str = str(n).strip()
+                if n_str:
+                    assigned_names.append(n_str)
+
+            if not assigned_names and name_to_user:
+                assigned_names = [next(iter(name_to_user.keys()))]
+
+            systems = item.get("certification_systems") or project.certification_systems or []
+            if not isinstance(systems, list):
+                systems = [str(systems)]
+
+            clauses = item.get("clauses") or []
+            if not isinstance(clauses, list):
+                clauses = [str(clauses)]
+
+            activity_type = str(item.get("activity_type") or "normal")
+            remarks = str(item.get("remarks") or "")
+
+            clean_items.append({
+                "plan_date": date_str,
+                "time_start": time_start,
+                "time_end": time_end,
+                "area_name": area_name,
+                "area_type": area_type,
+                "group_no": group_no,
+                "assigned_member_names": assigned_names,
+                "certification_systems": systems,
+                "clauses": clauses,
+                "activity_type": activity_type,
+                "remarks": remarks,
+            })
+
+        if not clean_items:
+            return {"error": "未能成功解析出有效的审核计划项"}
+
+        proposal = {
+            "type": "action_proposal",
+            "action": "create_audit_plan",
+            "status": "pending",
+            "title": f"录入审核计划表：共 {len(clean_items)} 个计划任务",
+            "data": {
+                "project_id": str(project.id),
+                "project_title": project.title,
+                "plan_items": clean_items,
+                "total_items": len(clean_items),
             },
         }
         return proposal

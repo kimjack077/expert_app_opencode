@@ -29,15 +29,19 @@ Agent 工具产出的提案形如::
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+import random
+from datetime import datetime, date, timedelta
+from typing import Any, Awaitable, Callable, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
+from app.models.enterprise import Enterprise
+from app.models.audit_project import AuditProject, AuditTeamMember, AuditPlanItem
 from app.models.user import User
 from app.utils.roles import ADMIN_ROLES
 
@@ -263,3 +267,244 @@ async def _confirm_audit_drafts(
 
     result = await perform_draft_confirmation(db, project_id, session_id, payload, user)
     return {"applied": "confirm_audit_drafts", **result}
+
+
+@register("add_team_member")
+async def _add_team_member(
+    db: AsyncSession, user: User, data: dict[str, Any]
+) -> dict[str, Any]:
+    """向审核项目添加审核组成员。"""
+    from app.services.project_access_service import ensure_project_access
+    from app.models.audit_project import AuditProject, AuditTeamMember
+
+    project_id = _as_uuid(_require(data, "project_id"), "project_id")
+    await ensure_project_access(db, project_id, user, require_manage=True)
+
+    project = await db.get(AuditProject, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="审核项目不存在")
+
+    member_id_raw = data.get("member_id")
+    target_user: Optional[User] = None
+    if member_id_raw:
+        target_user = await db.get(User, _as_uuid(member_id_raw, "member_id"))
+
+    if not target_user and data.get("member_name"):
+        member_name = str(data["member_name"]).strip()
+        res = await db.execute(
+            select(User).where(
+                or_(User.full_name == member_name, User.username == member_name),
+                User.is_deleted == False,
+            )
+        )
+        target_user = res.scalar_one_or_none()
+
+    if not target_user:
+        raise HTTPException(status_code=404, detail="未找到指定的审核员用户")
+
+    # 检查是否已在审核组中
+    existing = await db.execute(
+        select(AuditTeamMember).where(
+            AuditTeamMember.project_id == project_id,
+            AuditTeamMember.member_id == target_user.id,
+            AuditTeamMember.is_deleted == False,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail=f"审核员 {target_user.full_name or target_user.username} 已在当前审核组中",
+        )
+
+    role = str(data.get("role") or "member")
+    responsible_systems = data.get("responsible_systems")
+    if not responsible_systems:
+        responsible_systems = project.certification_systems or []
+    elif not isinstance(responsible_systems, list):
+        responsible_systems = [str(responsible_systems)]
+
+    db_member = AuditTeamMember(
+        project_id=project_id,
+        member_id=target_user.id,
+        role=role,
+        responsible_systems=responsible_systems,
+        qualification_codes=target_user.qualified_industry_codes or [],
+        registration_no=target_user.auditor_registration_no,
+        registration_level=target_user.auditor_level,
+        assigned_areas=data.get("assigned_areas") or [],
+        assigned_clauses=data.get("assigned_clauses") or [],
+        status="assigned",
+    )
+    db.add(db_member)
+    await db.commit()
+    await db.refresh(db_member)
+
+    return {
+        "applied": "add_team_member",
+        "team_member_id": str(db_member.id),
+        "project_id": str(project_id),
+        "member_name": target_user.full_name or target_user.username,
+        "role": db_member.role,
+        "responsible_systems": db_member.responsible_systems,
+    }
+
+
+@register("create_audit_plan")
+async def _action_create_audit_plan(
+    db: AsyncSession,
+    user: User,
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    project_id = _as_uuid(_require(data, "project_id"), "project_id")
+    project = await db.get(AuditProject, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="审核项目不存在")
+
+    raw_items = data.get("plan_items") or []
+    if not raw_items or not isinstance(raw_items, list):
+        raise HTTPException(status_code=400, detail="缺少有效的审核计划项列表")
+
+    # 获取当前审核组成员与系统用户映射
+    team_members_res = await db.execute(
+        select(AuditTeamMember, User)
+        .join(User, AuditTeamMember.member_id == User.id)
+        .where(
+            AuditTeamMember.project_id == project_id,
+            AuditTeamMember.is_deleted == False,
+            User.is_deleted == False,
+        )
+    )
+    name_to_user_id: dict[str, UUID] = {}
+    for tm, u in team_members_res.all():
+        if u.full_name:
+            name_to_user_id[u.full_name] = u.id
+        if u.username:
+            name_to_user_id[u.username] = u.id
+
+    enterprise = await db.get(Enterprise, project.enterprise_id) if project.enterprise_id else None
+    base_date = project.scheduled_start or date.today()
+
+    created_items = []
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            continue
+
+        raw_date = item.get("plan_date")
+        plan_date: date = base_date
+        if raw_date:
+            if isinstance(raw_date, date):
+                plan_date = raw_date
+            elif isinstance(raw_date, str):
+                d_str = raw_date.strip()
+                try:
+                    plan_date = datetime.strptime(d_str[:10], "%Y-%m-%d").date()
+                except Exception:
+                    if "1" in d_str or "一" in d_str:
+                        plan_date = base_date
+                    elif "2" in d_str or "二" in d_str:
+                        plan_date = base_date + timedelta(days=1)
+                    elif "3" in d_str or "三" in d_str:
+                        plan_date = base_date + timedelta(days=2)
+                    elif "4" in d_str or "四" in d_str:
+                        plan_date = base_date + timedelta(days=3)
+                    elif "5" in d_str or "五" in d_str:
+                        plan_date = base_date + timedelta(days=4)
+                    else:
+                        plan_date = base_date
+
+        time_start = str(item.get("time_start") or "08:30")
+        time_end = str(item.get("time_end") or "12:00")
+        area_name = str(item.get("area_name") or f"审核区域-{idx+1}").strip()
+        area_type = str(item.get("area_type") or "department")
+        group_no = str(item.get("group_no") or "A")
+
+        assigned_member_ids: list[UUID] = []
+        raw_assigned = item.get("assigned_member_ids") or []
+        for mid in raw_assigned:
+            try:
+                assigned_member_ids.append(UUID(str(mid)))
+            except Exception:
+                pass
+
+        raw_names = item.get("assigned_member_names") or []
+        if isinstance(raw_names, str):
+            raw_names = [raw_names]
+        for name in raw_names:
+            name_clean = str(name).strip()
+            if name_clean in name_to_user_id and name_to_user_id[name_clean] not in assigned_member_ids:
+                assigned_member_ids.append(name_to_user_id[name_clean])
+
+        if not assigned_member_ids:
+            if name_to_user_id:
+                assigned_member_ids.append(next(iter(name_to_user_id.values())))
+            else:
+                assigned_member_ids.append(user.id)
+
+        systems = item.get("certification_systems") or project.certification_systems or []
+        if not isinstance(systems, list):
+            systems = [str(systems)]
+
+        clauses = item.get("clauses") or []
+        if not isinstance(clauses, list):
+            clauses = [str(clauses)]
+
+        activity_type = str(item.get("activity_type") or "normal")
+        remarks = str(item.get("remarks") or "")
+
+        random_suffix = "".join([str(random.randint(0, 9)) for _ in range(6)])
+        task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{random_suffix}"
+        task_title = f"{project.title} - {area_name} - {plan_date}"
+
+        inspection_task = InspectionTask(
+            task_no=task_no,
+            title=task_title,
+            template_id=None,
+            assigned_to=assigned_member_ids[0] if assigned_member_ids else user.id,
+            assigned_by=user.id,
+            target_name=enterprise.name if enterprise else project.title,
+            target_address=enterprise.address if enterprise else None,
+            scheduled_at=datetime.combine(plan_date, datetime.min.time()),
+            status="pending",
+        )
+        db.add(inspection_task)
+        await db.flush()
+
+        db_plan_item = AuditPlanItem(
+            project_id=project_id,
+            inspection_task_id=inspection_task.id,
+            plan_date=plan_date,
+            time_start=time_start,
+            time_end=time_end,
+            group_no=group_no,
+            area_name=area_name,
+            area_type=area_type,
+            assigned_member_ids=assigned_member_ids,
+            certification_systems=systems,
+            clauses=clauses,
+            activity_type=activity_type,
+            status="pending",
+            remarks=remarks,
+        )
+        db.add(db_plan_item)
+        await db.flush()
+
+        created_items.append({
+            "id": str(db_plan_item.id),
+            "area_name": area_name,
+            "plan_date": str(plan_date),
+            "time_start": time_start,
+            "time_end": time_end,
+            "certification_systems": systems,
+            "clauses": clauses,
+        })
+
+    await db.commit()
+
+    return {
+        "applied": "create_audit_plan",
+        "project_id": str(project_id),
+        "created_count": len(created_items),
+        "plan_items": created_items,
+    }
+
+

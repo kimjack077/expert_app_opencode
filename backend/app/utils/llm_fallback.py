@@ -1,28 +1,48 @@
-"""AsyncOpenAI 包装类：主 LLM 遇 429/超时自动切换备用模型。
+"""AsyncOpenAI 包装类：主 LLM 遇到异常/超时/429/500/断连时自动无缝切换备用模型。
 
 用法（替换原 AsyncOpenAI(...) 即可，其余代码不变）：
 
     from app.utils.llm_fallback import create_main_llm_client
 
     self.client = create_main_llm_client()
-    # 调用代码不变：
+    # 调用代码完全不变，支持普通与流式模式：
     response = await self.client.chat.completions.create(model=..., messages=...)
 """
-from typing import Any, Optional
+import logging
+from typing import Any, Optional, AsyncGenerator
 
 import httpx
-from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from openai import (
+    AsyncOpenAI,
+    APIError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    APIStatusError,
+    InternalServerError,
+)
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
-# 触发降级的异常类型：限流、网关超时、连接失败。
-# 不捕获 APIStatusError(500/502/503)，避免对端短暂故障导致误切。
-FALLBACK_EXC = (RateLimitError, APITimeoutError, APIConnectionError)
+# 触发降级的异常类型：包含限流、超时、连接断开、服务器 5xx、无效请求体及网络协议错误
+FALLBACK_EXC = (
+    APIError,
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    APIStatusError,
+    InternalServerError,
+    httpx.HTTPError,
+    httpx.TimeoutException,
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+)
 
 
 class _CompletionsProxy:
-    """代理 completions.create，主模型失败时切换备用 client 并替换 model 名。"""
+    """代理 completions.create，主模型失败或异常时自动切换备用 client 并替换 model 名。"""
 
     def __init__(
         self,
@@ -36,24 +56,63 @@ class _CompletionsProxy:
         self._backup_model = backup_model
         self._tag = tag
 
+    def _prepare_backup_kwargs(self, kwargs: dict) -> dict:
+        backup_kwargs = dict(kwargs)
+        if self._backup_model and "model" in backup_kwargs:
+            backup_kwargs["model"] = self._backup_model
+        # 移除 reasoning_effort，避免对端网关报 400 (例如 none 不合法)
+        backup_kwargs.pop("reasoning_effort", None)
+        # 移除 stream_options 避免网关兼容性问题
+        backup_kwargs.pop("stream_options", None)
+        return backup_kwargs
+
     async def create(self, *args: Any, **kwargs: Any):
+        if not self._backup:
+            return await self._primary.chat.completions.create(*args, **kwargs)
+
+        is_stream = bool(kwargs.get("stream"))
+        if is_stream:
+            return self._stream_with_fallback(*args, **kwargs)
+
         try:
             return await self._primary.chat.completions.create(*args, **kwargs)
-        except FALLBACK_EXC as e:
-            if not self._backup:
-                raise
-            backup_kwargs = dict(kwargs)
-            if self._backup_model and "model" in backup_kwargs:
-                backup_kwargs["model"] = self._backup_model
-            # 备用模型强制关闭思考模式：降级场景优先快速响应
-            backup_kwargs["reasoning_effort"] = "none"
-            # 备用模型不传 stream_options.include_usage，避免网关兼容性问题
-            backup_kwargs.pop("stream_options", None)
+        except Exception as e:
+            backup_kwargs = self._prepare_backup_kwargs(kwargs)
+            logger.warning(
+                f"[{self._tag}] 主模型调用失败 ({type(e).__name__}: {e}); "
+                f"正在自动切换至备用模型: {self._backup_model}"
+            )
             print(
-                f"[{self._tag}] primary failed ({type(e).__name__}): {e}; "
-                f"switching to backup model={self._backup_model}, reasoning_effort=none"
+                f"[{self._tag}] primary failed ({type(e).__name__}: {e}); "
+                f"switching to backup model={self._backup_model}"
             )
             return await self._backup.chat.completions.create(*args, **backup_kwargs)
+
+    async def _stream_with_fallback(self, *args: Any, **kwargs: Any) -> AsyncGenerator:
+        """流式 fallback 生成器：在建连或首包阶段失败时自动无缝降级到备用模型。"""
+        streamed_any = False
+        try:
+            primary_stream = await self._primary.chat.completions.create(*args, **kwargs)
+            async for chunk in primary_stream:
+                streamed_any = True
+                yield chunk
+        except Exception as e:
+            if streamed_any:
+                logger.error(f"[{self._tag}] 主模型流式传输中途中断 ({type(e).__name__}: {e})")
+                raise
+
+            backup_kwargs = self._prepare_backup_kwargs(kwargs)
+            logger.warning(
+                f"[{self._tag}] 主模型流式连接失败 ({type(e).__name__}: {e}); "
+                f"正在自动降级切换至备用模型: {self._backup_model}"
+            )
+            print(
+                f"[{self._tag}] primary stream failed ({type(e).__name__}: {e}); "
+                f"switching to backup model={self._backup_model}"
+            )
+            backup_stream = await self._backup.chat.completions.create(*args, **backup_kwargs)
+            async for chunk in backup_stream:
+                yield chunk
 
 
 class _ChatProxy:
@@ -68,7 +127,7 @@ class _ChatProxy:
 
 
 class LLMClientWithFallback:
-    """AsyncOpenAI 包装类：主模型 429/超时自动切换备用模型。
+    """AsyncOpenAI 包装类：主模型异常/超时/限流自动切换备用模型。
 
     代理 chat.completions.create 调用，其他属性转发给 primary。
     """
@@ -85,16 +144,11 @@ class LLMClientWithFallback:
         self.chat = _ChatProxy(primary, backup, backup_model, tag)
 
     def __getattr__(self, name: str):
-        # 未显式代理的属性（base_url、api_key、models 等）直接读 primary
         return getattr(self._primary, name)
 
 
 def create_main_llm_client() -> LLMClientWithFallback:
-    """创建主 LLM 客户端，配置了备用模型时自动启用降级。
-
-    读 settings 中的 LLM_BASE_URL/MODEL/API_KEY 作为主，
-    LLM_BACKUP_BASE_URL/MODEL/API_KEY 作为备用（可选）。
-    """
+    """创建主 LLM 客户端，配置了备用模型时自动启用降级。"""
     primary = AsyncOpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
@@ -120,12 +174,7 @@ def create_main_llm_client() -> LLMClientWithFallback:
 
 
 def create_ai_extract_llm_client() -> LLMClientWithFallback:
-    """创建 AI 文档解析 LLM 客户端，配置了备用模型时自动启用降级。
-
-    与主 LLM 区别：使用 AI_EXTRACT_LLM_* 配置、长超时（read=600s）、独立备用模型。
-    降级时备用模型强制 reasoning_effort=none。
-    """
-    # AI 解析需要长读超时（大文档流式响应慢）
+    """创建 AI 文档解析 LLM 客户端，配置了备用模型时自动启用降级。"""
     primary_timeout = httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=15.0)
     primary = AsyncOpenAI(
         base_url=settings.AI_EXTRACT_LLM_BASE_URL,
@@ -154,4 +203,3 @@ def create_ai_extract_llm_client() -> LLMClientWithFallback:
         ),
         tag="AIExtract-Fallback",
     )
-

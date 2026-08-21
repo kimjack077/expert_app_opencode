@@ -9,7 +9,7 @@ Audit AI Agent Service
 """
 import logging
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, AsyncGenerator
 from uuid import UUID
 
 from sqlalchemy import select
@@ -107,6 +107,215 @@ class AuditAgent:
                 await self.db.flush()
             except Exception as log_err:
                 logger.warning("[AuditAgent] failed to write LLMCallLog: %s", log_err)
+
+    async def _chat_stream(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        call_type: str,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> AsyncGenerator[dict, None]:
+        """流式调用 LLM 并逐 chunk 生成 SSE 事件。"""
+        started = time.monotonic()
+        content = ""
+        tokens_used = 0
+        error_text: Optional[str] = None
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            async for chunk in response:
+                if not chunk.choices:
+                    if getattr(chunk, "usage", None):
+                        tokens_used += chunk.usage.total_tokens or 0
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    content += delta.content
+                    yield {"type": "content", "content": delta.content}
+
+            yield {"type": "done", "full_content": content}
+        except Exception as exc:
+            error_text = f"{type(exc).__name__}: {exc}"
+            yield {"type": "error", "content": f"AI 服务异常: {exc}"}
+            raise
+        finally:
+            try:
+                from app.models.audit import LLMCallLog
+
+                self.db.add(
+                    LLMCallLog(
+                        user_id=self.user_id,
+                        call_type=call_type,
+                        prompt=user_prompt,
+                        response=content,
+                        model=self.model,
+                        tokens_used=tokens_used or None,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        is_success="false" if error_text else "true",
+                        error_msg=error_text,
+                    )
+                )
+                await self.db.flush()
+            except Exception as log_err:
+                logger.warning("[AuditAgent] failed to write LLMCallLog: %s", log_err)
+
+    async def stream_prepare_audit(
+        self, project_id: UUID
+    ) -> AsyncGenerator[dict, None]:
+        """流式生成审核准备建议。"""
+        project_result = await self.db.execute(
+            select(AuditProject).where(AuditProject.id == project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            yield {"type": "error", "content": "审核项目不存在"}
+            return
+
+        enterprise_result = await self.db.execute(
+            select(Enterprise).where(Enterprise.id == project.enterprise_id)
+        )
+        enterprise = enterprise_result.scalar_one_or_none()
+
+        historical_nc = []
+        if enterprise:
+            historical_result = await self.db.execute(
+                select(Nonconformity, AuditProject)
+                .join(AuditProject, Nonconformity.project_id == AuditProject.id)
+                .where(AuditProject.enterprise_id == enterprise.id)
+                .where(AuditProject.id != project.id)
+                .order_by(Nonconformity.created_at.desc())
+                .limit(20)
+            )
+            historical_nc = [
+                {
+                    "project_no": historical_project.project_no,
+                    "severity": nc.severity,
+                    "clause_no": nc.clause_no,
+                    "description": nc.description,
+                    "status": nc.status,
+                }
+                for nc, historical_project in historical_result.all()
+            ]
+
+        prompt = f"""
+你是一位资深的认证审核专家。请基于以下企业信息与本次审核要求，为即将进行的现场审核提供专业、详尽的审核准备建议与风险评估方案：
+
+企业信息：
+- 企业名称：{enterprise.name if enterprise else '未知'}
+- 行业类型：{enterprise.enterprise_type if enterprise else '未知'}
+- 员工人数：{enterprise.employee_count if enterprise else '未知'}
+- 上次审核时间：{enterprise.last_audit_date if enterprise else '首次审核'}
+- 上次审核类型：{enterprise.last_audit_type if enterprise else '无'}
+
+本次审核信息：
+- 项目名称：{project.title}
+- 审核类型：{project.audit_type}
+- 认证体系：{', '.join(project.certification_systems)}
+- 审核准则：{', '.join(project.audit_criteria)}
+- 计划审核人天：{project.audit_days or '待定'} 天
+
+历史不符合项：
+{historical_nc if historical_nc else '无历史不符合项记录'}
+
+请按照以下 Markdown 格式结构输出专业建议：
+### 一、 审核人天与资源评估
+（评估计划人天数是否合理，给出依据）
+
+### 二、 高风险区域与重点工序预判
+（列出需要重点抽查的生产车间、职能部门、危险化学品/特种设备等关键区域，并说明原因）
+
+### 三、 重点审核条款及核查要点
+（基于行业特点与体系标准，列出 3-5 个核心标准条款及其现场核查要点）
+
+### 四、 现场审核注意事项与取证建议
+（列出审核员在现场取证、交谈、抽样、安全防护等方面的特别注意事项）
+
+### 五、 总体准备建议
+（给出审核组进驻前的一揽子准备建议）
+"""
+        async for chunk in self._chat_stream(
+            system_prompt="你是一位资深的认证审核专家，擅长审核准备、风险评估与现场策略制定。",
+            user_prompt=prompt,
+            call_type="audit_prepare_stream",
+            max_tokens=3000,
+            temperature=0.7,
+        ):
+            yield chunk
+
+    async def stream_generate_report(
+        self, project_id: UUID
+    ) -> AsyncGenerator[dict, None]:
+        """流式生成审核报告叙述性评价。"""
+        project_result = await self.db.execute(
+            select(AuditProject).where(AuditProject.id == project_id)
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            yield {"type": "error", "content": "审核项目不存在"}
+            return
+
+        records_result = await self.db.execute(
+            select(AuditAreaRecord).where(AuditAreaRecord.project_id == project_id)
+        )
+        records = records_result.scalars().all()
+
+        nc_result = await self.db.execute(
+            select(Nonconformity).where(Nonconformity.project_id == project_id)
+        )
+        nonconformities = nc_result.scalars().all()
+
+        findings_summary = []
+        for record in records:
+            if record.conclusion:
+                findings_summary.append(f"【{record.area_id or '区域'}】{record.conclusion}")
+
+        nc_summary = []
+        for nc in nonconformities:
+            nc_summary.append(f"[{nc.severity}] {nc.clause_no}: {nc.description}")
+
+        prompt = f"""
+你是一位资深的认证审核专家。请基于以下现场审核信息，生成审核报告第二章中的叙述性综合评价：
+
+审核项目信息：
+- 项目名称：{project.title}
+- 认证体系：{', '.join(project.certification_systems)}
+- 审核类型：{project.audit_type}
+
+现场审核发现摘要：
+{chr(10).join(findings_summary[:15]) if findings_summary else '暂无异常发现记录'}
+
+不符合项摘要：
+{chr(10).join(nc_summary) if nc_summary else '本次审核未开具不符合项'}
+
+请按照以下 Markdown 格式结构输出审核报告评价内容（每节150-250字，用词严谨专业）：
+### 3.1 文件化信息与管理体系构建
+### 3.2 质量/环境/安全目标与指标达成
+### 3.3 风险和机遇的应对措施
+### 3.4 资源配置与支持过程控制
+### 3.5 现场运行控制与过程绩效
+### 3.6 监测、测量与绩效评价
+### 3.7 持续改进与纠正措施
+### 3.8 管理评审与内部审核实施
+### 3.9 总体审核结论与推荐意见
+"""
+        async for chunk in self._chat_stream(
+            system_prompt="你是一位资深的认证审核专家，擅长撰写规范、客观、严谨的认证审核报告。",
+            user_prompt=prompt,
+            call_type="audit_report_stream",
+            max_tokens=4000,
+            temperature=0.7,
+        ):
+            yield chunk
 
     async def prepare_audit(self, project_id: UUID) -> Dict[str, Any]:
         """
@@ -462,3 +671,24 @@ async def suggest_nc_with_ai(
     """使用 AI 建议不符合项"""
     agent = AuditAgent(db, user_id=user_id)
     return await agent.suggest_nonconformity(evidence, clause_no, certification_system)
+
+
+def stream_prepare_audit_with_ai(
+    db: AsyncSession,
+    project_id: UUID,
+    user_id: Optional[str] = None,
+) -> AsyncGenerator[dict, None]:
+    """使用 AI 流式准备审核"""
+    agent = AuditAgent(db, user_id=user_id)
+    return agent.stream_prepare_audit(project_id)
+
+
+def stream_generate_report_with_ai(
+    db: AsyncSession,
+    project_id: UUID,
+    user_id: Optional[str] = None,
+) -> AsyncGenerator[dict, None]:
+    """使用 AI 流式生成报告"""
+    agent = AuditAgent(db, user_id=user_id)
+    return agent.stream_generate_report(project_id)
+

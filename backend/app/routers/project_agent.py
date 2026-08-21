@@ -359,7 +359,14 @@ async def list_documents(project_id: UUID, db: AsyncSession = Depends(get_db), c
 
 
 @router.post("/{project_id}/documents")
-async def upload_document(project_id: UUID, file: UploadFile = File(...), category: str = Form("auto"), db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def upload_document(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    category: str = Form("auto"),
+    force_index: bool = Form(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     await ensure_project_access(db, project_id, current_user)
     content = await file.read()
     if not content:
@@ -393,11 +400,13 @@ async def upload_document(project_id: UUID, file: UploadFile = File(...), catego
             content,
             expected_enterprise_name=enterprise_name,
             expected_industry_keywords=industry_keywords,
+            force_index=force_index,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"资料已保存但解析失败: {exc}") from exc
     await db.refresh(document)
-    return response({**document_dict(document), **stats}, "项目资料已上传并索引")
+    msg = "初审提示：文档可能与当前项目特征存在差异，已暂停自动索引" if stats.get("requires_confirmation") else "项目资料已上传并索引"
+    return response({**document_dict(document), **stats}, msg)
 
 
 @router.delete("/{project_id}/documents/{document_id}")
@@ -432,9 +441,66 @@ async def reindex_document(project_id: UUID, document_id: UUID, db: AsyncSession
             path.read_bytes(),
             expected_enterprise_name=enterprise_name,
             expected_industry_keywords=industry_keywords,
+            force_index=True,
         ),
         "索引已重建",
     )
+
+
+@router.post("/{project_id}/documents/{document_id}/confirm_index")
+async def confirm_document_index(
+    project_id: UUID,
+    document_id: UUID,
+    payload: dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await ensure_project_access(db, project_id, current_user)
+    document = await db.get(ProjectDocument, document_id)
+    if not document or document.project_id != project_id or document.is_deleted:
+        raise HTTPException(status_code=404, detail="项目资料不存在")
+    action = payload.get("action", "index")
+    if action == "archive_only":
+        document.document_metadata = {
+            **(document.document_metadata or {}),
+            "quarantined": True,
+            "searchable": False,
+            "pending_confirmation": False,
+            "archive_only": True,
+        }
+        await db.execute(
+            delete(ProjectKnowledgeChunk).where(
+                ProjectKnowledgeChunk.document_id == document.id
+            )
+        )
+        await db.commit()
+        return response(
+            {
+                "document_id": str(document.id),
+                "chunk_count": 0,
+                "status": document.status,
+                "archive_only": True,
+                "quarantined": True,
+            },
+            "已设置为仅归档资料",
+        )
+
+    # 强制建立索引
+    path = resolve_storage_path(document.stored_path)
+    if not path:
+        raise HTTPException(status_code=404, detail="原始文件不存在")
+    enterprise_name, industry_keywords = await _document_project_context(
+        db, project_id
+    )
+    stats = await project_knowledge_service.index_document(
+        db,
+        document,
+        path.read_bytes(),
+        expected_enterprise_name=enterprise_name,
+        expected_industry_keywords=industry_keywords,
+        force_index=True,
+    )
+    return response(stats, "已确认并完成知识向量索引")
 
 
 @router.post("/{project_id}/knowledge/search")

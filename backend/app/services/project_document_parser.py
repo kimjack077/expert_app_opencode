@@ -184,6 +184,7 @@ class ProjectDocumentParser:
     @staticmethod
     def _normalize_text(text: str) -> str:
         text = text.replace("\x00", "")
+        text = re.sub(r"[\ue000-\uf8ff]", " ", text)
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
@@ -305,23 +306,33 @@ class ProjectDocumentParser:
                 for detected in detected_normalized
             )
         )
+        IGNORED_ORG_KEYWORDS = (
+            "认证",
+            "认可",
+            "检验",
+            "检测",
+            "评定",
+            "标准",
+            "测试",
+            "计量",
+            "质量保证",
+            "咨询",
+            "委员会",
+            "中心",
+            "协会",
+            "监督",
+        )
         other_names = [
             original
             for detected, original in detected_normalized.items()
             if expected_name
             and expected_name not in detected
             and detected not in expected_name
+            and not any(kw in original for kw in IGNORED_ORG_KEYWORDS)
         ]
 
         reasons: list[dict[str, Any]] = []
-        if other_names and not expected_name_present:
-            reasons.append(
-                {
-                    "code": "OTHER_ENTERPRISE_NAME",
-                    "message": f"资料出现其他企业名称：{'、'.join(other_names)}",
-                    "matches": other_names,
-                }
-            )
+        has_industry_mismatch = False
 
         expected_text = " ".join(
             [expected_enterprise_name or "", *(expected_industry_keywords or [])]
@@ -347,6 +358,7 @@ class ProjectDocumentParser:
                 ]
                 # Require more than a stray word before quarantining by industry.
                 if len(set(matches)) >= 2:
+                    has_industry_mismatch = True
                     reasons.append(
                         {
                             "code": "INDUSTRY_MISMATCH",
@@ -357,9 +369,18 @@ class ProjectDocumentParser:
                         }
                     )
 
-        high_risk = bool(reasons)
+        if other_names and not expected_name_present:
+            reasons.append(
+                {
+                    "code": "OTHER_ENTERPRISE_NAME",
+                    "message": f"资料出现其他企业名称：{'、'.join(other_names)}",
+                    "matches": other_names,
+                }
+            )
+
+        high_risk = has_industry_mismatch
         return {
-            "risk_level": "high" if high_risk else "low",
+            "risk_level": "high" if high_risk else ("medium" if reasons else "low"),
             "recommended_quarantine": high_risk,
             "expected_enterprise_name": expected_enterprise_name,
             "detected_company_names": detected_names,

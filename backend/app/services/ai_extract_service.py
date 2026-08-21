@@ -753,5 +753,288 @@ class AIExtractService:
         except Exception as e:
             return {"success": False, "error": str(e), "items": items}
 
+    async def refine_items_stream(
+        self,
+        items: List[dict],
+        instruction: str,
+    ) -> AsyncGenerator[dict, None]:
+        """流式版精修：推送思考过程与结构化输出给前端实时显示。
+
+        chunk 格式与 extract_items_from_file 一致：
+        - {type: status, message, reasoning_delta, reasoning_done, content_delta, ...}
+        - {type: done, items, item_count, raw_response}
+        - {type: error, content}
+        """
+        items_json = json.dumps(items, ensure_ascii=False, indent=2)
+
+        prompt = f"""
+你是一个检查模板优化专家，熟悉行政执法、质量监督领域的检查规范。
+请根据用户的优化指令，对以下检查项目列表进行优化调整。
+
+## 当前的检查项目列表
+```json
+{items_json}
+```
+
+## 用户的优化指令
+{instruction}
+
+## 输出要求
+1. 请输出优化后的完整检查项目列表
+2. 保持原有的数据结构格式不变（所有字段名称不变）
+3. 直接输出JSON格式，包含 "items" 数组
+"""
+        yield {
+            "type": "status",
+            "stage": "sending",
+            "step": 1,
+            "message": f"已接收 {len(items)} 个检查项，正在组织精修提示词...",
+        }
+
+        # 与 extract 相同的流式容错策略：心跳、首字超时、空闲超时、重试、部分恢复
+        max_attempts = 3
+        first_token_timeout = 300
+        idle_timeout = 120
+        heartbeat_interval = 3.0
+
+        full_content = ""
+        best_partial = ""
+        success_stream = False
+
+        for attempt in range(1, max_attempts + 1):
+            if attempt > 1:
+                yield {
+                    "type": "status",
+                    "stage": "ai_parsing",
+                    "step": 1,
+                    "message": f"检测到网络波动，正在自动重试 (第 {attempt}/{max_attempts} 次)...",
+                }
+
+            attempt_content = ""
+            stream = None
+            anext_task = None
+            create_task = None
+
+            try:
+                start_time = time.time()
+                last_data_time = time.time()
+                first_chunk_received = False
+                reasoning_text = ""
+                reasoning_sent = 0
+                content_sent = 0
+
+                reasoning_kwargs = settings.ai_extract_reasoning_kwargs
+                create_task = asyncio.ensure_future(
+                    self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=32000,
+                        temperature=0.2,
+                        stream=True,
+                        stream_options={"include_usage": True},
+                        **reasoning_kwargs,
+                    )
+                )
+                while True:
+                    done, _ = await asyncio.wait({create_task}, timeout=heartbeat_interval)
+                    if done:
+                        stream = create_task.result()
+                        create_task = None
+                        break
+                    waited = int(time.time() - start_time)
+                    if waited >= first_token_timeout:
+                        raise RuntimeError(f"等待 AI 响应超时（{waited} 秒）")
+                    yield {
+                        "type": "status",
+                        "stage": "ai_parsing",
+                        "step": 1,
+                        "message": (
+                            f"AI 模型 ({self.model}) 正在建立连接并启动推理，已等待 {waited} 秒"
+                            f"（连接建立后会立即开始流式输出）..."
+                        ),
+                    }
+
+                while True:
+                    if anext_task is None:
+                        anext_task = asyncio.ensure_future(stream.__anext__())
+
+                    done, _ = await asyncio.wait({anext_task}, timeout=heartbeat_interval)
+
+                    if not done:
+                        waited = int(time.time() - start_time)
+                        if not first_chunk_received:
+                            if waited >= first_token_timeout:
+                                raise RuntimeError(f"等待 AI 首字响应超时（{waited} 秒）")
+                            if reasoning_text:
+                                yield {
+                                    "type": "status",
+                                    "stage": "ai_parsing",
+                                    "step": 1,
+                                    "message": f"AI 正在深度思考中（已思考 {len(reasoning_text)} 字，已耗时 {waited} 秒）...",
+                                }
+                            else:
+                                yield {
+                                    "type": "status",
+                                    "stage": "ai_parsing",
+                                    "step": 1,
+                                    "message": f"AI 模型 ({self.model}) 正在思考中，已等待 {waited} 秒...",
+                                }
+                        else:
+                            idle = int(time.time() - last_data_time)
+                            if idle >= idle_timeout:
+                                raise RuntimeError(f"AI 流式响应空闲超时（{idle} 秒无数据）")
+                            yield {
+                                "type": "status",
+                                "stage": "extracting",
+                                "step": 1,
+                                "message": f"AI 正在持续精修中 (已生成 {len(attempt_content)} 字符，已耗时 {waited} 秒)...",
+                            }
+                        continue
+
+                    task, anext_task = anext_task, None
+                    try:
+                        chunk = task.result()
+                    except StopAsyncIteration:
+                        break
+
+                    if not chunk.choices:
+                        if getattr(chunk, "usage", None):
+                            print(f"[AIRefine] usage: prompt={chunk.usage.prompt_tokens} "
+                                  f"completion={chunk.usage.completion_tokens} "
+                                  f"total={chunk.usage.total_tokens}")
+                        continue
+
+                    delta = chunk.choices[0].delta
+                    if delta is None:
+                        continue
+
+                    # SenseNova 网关用 "reasoning"，DeepSeek 风格用 "reasoning_content"
+                    reasoning_piece = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+                    if reasoning_piece:
+                        reasoning_text += reasoning_piece
+                        last_data_time = time.time()
+
+                        # 增量推送思考文本（攒够 24 字推一次，避免事件风暴）
+                        if not first_chunk_received and len(reasoning_text) - reasoning_sent >= 24:
+                            piece = reasoning_text[reasoning_sent:]
+                            reasoning_sent = len(reasoning_text)
+                            yield {
+                                "type": "status",
+                                "stage": "ai_parsing",
+                                "step": 1,
+                                "message": f"AI 正在深度思考中（已思考 {len(reasoning_text)} 字）...",
+                                "reasoning_delta": piece,
+                            }
+
+                    content = delta.content
+                    if content:
+                        attempt_content += content
+                        last_data_time = time.time()
+
+                        if not first_chunk_received:
+                            first_chunk_received = True
+                            # 推送思考阶段剩余文本
+                            if len(reasoning_text) > reasoning_sent:
+                                yield {
+                                    "type": "status",
+                                    "stage": "ai_parsing",
+                                    "step": 1,
+                                    "reasoning_delta": reasoning_text[reasoning_sent:],
+                                    "reasoning_done": True,
+                                }
+                                reasoning_sent = len(reasoning_text)
+                            yield {
+                                "type": "status",
+                                "stage": "extracting",
+                                "step": 1,
+                                "message": "AI 思考完成，正在结构化输出精修结果...",
+                            }
+
+                        # 增量推送正文（结构化 JSON）
+                        if len(attempt_content) - content_sent >= 48:
+                            piece = attempt_content[content_sent:]
+                            content_sent = len(attempt_content)
+                            yield {
+                                "type": "status",
+                                "stage": "extracting",
+                                "step": 1,
+                                "content_delta": piece,
+                            }
+
+                if attempt_content.strip():
+                    full_content = attempt_content
+                    success_stream = True
+                    # 推送正文剩余部分
+                    if len(attempt_content) > content_sent:
+                        yield {
+                            "type": "status",
+                            "stage": "extracting",
+                            "step": 1,
+                            "content_delta": attempt_content[content_sent:],
+                        }
+                    break
+
+                raise RuntimeError("AI 返回内容为空")
+
+            except Exception as e:
+                print(f"[AIRefine] Attempt {attempt}/{max_attempts} ({self.model}) failed: {e}")
+
+                # 已生成较完整内容时直接采用部分结果
+                if len(attempt_content) >= 2000 and attempt_content.count('"title"') >= 3:
+                    print(f"[AIRefine] Recovering partial content: {len(attempt_content)} chars")
+                    full_content = attempt_content
+                    success_stream = True
+                    yield {
+                        "type": "status",
+                        "stage": "processing",
+                        "step": 2,
+                        "message": "网络出现波动，已从已接收内容中恢复精修结果...",
+                    }
+                    break
+
+                if len(attempt_content) > len(best_partial):
+                    best_partial = attempt_content
+                continue
+
+            finally:
+                if create_task is not None and not create_task.done():
+                    create_task.cancel()
+                if anext_task is not None and not anext_task.done():
+                    anext_task.cancel()
+                if stream is not None:
+                    try:
+                        await stream.close()
+                    except Exception:
+                        pass
+
+        if not success_stream or not full_content:
+            if len(best_partial) >= 800 and best_partial.count('"title"') >= 2:
+                yield {
+                    "type": "status",
+                    "stage": "processing",
+                    "step": 2,
+                    "message": f"网络不稳定，正在从已接收的 {len(best_partial)} 字符中尽力恢复精修结果...",
+                }
+                full_content = best_partial
+            else:
+                yield {"type": "error", "content": "AI 精修多次中断，模型服务暂时不稳定，请稍后重试"}
+                return
+
+        yield {
+            "type": "status",
+            "stage": "processing",
+            "step": 2,
+            "message": "正在解析精修结果并构建检查项...",
+        }
+
+        parsed_result = self._parse_extracted_items(full_content)
+
+        yield {
+            "type": "done",
+            "items": parsed_result,
+            "item_count": len(parsed_result),
+            "raw_response": full_content,
+        }
+
 
 ai_extract_service = AIExtractService()

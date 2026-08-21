@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert } from 'antd'
+import { useState, useEffect, useRef } from 'react'
+import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography } from 'antd'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
   EditOutlined, 
@@ -10,6 +10,9 @@ import {
   DatabaseOutlined,
   FileDoneOutlined,
   ScheduleOutlined,
+  CopyOutlined,
+  PauseCircleOutlined,
+  CheckOutlined,
 } from '@ant-design/icons'
 import { auditProjectApi, auditAIApi } from '@/services/auditProjectApi'
 import TeamManagement from './components/TeamManagement'
@@ -41,8 +44,10 @@ export default function AuditProjectDetail() {
   const [project, setProject] = useState<any>(null)
   const [progress, setProgress] = useState<any>(null)
   const [aiModalVisible, setAiModalVisible] = useState(false)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiResult, setAiResult] = useState<any>(null)
+  const [aiModalTitle, setAiModalTitle] = useState('AI 审核准备建议')
+  const [aiStreamingText, setAiStreamingText] = useState('')
+  const [aiIsStreaming, setAiIsStreaming] = useState(false)
+  const aiAbortControllerRef = useRef<AbortController | null>(null)
   const [activeTab, setActiveTab] = useState('team')
 
   useEffect(() => {
@@ -74,121 +79,239 @@ export default function AuditProjectDetail() {
   }
 
   const handleAIPrepare = async () => {
+    if (aiAbortControllerRef.current) {
+      aiAbortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    aiAbortControllerRef.current = controller
+
+    setAiModalTitle('AI 审核准备建议')
+    setAiStreamingText('')
+    setAiIsStreaming(true)
     setAiModalVisible(true)
-    setAiLoading(true)
-    setAiResult(null)
+
     try {
-      const response = await auditAIApi.prepareAudit(id!)
-      setAiResult({
-        type: 'prepare',
-        data: response.data,
-      })
+      const generator = auditAIApi.prepareAuditStream(id!, controller.signal)
+      for await (const chunk of generator) {
+        if (chunk.type === 'content' && chunk.content) {
+          setAiStreamingText((prev) => prev + chunk.content)
+        } else if (chunk.type === 'error') {
+          message.error(chunk.content || 'AI 生成出错')
+        }
+      }
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'AI 分析失败')
-      setAiModalVisible(false)
+      if (error.name !== 'AbortError') {
+        message.error(error.message || 'AI 准备建议生成失败')
+      }
     } finally {
-      setAiLoading(false)
+      setAiIsStreaming(false)
+      aiAbortControllerRef.current = null
     }
   }
 
   const handleAIGenerateReport = async () => {
+    if (aiAbortControllerRef.current) {
+      aiAbortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    aiAbortControllerRef.current = controller
+
+    setAiModalTitle('AI 生成审核报告叙述性评价')
+    setAiStreamingText('')
+    setAiIsStreaming(true)
     setAiModalVisible(true)
-    setAiLoading(true)
-    setAiResult(null)
+
     try {
-      const response = await auditAIApi.generateReport(id!)
-      setAiResult({
-        type: 'report',
-        data: response.data,
-      })
+      const generator = auditAIApi.generateReportStream(id!, controller.signal)
+      for await (const chunk of generator) {
+        if (chunk.type === 'content' && chunk.content) {
+          setAiStreamingText((prev) => prev + chunk.content)
+        } else if (chunk.type === 'error') {
+          message.error(chunk.content || 'AI 生成出错')
+        }
+      }
     } catch (error: any) {
-      message.error(error.response?.data?.message || 'AI 生成报告失败')
-      setAiModalVisible(false)
+      if (error.name !== 'AbortError') {
+        message.error(error.message || 'AI 报告评价生成失败')
+      }
     } finally {
-      setAiLoading(false)
+      setAiIsStreaming(false)
+      aiAbortControllerRef.current = null
     }
   }
 
-  const renderAIResult = () => {
-    if (!aiResult) return null
+  const handleStopStreaming = () => {
+    if (aiAbortControllerRef.current) {
+      aiAbortControllerRef.current.abort()
+      aiAbortControllerRef.current = null
+      setAiIsStreaming(false)
+      message.info('已停止生成')
+    }
+  }
 
-    if (aiResult.type === 'prepare') {
-      const data = aiResult.data
+  const handleCopyAiContent = async () => {
+    if (!aiStreamingText) return
+    try {
+      await navigator.clipboard.writeText(aiStreamingText)
+      message.success('已复制到剪贴板')
+    } catch {
+      message.error('复制失败，请手动选取复制')
+    }
+  }
+
+  const renderInlineMarkdown = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} style={{ color: '#262626' }}>{part.slice(2, -2)}</strong>
+      }
+      if (part.startsWith('*') && part.endsWith('*')) {
+        return <em key={i}>{part.slice(1, -1)}</em>
+      }
+      if (part.startsWith('`') && part.endsWith('`')) {
+        return (
+          <code
+            key={i}
+            style={{
+              backgroundColor: '#f5f5f5',
+              padding: '2px 6px',
+              borderRadius: 4,
+              fontSize: '12px',
+              color: '#d46b08',
+            }}
+          >
+            {part.slice(1, -1)}
+          </code>
+        )
+      }
+      return part
+    })
+  }
+
+  const renderStreamingMarkdown = (text: string) => {
+    if (!text && aiIsStreaming) {
       return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Card title="审核人天评估" size="small">
-            {data.audit_days_assessment}
-          </Card>
-          <Card title="高风险区域" size="small">
-            <ul>
-              {data.high_risk_areas?.map((area: string, idx: number) => (
-                <li key={idx}>{area}</li>
-              ))}
-            </ul>
-          </Card>
-          <Card title="重点审核条款" size="small">
-            <ul>
-              {data.key_clauses?.map((clause: string, idx: number) => (
-                <li key={idx}>{clause}</li>
-              ))}
-            </ul>
-          </Card>
-          <Card title="审核注意事项" size="small">
-            <ul>
-              {data.attention_points?.map((point: string, idx: number) => (
-                <li key={idx}>{point}</li>
-              ))}
-            </ul>
-          </Card>
-          <Card title="总体建议" size="small">
-            {data.overall_suggestion}
-          </Card>
-        </Space>
+        <div style={{ textAlign: 'center', padding: '48px 0', color: '#8c8c8c' }}>
+          <Spin size="default" style={{ marginRight: 8 }} />
+          <span>AI 专家正在分析项目背景与历史记录，即将开始实时流式输出...</span>
+        </div>
       )
     }
 
-    if (aiResult.type === 'report') {
-      const data = aiResult.data
-      return (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Alert
-            message="AI 生成的报告内容"
-            description="以下内容由 AI 自动生成，请审核后使用"
-            type="info"
-            showIcon
-          />
-          <Card title="3.1 文件化信息" size="small">
-            {data.section_3_1}
-          </Card>
-          <Card title="3.2 目标和指标" size="small">
-            {data.section_3_2}
-          </Card>
-          <Card title="3.3 风险和机遇" size="small">
-            {data.section_3_3}
-          </Card>
-          <Card title="3.4 支持过程" size="small">
-            {data.section_3_4}
-          </Card>
-          <Card title="3.5 运行控制" size="small">
-            {data.section_3_5}
-          </Card>
-          <Card title="3.6 绩效评价" size="small">
-            {data.section_3_6}
-          </Card>
-          <Card title="3.7 改进" size="small">
-            {data.section_3_7}
-          </Card>
-          <Card title="3.8 管理评审" size="small">
-            {data.section_3_8}
-          </Card>
-          <Card title="3.9 总体评价" size="small">
-            {data.section_3_9}
-          </Card>
-        </Space>
-      )
+    if (!text && !aiIsStreaming) {
+      return <div style={{ color: '#999', padding: '24px', textAlign: 'center' }}>暂无生成内容</div>
     }
 
-    return null
+    const lines = text.split('\n')
+    return (
+      <div style={{ lineHeight: '1.8', fontSize: 14 }}>
+        {lines.map((line, index) => {
+          const trimmed = line.trim()
+          if (trimmed.startsWith('### ')) {
+            return (
+              <Typography.Title
+                key={index}
+                level={5}
+                style={{
+                  marginTop: 18,
+                  marginBottom: 8,
+                  color: '#1677ff',
+                  borderLeft: '3px solid #1677ff',
+                  paddingLeft: 8,
+                }}
+              >
+                {trimmed.replace('### ', '')}
+              </Typography.Title>
+            )
+          }
+          if (trimmed.startsWith('## ')) {
+            return (
+              <Typography.Title
+                key={index}
+                level={4}
+                style={{
+                  marginTop: 20,
+                  marginBottom: 10,
+                  color: '#262626',
+                  borderBottom: '1px solid #f0f0f0',
+                  paddingBottom: 4,
+                }}
+              >
+                {trimmed.replace('## ', '')}
+              </Typography.Title>
+            )
+          }
+          if (trimmed.startsWith('# ')) {
+            return (
+              <Typography.Title
+                key={index}
+                level={3}
+                style={{ marginTop: 22, marginBottom: 12 }}
+              >
+                {trimmed.replace('# ', '')}
+              </Typography.Title>
+            )
+          }
+          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+            return (
+              <div
+                key={index}
+                style={{
+                  paddingLeft: 16,
+                  position: 'relative',
+                  marginBottom: 4,
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 4,
+                    top: 0,
+                    color: '#1677ff',
+                  }}
+                >
+                  •
+                </span>
+                {renderInlineMarkdown(trimmed.slice(2))}
+              </div>
+            )
+          }
+          if (/^\d+\.\s/.test(trimmed)) {
+            const match = trimmed.match(/^(\d+\.)\s+(.*)$/)
+            return (
+              <div
+                key={index}
+                style={{
+                  paddingLeft: 20,
+                  position: 'relative',
+                  marginBottom: 4,
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    fontWeight: 600,
+                    color: '#595959',
+                  }}
+                >
+                  {match?.[1]}
+                </span>
+                {renderInlineMarkdown(match?.[2] || '')}
+              </div>
+            )
+          }
+          if (!trimmed) {
+            return <div key={index} style={{ height: 8 }} />
+          }
+          return (
+            <p key={index} style={{ marginBottom: 6 }}>
+              {renderInlineMarkdown(line)}
+            </p>
+          )
+        })}
+      </div>
+    )
   }
 
   if (!project) {
@@ -200,160 +323,242 @@ export default function AuditProjectDetail() {
   return (
     <div style={{ padding: '24px' }}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Card>
-          <Space style={{ marginBottom: 16 }}>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/audit-projects')}>
-              返回
-            </Button>
-            <Button
-              icon={<EditOutlined />}
-              onClick={() => navigate(`/audit-projects/${id}/edit`)}
-            >
-              编辑项目
-            </Button>
-            <Button icon={<FileDoneOutlined />} onClick={() => setActiveTab('artifacts')}>
-              报告与资料包
-            </Button>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'prepare',
-                    label: 'AI 审核准备建议',
-                    icon: <BulbOutlined />,
-                    onClick: handleAIPrepare,
-                  },
-                  {
-                    key: 'generate',
-                    label: '报告与资料包',
-                    icon: <FileWordOutlined />,
-                    onClick: () => setActiveTab('artifacts'),
-                  },
-                  {
-                    key: 'documents',
-                    label: '项目资料与知识库',
-                    icon: <DatabaseOutlined />,
-                    onClick: () => setActiveTab('documents'),
-                  },
-                ],
-              }}
-            >
-              <Button type="primary" icon={<RobotOutlined />}>
-                AI 助手
+        <Card
+          bodyStyle={{ padding: '16px 20px' }}
+          style={{
+            borderRadius: 12,
+            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          }}
+        >
+          {/* 顶部行：返回、项目标题与核心状态、功能操作按钮 */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
+            <Space size={10} wrap align="center">
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/audit-projects')}>
+                返回
               </Button>
-            </Dropdown>
-          </Space>
+              <span style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
+                {project.title}
+              </span>
+              <Tag color="blue" style={{ fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
+                {project.project_no}
+              </Tag>
+              <Tag color={statusConfig.color} style={{ fontSize: 12, margin: 0, fontWeight: 600 }}>
+                {statusConfig.text}
+              </Tag>
+              <Tag color="cyan" style={{ fontSize: 12, margin: 0 }}>
+                {auditTypeMap[project.audit_type] || project.audit_type} · {project.audit_days || 0}人天
+              </Tag>
+            </Space>
 
-          <Descriptions title="项目基本信息" column={2} bordered>
-            <Descriptions.Item label="项目编号">{project.project_no}</Descriptions.Item>
-            <Descriptions.Item label="状态">
-              <Tag color={statusConfig.color}>{statusConfig.text}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="项目名称" span={2}>
-              {project.title}
-            </Descriptions.Item>
-            <Descriptions.Item label="审核类型">
-              {auditTypeMap[project.audit_type] || project.audit_type}
-            </Descriptions.Item>
-            <Descriptions.Item label="审核人天">{project.audit_days || 0} 天</Descriptions.Item>
-            <Descriptions.Item label="认证体系">
-              <Space size={4}>
+            <Space wrap size={8}>
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => navigate(`/audit-projects/${id}/edit`)}
+              >
+                编辑项目
+              </Button>
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'prepare',
+                      label: 'AI 审核准备建议',
+                      icon: <BulbOutlined />,
+                      onClick: handleAIPrepare,
+                    },
+                    {
+                      key: 'generate',
+                      label: 'AI 报告叙述性评价',
+                      icon: <FileWordOutlined />,
+                      onClick: handleAIGenerateReport,
+                    },
+                    {
+                      key: 'artifacts',
+                      label: '报告与资料包',
+                      icon: <FileDoneOutlined />,
+                      onClick: () => setActiveTab('artifacts'),
+                    },
+                    {
+                      key: 'documents',
+                      label: '项目资料与知识库',
+                      icon: <DatabaseOutlined />,
+                      onClick: () => setActiveTab('documents'),
+                    },
+                  ],
+                }}
+              >
+                <Button type="primary" icon={<RobotOutlined />}>
+                  AI 助手
+                </Button>
+              </Dropdown>
+            </Space>
+          </div>
+
+          {/* 中间信息栅格：紧凑 1 行/2 行排布 */}
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: 8,
+              border: '1px solid #e2e8f0',
+              padding: '10px 14px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '8px 16px',
+              fontSize: 13,
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <span style={{ color: '#64748b' }}>认证体系：</span>
+              <Space size={3}>
                 {project.certification_systems?.map((sys: string) => (
-                  <Tag key={sys}>{sys}</Tag>
+                  <Tag
+                    key={sys}
+                    color={sys === 'Q' ? 'blue' : sys === 'E' ? 'green' : sys === 'S' ? 'orange' : 'cyan'}
+                    style={{ margin: 0, fontWeight: 600, fontSize: 11 }}
+                  >
+                    {sys}
+                  </Tag>
                 ))}
               </Space>
-            </Descriptions.Item>
-            <Descriptions.Item label="审核准则">
-              {project.audit_criteria?.join(', ')}
-            </Descriptions.Item>
-            <Descriptions.Item label="计划开始时间">
-              {project.scheduled_start
-                ? new Date(project.scheduled_start).toLocaleString()
-                : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="计划结束时间">
-              {project.scheduled_end ? new Date(project.scheduled_end).toLocaleString() : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="备注" span={2}>
-              {project.remarks || '-'}
-            </Descriptions.Item>
-          </Descriptions>
-
-          {/* 项目工作台：下一步行动 */}
-          <Card
-            title="项目工作台"
-            style={{ marginTop: 16 }}
-            extra={
-              <span style={{ fontSize: 12, color: '#64748b' }}>
-                建议顺序：组员 → 计划 → 现场记录 → 会议 → 不符合项 → 交付
+            </div>
+            <div
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title={project.audit_criteria?.join(', ')}
+            >
+              <span style={{ color: '#64748b' }}>审核准则：</span>
+              <span style={{ color: '#1e293b', fontWeight: 500 }}>
+                {project.audit_criteria?.join(', ') || '-'}
               </span>
-            }
+            </div>
+            <div>
+              <span style={{ color: '#64748b' }}>审核排期：</span>
+              <span style={{ color: '#1e293b', fontWeight: 500 }}>
+                {project.scheduled_start ? String(project.scheduled_start).slice(0, 10) : '-'} ~{' '}
+                {project.scheduled_end ? String(project.scheduled_end).slice(0, 10) : '-'}
+              </span>
+            </div>
+            {project.remarks && (
+              <div style={{ gridColumn: '1 / -1', color: '#64748b', fontSize: 12 }}>
+                <span>备注：</span>
+                <span style={{ color: '#334155' }}>{project.remarks}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 底部紧凑工作台行动条：进度指标 + 快捷导航按钮 */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+              paddingTop: 8,
+              borderTop: '1px dashed #e2e8f0',
+            }}
           >
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              {progress && (
-                <>
-                  <div>
-                    <div style={{ marginBottom: 8 }}>
-                      审核计划完成度：{progress.plan_items?.completion_rate || 0}%
-                    </div>
-                    <Progress percent={progress.plan_items?.completion_rate || 0} />
-                  </div>
-                  <Descriptions column={4} size="small">
-                    <Descriptions.Item label="总计划项">
-                      {progress.plan_items?.total || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="待开始">
-                      {progress.plan_items?.pending || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="进行中">
-                      {progress.plan_items?.in_progress || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="已完成">
-                      {progress.plan_items?.completed || 0}
-                    </Descriptions.Item>
-                  </Descriptions>
-                  <Descriptions column={4} size="small">
-                    <Descriptions.Item label="不符合项总数">
-                      {progress.nonconformities?.total || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="严重不符合">
-                      {progress.nonconformities?.major || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="一般不符合">
-                      {progress.nonconformities?.minor || 0}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="观察项">
-                      {progress.nonconformities?.observations || 0}
-                    </Descriptions.Item>
-                  </Descriptions>
-                </>
-              )}
-              <Space wrap>
-                <Button type="primary" onClick={() => setActiveTab('plan')}>
-                  安排 / 查看计划
-                </Button>
-                <Button onClick={() => setActiveTab('documents')}>上传项目资料</Button>
-                <Button onClick={() => setActiveTab('records')}>查看现场记录</Button>
-                <Button onClick={() => setActiveTab('meetings')}>记录会议 / 签到</Button>
-                <Button onClick={() => setActiveTab('nonconformities')}>
-                  处理不符合项
-                  {(progress?.nonconformities?.total || 0) > 0
-                    ? ` (${progress.nonconformities.total})`
-                    : ''}
-                </Button>
-                <Button type="primary" ghost onClick={() => setActiveTab('artifacts')}>
-                  质量门禁 / 生成资料包
-                </Button>
-              </Space>
-              {!progress?.plan_items?.total && (
-                <Alert
-                  type="info"
-                  showIcon
-                  message="下一步：请先在「审核计划」中添加区域计划项并指定检查模板与审核员"
+            {/* 左侧紧凑指标 */}
+            <Space size={16} wrap align="center">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: '#64748b' }}>计划进度:</span>
+                <Progress
+                  percent={progress?.plan_items?.completion_rate || 0}
+                  size="small"
+                  style={{ width: 90, margin: 0 }}
                 />
-              )}
+              </div>
+              <div style={{ fontSize: 12, color: '#475569' }}>
+                计划项: <strong style={{ color: '#0f172a' }}>{progress?.plan_items?.total || 0}</strong>{' '}
+                (已完: <strong style={{ color: '#16a34a' }}>{progress?.plan_items?.completed || 0}</strong>, 进行:{' '}
+                <strong style={{ color: '#0284c7' }}>{progress?.plan_items?.in_progress || 0}</strong>, 待办:{' '}
+                <strong style={{ color: '#94a3b8' }}>{progress?.plan_items?.pending || 0}</strong>)
+              </div>
+              <div style={{ fontSize: 12, color: '#475569' }}>
+                不符合项:{' '}
+                <strong style={{ color: (progress?.nonconformities?.total || 0) > 0 ? '#ef4444' : '#16a34a' }}>
+                  {progress?.nonconformities?.total || 0}
+                </strong>
+              </div>
             </Space>
-          </Card>
+
+            {/* 右侧快速工作流导航按钮组 */}
+            <Space size={6} wrap>
+              <Button
+                size="small"
+                type={activeTab === 'team' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('team')}
+              >
+                审核组
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'plan' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('plan')}
+              >
+                审核计划
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'records' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('records')}
+              >
+                现场记录
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'meetings' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('meetings')}
+              >
+                会议沟通
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'nonconformities' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('nonconformities')}
+              >
+                不符合项
+                {(progress?.nonconformities?.total || 0) > 0
+                  ? ` (${progress.nonconformities.total})`
+                  : ''}
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'documents' ? 'primary' : 'default'}
+                onClick={() => setActiveTab('documents')}
+              >
+                项目资料
+              </Button>
+              <Button
+                size="small"
+                type={activeTab === 'artifacts' ? 'primary' : 'default'}
+                style={
+                  activeTab === 'artifacts'
+                    ? undefined
+                    : {
+                        borderColor: '#86efac',
+                        color: '#15803d',
+                        backgroundColor: '#f0fdf4',
+                        fontWeight: 600,
+                      }
+                }
+                onClick={() => setActiveTab('artifacts')}
+              >
+                质量门禁 / 生成资料包
+              </Button>
+            </Space>
+          </div>
         </Card>
 
         <Card>
@@ -417,24 +622,68 @@ export default function AuditProjectDetail() {
       </Space>
 
       <Modal
-        title="AI 助手"
+        title={
+          <Space>
+            <RobotOutlined style={{ color: '#1677ff' }} />
+            <span>{aiModalTitle}</span>
+            {aiIsStreaming && <Tag color="processing">正在实时输出中...</Tag>}
+            {!aiIsStreaming && aiStreamingText && <Tag color="success">生成完成</Tag>}
+          </Space>
+        }
         open={aiModalVisible}
-        onCancel={() => setAiModalVisible(false)}
+        onCancel={() => {
+          if (aiIsStreaming) {
+            handleStopStreaming()
+          }
+          setAiModalVisible(false)
+        }}
         footer={[
-          <Button key="close" onClick={() => setAiModalVisible(false)}>
-            关闭
+          aiIsStreaming && (
+            <Button
+              key="stop"
+              danger
+              icon={<PauseCircleOutlined />}
+              onClick={handleStopStreaming}
+            >
+              停止生成
+            </Button>
+          ),
+          <Button
+            key="copy"
+            icon={<CopyOutlined />}
+            disabled={!aiStreamingText}
+            onClick={handleCopyAiContent}
+          >
+            一键复制
           </Button>,
-        ]}
-        width={800}
+          <Button
+            key="close"
+            type="primary"
+            onClick={() => {
+              if (aiIsStreaming) {
+                handleStopStreaming()
+              }
+              setAiModalVisible(false)
+            }}
+          >
+            完成
+          </Button>,
+        ].filter(Boolean)}
+        width={850}
+        destroyOnClose
       >
-        {aiLoading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16 }}>AI 正在分析中...</div>
-          </div>
-        ) : (
-          renderAIResult()
-        )}
+        <div
+          style={{
+            maxHeight: '65vh',
+            overflowY: 'auto',
+            padding: '12px 16px',
+            backgroundColor: '#fafafa',
+            borderRadius: 8,
+            border: '1px solid #f0f0f0',
+          }}
+        >
+          {renderStreamingMarkdown(aiStreamingText)}
+        </div>
       </Modal>
     </div>
   )

@@ -2,6 +2,7 @@
 审核项目 API 路由
 Audit Projects API Routes
 """
+import json
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 from uuid import UUID
@@ -1198,6 +1199,8 @@ from app.services.audit_agent import (
     evaluate_evidence_with_ai,
     generate_report_with_ai,
     suggest_nc_with_ai,
+    stream_prepare_audit_with_ai,
+    stream_generate_report_with_ai,
 )
 
 @router.post("/{project_id}/ai/prepare")
@@ -1215,6 +1218,35 @@ async def ai_prepare_audit(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")
+
+
+@router.post("/{project_id}/ai/prepare/stream")
+async def ai_prepare_audit_stream(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI 审核准备建议（流式 SSE）"""
+    await ensure_project_access(db, project_id, current_user)
+
+    async def event_generator():
+        try:
+            async for chunk in stream_prepare_audit_with_ai(
+                db, project_id, user_id=str(current_user.id)
+            ):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/{project_id}/ai/evaluate-evidence")
@@ -1252,6 +1284,35 @@ async def ai_generate_report(
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")
 
 
+@router.post("/{project_id}/ai/generate-report/stream")
+async def ai_generate_report_stream(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI 生成审核报告叙述性评价（流式 SSE）"""
+    await ensure_project_access(db, project_id, current_user, require_manage=True)
+
+    async def event_generator():
+        try:
+            async for chunk in stream_generate_report_with_ai(
+                db, project_id, user_id=str(current_user.id)
+            ):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/{project_id}/ai/suggest-nc")
 async def ai_suggest_nonconformity(
     project_id: UUID,
@@ -1268,3 +1329,4 @@ async def ai_suggest_nonconformity(
         return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")
+

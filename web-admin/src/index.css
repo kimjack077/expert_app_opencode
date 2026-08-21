@@ -298,19 +298,59 @@ body {
 
 .ant-btn-primary {
   background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%) !important;
+  color: #ffffff !important;
   border: none !important;
-  box-shadow: 0 2px 4px rgba(3, 105, 161, 0.3) !important;
+  box-shadow: 0 2px 4px rgba(3, 105, 161, 0.25) !important;
 }
 
-.ant-btn-primary:hover {
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
   background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary-light) 100%) !important;
+  color: #ffffff !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(3, 105, 161, 0.4) !important;
+  box-shadow: 0 4px 8px rgba(3, 105, 161, 0.35) !important;
 }
 
-.ant-btn-default:hover {
+.ant-btn-default {
+  color: #1e293b !important;
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+.ant-btn-default:hover,
+.ant-btn-default:focus {
   border-color: var(--primary-color) !important;
   color: var(--primary-color) !important;
+  background: #f0f9ff !important;
+}
+
+/* Fix ghost button contrast: prevent primary gradient from overriding ghost transparent background */
+.ant-btn-background-ghost.ant-btn-primary {
+  background: transparent !important;
+  color: var(--primary-color) !important;
+  border: 1px solid var(--primary-color) !important;
+  box-shadow: none !important;
+}
+
+.ant-btn-background-ghost.ant-btn-primary:hover,
+.ant-btn-background-ghost.ant-btn-primary:focus {
+  background: rgba(3, 105, 161, 0.08) !important;
+  color: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+
+.ant-btn-background-ghost.ant-btn-dangerous {
+  background: transparent !important;
+  color: #ef4444 !important;
+  border: 1px solid #ef4444 !important;
+  box-shadow: none !important;
+}
+
+.ant-btn-background-ghost.ant-btn-dangerous:hover,
+.ant-btn-background-ghost.ant-btn-dangerous:focus {
+  background: rgba(239, 68, 68, 0.08) !important;
+  color: #dc2626 !important;
+  border-color: #dc2626 !important;
 }
 
 .ant-table-wrapper .ant-table-container {

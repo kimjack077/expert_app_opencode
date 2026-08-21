@@ -262,6 +262,60 @@ export const aiExtractApi = {
       timeout: 120000,
     })
   },
+  refineItemsStream: async function* (
+    items: any[],
+    instruction: string
+  ): AsyncGenerator<any> {
+    const token = useAuthStore.getState().token
+    // 总超时兜底：15 分钟（覆盖整个流式精修过程）
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15 * 60 * 1000)
+
+    try {
+      const response = await fetch('/api/ai-extract/refine/stream', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ items, instruction }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        throw new Error('No reader available')
+      }
+
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              yield JSON.parse(line.slice(6))
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e)
+            }
+          }
+        }
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  },
 }
 
 export const industryApi = {

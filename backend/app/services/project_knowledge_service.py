@@ -1,5 +1,4 @@
-"""Project-isolated parsing, indexing and retrieval for formal audits."""
-
+import asyncio
 import json
 import math
 import re
@@ -26,6 +25,7 @@ class ProjectKnowledgeService:
         *,
         expected_enterprise_name: str | None = None,
         expected_industry_keywords: list[str] | tuple[str, ...] | None = None,
+        force_index: bool = False,
     ) -> dict[str, Any]:
         if bool(getattr(document, "is_deleted", False)):
             raise ValueError("已删除的项目资料不能建立索引")
@@ -52,19 +52,6 @@ class ProjectKnowledgeService:
                     filename=document.original_filename,
                 )
             )
-            if consistency["recommended_quarantine"]:
-                document.document_metadata = {
-                    **document.document_metadata,
-                    "consistency": consistency,
-                    "quarantined": True,
-                    "searchable": False,
-                    "warning": "资料与项目企业或行业明显不一致，已隔离等待人工复核",
-                }
-            elif expected_enterprise_name or expected_industry_keywords:
-                document.document_metadata = {
-                    **document.document_metadata,
-                    "consistency": consistency,
-                }
             if document.document_type == "auto":
                 document.document_type = parsed.metadata.get("category", "other")
 
@@ -73,7 +60,49 @@ class ProjectKnowledgeService:
                     ProjectKnowledgeChunk.document_id == document.id
                 )
             )
-            if not self._document_is_searchable(document):
+
+            # 如果系统初审发现不一致/隔离风险，且用户未显式确认强制索引
+            is_quarantined = bool(consistency.get("recommended_quarantine")) and not force_index
+            if is_quarantined:
+                document.document_metadata = {
+                    **document.document_metadata,
+                    "consistency": consistency,
+                    "quarantined": True,
+                    "searchable": False,
+                    "pending_confirmation": True,
+                    "warning": consistency["reasons"][0]["message"] if consistency.get("reasons") else "系统初审发现文档与当前项目特征存在偏差，建议仅做归档",
+                }
+                from sqlalchemy.sql import func
+
+                document.status = "ready"
+                document.parsed_at = func.now()
+                await db.commit()
+                return {
+                    "document_id": str(document.id),
+                    "chunk_count": 0,
+                    "status": document.status,
+                    "quarantined": True,
+                    "pending_confirmation": True,
+                    "requires_confirmation": True,
+                    "reasons": consistency.get("reasons", []),
+                    "warning": document.document_metadata.get("warning"),
+                    "embedding_errors": [],
+                }
+
+            # 正常索引或用户显式确认索引
+            is_archive_only = bool((document.document_metadata or {}).get("archive_only")) or bool(parsed.metadata.get("archive_only"))
+            document.document_metadata = {
+                **document.document_metadata,
+                "consistency": consistency,
+                "quarantined": False,
+                "searchable": not is_archive_only,
+                "archive_only": is_archive_only,
+                "pending_confirmation": False,
+                "warning": consistency["reasons"][0]["message"] if consistency.get("reasons") else None,
+            }
+
+            # 仅对于未提取出文本的归档类型文件才不分块
+            if not parsed.text or not parsed.text.strip():
                 from sqlalchemy.sql import func
 
                 document.status = "ready"
@@ -86,9 +115,6 @@ class ProjectKnowledgeService:
                     "archive_only": bool(
                         (document.document_metadata or {}).get("archive_only")
                     ),
-                    "quarantined": self._is_quarantined_metadata(
-                        document.document_metadata
-                    ),
                     "warning": (document.document_metadata or {}).get("warning"),
                     "embedding_errors": [],
                 }
@@ -97,12 +123,24 @@ class ProjectKnowledgeService:
                 project_document_parser.chunk_text, parsed.text
             )
             errors: list[str] = []
-            for index, chunk_text in enumerate(chunks):
-                embedding: list[float] | None = None
-                try:
-                    embedding = await rag_service._get_document_embedding(chunk_text)
-                except Exception as exc:  # lexical fallback remains available
-                    errors.append(f"chunk {index}: {type(exc).__name__}")
+            sem = asyncio.Semaphore(3)
+
+            async def embed_single(idx: int, text: str):
+                async with sem:
+                    try:
+                        emb = await rag_service._get_document_embedding(text)
+                        await asyncio.sleep(0.05)
+                        return idx, text, emb, None
+                    except Exception as exc:
+                        return idx, text, None, f"chunk {idx}: {type(exc).__name__}"
+
+            embed_results = await asyncio.gather(
+                *(embed_single(i, c) for i, c in enumerate(chunks))
+            )
+
+            for index, chunk_text, embedding, err in embed_results:
+                if err:
+                    errors.append(err)
                 db.add(
                     ProjectKnowledgeChunk(
                         project_id=document.project_id,
@@ -124,6 +162,9 @@ class ProjectKnowledgeService:
                 "document_id": str(document.id),
                 "chunk_count": len(chunks),
                 "status": document.status,
+                "quarantined": False,
+                "pending_confirmation": False,
+                "requires_confirmation": False,
                 "embedding_errors": errors,
             }
         except Exception as exc:
@@ -173,9 +214,21 @@ class ProjectKnowledgeService:
                 except (ValueError, TypeError, json.JSONDecodeError):
                     semantic = 0.0
             chunk_tokens = self._tokens(chunk.content)
-            lexical = len(query_tokens & chunk_tokens) / max(1, len(query_tokens))
-            clause_bonus = 0.2 if any(token in chunk.content for token in query_tokens if re.fullmatch(r"\d+(?:\.\d+)+", token)) else 0
-            score = semantic * 0.75 + lexical * 0.25 + clause_bonus if query_embedding else lexical + clause_bonus
+            doc_title_tokens = self._tokens(chunk.document.title or "") if chunk.document else set()
+            doc_filename_tokens = self._tokens(chunk.document.original_filename or "") if chunk.document else set()
+            doc_tokens = doc_title_tokens | doc_filename_tokens
+
+            overlap = query_tokens & (chunk_tokens | doc_tokens)
+            lexical = len(overlap) / max(1, len(query_tokens))
+
+            title_overlap = query_tokens & doc_tokens
+            title_bonus = 0.15 if len(title_overlap) >= 2 else (0.08 if len(title_overlap) == 1 else 0.0)
+
+            clause_bonus = 0.2 if any(token in chunk.content for token in query_tokens if re.fullmatch(r"\d+(?:\.\d+)+", token)) else 0.0
+            if query_embedding:
+                score = min(1.0, semantic * 0.7 + lexical * 0.2 + title_bonus + clause_bonus)
+            else:
+                score = min(1.0, lexical + title_bonus + clause_bonus)
             scored.append((score, chunk))
 
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -248,11 +301,26 @@ class ProjectKnowledgeService:
                 combined.extend(
                     item for item in extra_project if item.get("chunk_id") not in known
                 )
+        combined.sort(key=lambda x: float(x.get("similarity") or 0.0), reverse=True)
         return combined[:top_k]
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
-        return set(re.findall(r"\d+(?:\.\d+)+|[A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}", text.lower()))
+        text_clean = text.lower()
+        tokens = set()
+        # Codes, English words, numbers, standard clauses (e.g. GB/T 19001-2016, 2025, QMS)
+        for m in re.finditer(r"\d+(?:\.\d+)+|[a-zA-Z0-9_-]{2,}", text_clean):
+            tokens.add(m.group())
+        # Chinese characters n-grams (2-grams, 3-grams) and phrases
+        chinese_chars = re.findall(r"[\u4e00-\u9fff]", text_clean)
+        chinese_text = "".join(chinese_chars)
+        for i in range(len(chinese_text) - 1):
+            tokens.add(chinese_text[i : i + 2])
+            if i + 2 < len(chinese_text):
+                tokens.add(chinese_text[i : i + 3])
+        for phrase in re.findall(r"[\u4e00-\u9fff]{2,6}", text_clean):
+            tokens.add(phrase)
+        return tokens
 
     @classmethod
     def _document_is_searchable(cls, document: ProjectDocument) -> bool:

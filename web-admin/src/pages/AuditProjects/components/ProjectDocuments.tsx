@@ -7,6 +7,7 @@ import {
   Empty,
   Input,
   List,
+  Modal,
   Popconfirm,
   Progress,
   Row,
@@ -27,10 +28,12 @@ import {
   CheckCircleOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  ExclamationCircleOutlined,
   FileSearchOutlined,
   InboxOutlined,
   LoadingOutlined,
   ReloadOutlined,
+  SafetyCertificateOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 
@@ -174,9 +177,72 @@ export default function ProjectDocuments({ projectId }: Props) {
       setUploading(true)
       try {
         const response = await projectDocumentApi.upload(projectId, file as File, category)
+        const data = unwrap(response)
         onSuccess?.(response)
-        message.success('资料已上传，系统正在解析并建立项目专属索引')
         await fetchDocuments()
+
+        if (data?.requires_confirmation || (data?.metadata as any)?.pending_confirmation) {
+          const docTitle = data?.title || (file as File).name
+          const warningMsg =
+            data?.warning ||
+            (data?.metadata as any)?.warning ||
+            '资料包含其他企业名称或与当前受审行业特征存在较大差异'
+          Modal.confirm({
+            title: '📋 知识库一致性初审提示',
+            icon: <ExclamationCircleOutlined style={{ color: '#faad14', fontSize: 22 }} />,
+            width: 520,
+            content: (
+              <div style={{ marginTop: 8 }}>
+                <Paragraph>
+                  系统初审检测到您上传的资料 <Text strong>《{docTitle}》</Text> 与当前项目可能存在差异：
+                </Paragraph>
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="初审风险提示"
+                  description={warningMsg}
+                  style={{ marginBottom: 12 }}
+                />
+                <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
+                  为节省模型算力开销并防止干扰项目知识库的匹配精度，系统已暂停自动分块向量化。
+                  <br />
+                  <strong>您是否确定仍要将其索引进入项目知识库？</strong>
+                </Paragraph>
+              </div>
+            ),
+            okText: '确定建立索引（消耗算力）',
+            okType: 'primary',
+            cancelText: '仅作文件归档（推荐）',
+            onOk: async () => {
+              try {
+                await projectDocumentApi.confirmIndex(
+                  projectId,
+                  data.id || data.document_id,
+                  'index'
+                )
+                message.success(`已为《${docTitle}》建立知识库索引`)
+                await fetchDocuments()
+              } catch (err: any) {
+                message.error(err.response?.data?.detail || '建立索引失败')
+              }
+            },
+            onCancel: async () => {
+              try {
+                await projectDocumentApi.confirmIndex(
+                  projectId,
+                  data.id || data.document_id,
+                  'archive_only'
+                )
+                message.info(`《${docTitle}》已保持为归档文件`)
+                await fetchDocuments()
+              } catch (err: any) {
+                console.error(err)
+              }
+            },
+          })
+        } else {
+          message.success('资料已上传，并已成功建立项目专属知识索引')
+        }
       } catch (error: any) {
         onError?.(error)
         message.error(error.response?.data?.detail || error.response?.data?.message || '资料上传失败')
@@ -184,6 +250,49 @@ export default function ProjectDocuments({ projectId }: Props) {
         setUploading(false)
       }
     },
+  }
+
+  const promptConfirmIndex = (item: ProjectDocument) => {
+    const docTitle = documentName(item)
+    const warningMsg = (item.metadata as any)?.warning || '资料包含其他机构或与当前受审项目特征可能不一致'
+    Modal.confirm({
+      title: '📋 知识库建立索引确认',
+      icon: <ExclamationCircleOutlined style={{ color: '#1677ff', fontSize: 22 }} />,
+      width: 520,
+      content: (
+        <div style={{ marginTop: 8 }}>
+          <Paragraph>
+            您正准备为资料 <Text strong>《{docTitle}》</Text> 建立向量知识索引：
+          </Paragraph>
+          {warningMsg && (
+            <Alert
+              type="info"
+              showIcon
+              message="初审提示"
+              description={warningMsg}
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 0 }}>
+            建立索引后，AI 助手将能够在审核准备、现场问答和报告生成中检索并引用该资料的内容。
+          </Paragraph>
+        </div>
+      ),
+      okText: '确认建立索引',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          setReindexingId(item.id)
+          await projectDocumentApi.confirmIndex(projectId, item.id, 'index')
+          message.success(`已成功为《${docTitle}》建立知识库索引`)
+          await fetchDocuments()
+        } catch (err: any) {
+          message.error(err.response?.data?.detail || '建立索引失败')
+        } finally {
+          setReindexingId(undefined)
+        }
+      },
+    })
   }
 
   const handleReindex = async (documentId: string) => {
@@ -282,22 +391,36 @@ export default function ProjectDocuments({ projectId }: Props) {
     {
       title: '资料',
       key: 'name',
-      render: (_, item) => (
-        <Space direction="vertical" size={0}>
-          <Space wrap size={6}>
-            <Text strong>{documentName(item)}</Text>
-            {Boolean((item.metadata as any)?.quarantined || (item.metadata as any)?.consistency?.risk_level === 'high') && (
-              <Tag color="error">一致性风险·已隔离</Tag>
+      render: (_, item) => {
+        const metadata = (item.metadata as any) || {}
+        const isPending = Boolean(metadata.pending_confirmation || (metadata.quarantined && !item.chunk_count))
+        const isArchive = Boolean(metadata.archive_only)
+        const hasWarning = Boolean(metadata.warning || metadata.consistency?.reasons?.length)
+
+        return (
+          <Space direction="vertical" size={0}>
+            <Space wrap size={6}>
+              <Text strong>{documentName(item)}</Text>
+              {isPending ? (
+                <Tooltip title={metadata.warning || '系统初审提示：文档与当前项目特征存在差异，等待人工确认'}>
+                  <Tag color="orange" style={{ margin: 0 }}>初审提示·待确认</Tag>
+                </Tooltip>
+              ) : isArchive ? (
+                <Tag color="default" style={{ margin: 0 }}>仅归档</Tag>
+              ) : hasWarning && Number(item.chunk_count || 0) > 0 ? (
+                <Tooltip title={metadata.warning}>
+                  <Tag color="blue" style={{ margin: 0 }}>已索引(已确认)</Tag>
+                </Tooltip>
+              ) : null}
+            </Space>
+            {item.summary && (
+              <Text type="secondary" ellipsis style={{ maxWidth: 420 }} title={item.summary}>
+                {item.summary}
+              </Text>
             )}
-            {Boolean((item.metadata as any)?.archive_only) && <Tag color="gold">仅归档</Tag>}
           </Space>
-          {item.summary && (
-            <Text type="secondary" ellipsis style={{ maxWidth: 420 }} title={item.summary}>
-              {item.summary}
-            </Text>
-          )}
-        </Space>
-      ),
+        )
+      },
     },
     {
       title: '分类',
@@ -334,41 +457,58 @@ export default function ProjectDocuments({ projectId }: Props) {
     {
       title: '操作',
       key: 'actions',
-      width: 112,
+      width: 130,
       fixed: 'right',
-      render: (_, item) => (
-        <Space size={4}>
-          <Tooltip title="重新解析并建立索引">
-            <Button
-              type="text"
-              icon={<ReloadOutlined />}
-              aria-label={`重新索引 ${documentName(item)}`}
-              loading={reindexingId === item.id}
-              disabled={Boolean(deletingId)}
-              onClick={() => handleReindex(item.id)}
-            />
-          </Tooltip>
-          <Popconfirm
-            title="删除项目资料"
-            description="资料及其项目知识索引将同时删除，此操作不可撤销。"
-            okText="删除"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            onConfirm={() => handleDelete(item.id)}
-          >
-            <Tooltip title="删除">
+      render: (_, item) => {
+        const metadata = (item.metadata as any) || {}
+        const isPending = Boolean(metadata.pending_confirmation || (metadata.quarantined && !item.chunk_count))
+
+        return (
+          <Space size={4}>
+            {isPending ? (
               <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                aria-label={`删除 ${documentName(item)}`}
-                loading={deletingId === item.id}
-                disabled={Boolean(reindexingId)}
-              />
-            </Tooltip>
-          </Popconfirm>
-        </Space>
-      ),
+                size="small"
+                type="primary"
+                ghost
+                loading={reindexingId === item.id}
+                onClick={() => promptConfirmIndex(item)}
+              >
+                确认索引
+              </Button>
+            ) : (
+              <Tooltip title="重新解析并建立索引">
+                <Button
+                  type="text"
+                  icon={<ReloadOutlined />}
+                  aria-label={`重新索引 ${documentName(item)}`}
+                  loading={reindexingId === item.id}
+                  disabled={Boolean(deletingId)}
+                  onClick={() => handleReindex(item.id)}
+                />
+              </Tooltip>
+            )}
+            <Popconfirm
+              title="删除项目资料"
+              description="资料及其项目知识索引将同时删除，此操作不可撤销。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => handleDelete(item.id)}
+            >
+              <Tooltip title="删除">
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  aria-label={`删除 ${documentName(item)}`}
+                  loading={deletingId === item.id}
+                  disabled={Boolean(reindexingId)}
+                />
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        )
+      },
     },
   ]
 
