@@ -424,7 +424,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                         ))}
                     </div>
                     <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 32 }}>
-                        本报告由 EFIS 系统自动生成 &nbsp;·&nbsp; 生成时间：{dayjs().format('YYYY-MM-DD HH:mm:ss')}
+                        本报告由 易审通 (EasyAudit) 智能审核云平台自动生成 &nbsp;·&nbsp; 生成时间：{dayjs().format('YYYY-MM-DD HH:mm:ss')}
                     </div>
                 </div>
             </div>

@@ -5,30 +5,22 @@
       <div class="hero-mesh"></div>
       <div class="hero-ambient-glow"></div>
 
-      <!-- 品牌 Shield Logo -->
+      <!-- 品牌 EasyAudit Logo -->
       <div class="hero-brand">
-        <div class="brand-shield-wrapper">
-          <div class="shield-pulse"></div>
-          <div class="brand-shield">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              <path d="m9 12 2 2 4-4"/>
-            </svg>
-          </div>
-        </div>
-
-        <div class="brand-text">
-          <div class="brand-tag">EFIS ENTERPRISE MOBILE</div>
-          <h1 class="brand-title">专家现场工作台</h1>
-          <p class="brand-desc">数智化认证审核 · 现场采证与分析</p>
-        </div>
+        <EasyAuditLogo
+          :size="44"
+          text-color="#ffffff"
+          sub-text-color="rgba(255, 255, 255, 0.75)"
+          :show-slogan="true"
+          slogan-text="让每一次审核都简单高效"
+        />
       </div>
 
       <!-- 业务能力亮点标签 -->
       <div class="hero-features">
         <div class="feature-chip">
           <span class="chip-dot"></span>
-          <span>AI 审查助手</span>
+          <span>智审 Agent</span>
         </div>
         <div class="feature-chip">
           <span class="chip-dot dot-green"></span>
@@ -36,7 +28,7 @@
         </div>
         <div class="feature-chip">
           <span class="chip-dot dot-amber"></span>
-          <span>移动检查单</span>
+          <span>移动合规研判</span>
         </div>
       </div>
     </div>
@@ -189,7 +181,7 @@
         <span>SSL 256-bit 加密传输 · 现场数据安全保障</span>
       </div>
       <div class="footer-copy">
-        EFIS 专家现场工作辅助系统 · 移动端 v2.4
+        易审通 EasyAudit · 移动现场端 v2.4
       </div>
     </div>
   </div>
@@ -200,6 +192,7 @@ import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast, showDialog } from 'vant'
 import { login } from '../api/auth.js'
+import EasyAuditLogo from '../components/brand/EasyAuditLogo.vue'
 
 const router = useRouter()
 const loading = ref(false)

@@ -15,6 +15,7 @@ import {
   GlobalOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
+import { EasyAuditLogo, EasyAuditLogoIcon } from '@/components/brand/EasyAuditLogo'
 import './Login.css'
 
 export default function Login() {
@@ -41,11 +42,11 @@ export default function Login() {
     const role = value as 'admin' | 'expert' | 'custom'
     setSelectedRole(role)
     if (role === 'admin') {
-      form.setFieldsValue({ username: 'admin', password: 'admin123' })
+      form.setFieldsValue({ username: 'admin', password: 'password123' })
     } else if (role === 'expert') {
-      form.setFieldsValue({ username: 'expert', password: 'expert123' })
+      form.setFieldsValue({ username: 'expert', password: 'password123' })
     } else {
-      form.setFieldsValue({ username: '', password: '' })
+      form.resetFields()
     }
   }
 
@@ -65,20 +66,20 @@ export default function Login() {
           {/* 系统标识 Badge */}
           <div className="efis-brand-badge">
             <span className="efis-brand-badge-icon">
-              <SafetyCertificateFilled />
+              <EasyAuditLogoIcon size={18} />
             </span>
-            <span>EFIS 专家现场工作辅助系统 · Enterprise Suite</span>
+            <span>易审通 · EasyAudit SaaS Cloud</span>
           </div>
 
           {/* 标题 & 副标 */}
           <h1 className="efis-hero-title">
-            数智化现场审核
+            让每一次审核
             <br />
-            <span className="efis-gradient-text">全要素合规把控</span>
+            <span className="efis-gradient-text">都变得简单高效</span>
           </h1>
 
           <p className="efis-hero-desc">
-            深度融合大模型与专业合规知识库，覆盖现场审核全生命周期。为审查专家与机构管理人员提供任务编排、智能采证、AI 对比分析与自动化报告交付能力。
+            新一代认证审核与现场评审智能云平台。专为认证机构、审核员与评审专家打造，深度融合智审 Agent、标准知识库、首末次会议管理与一键合规成果交付。
           </p>
 
           {/* 核心能力亮点卡片 */}
@@ -89,10 +90,10 @@ export default function Login() {
               </div>
               <div className="efis-feature-info">
                 <h4>
-                  <span>AI Agent 智能辅助审核</span>
+                  <span>智审 Agent 现场辅助</span>
                   <CheckCircleFilled style={{ color: '#38bdf8', fontSize: 13 }} />
                 </h4>
-                <p>内置标准规程 RAG 检索、现场核查提问建议与证据链符合性智能研判</p>
+                <p>内置标准规程 RAG 检索、首末次会议纪要生成与现场证据链智能研判</p>
               </div>
             </div>
 
@@ -105,7 +106,7 @@ export default function Login() {
                   <span>多模态证据链与质量门禁</span>
                   <CheckCircleFilled style={{ color: '#4ade80', fontSize: 13 }} />
                 </h4>
-                <p>现场照片智能打标、防篡改留痕，执行 6 重全要素质量门禁把关</p>
+                <p>现场照片智能打标、客观事实结构化留痕，执行 6 重全要素质量门禁把关</p>
               </div>
             </div>
 
@@ -132,7 +133,7 @@ export default function Login() {
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
             <span>安全加密: TLS 1.3 / AES-256</span>
-            <span>系统版本: v2.4 Pro</span>
+            <span>系统版本: v2.4 SaaS Pro</span>
           </div>
         </div>
       </div>
@@ -142,12 +143,11 @@ export default function Login() {
         <div className="efis-auth-card">
           {/* 表单头部 */}
           <div className="efis-auth-header">
-            <div className="efis-auth-logo-badge">
-              <GlobalOutlined />
-              <span>管理控制台</span>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              <EasyAuditLogo size={40} showText={true} direction="horizontal" textColor="#0f172a" subTextColor="#64748b" />
             </div>
-            <h2 className="efis-auth-title">欢迎登录 EFIS</h2>
-            <p className="efis-auth-subtitle">请选择身份或输入账号以访问管理系统</p>
+            <h2 className="efis-auth-title">欢迎登录 易审通</h2>
+            <p className="efis-auth-subtitle">EasyAudit 认证审核与现场评审智能云平台 · 管理控制台</p>
           </div>
 
           {/* 角色快捷分段选择器 */}

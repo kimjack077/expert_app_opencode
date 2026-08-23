@@ -100,9 +100,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="专家现场工作辅助系统 API",
-    description="Expert Field Inspection System API",
-    version="1.0.0",
+    title="易审通 (EasyAudit) API",
+    description="易审通 (EasyAudit) 认证审核与现场评审智能云平台 API",
+    version="2.4.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     lifespan=lifespan,

@@ -4,7 +4,7 @@ Guidelines for agentic coding agents working in this repository.
 
 ## Project Overview
 
-专家现场工作辅助系统 (Expert Field Inspection System - EFIS) - 一个完整的认证审核现场工作辅助系统，包含三大核心组件：
+易审通 (EasyAudit) - 一个专为认证机构、审核员与评审专家打造的认证审核与现场评审智能云平台，包含三大核心组件：
 
 - **Backend**: FastAPI (Python 3.11+) + PostgreSQL + SQLAlchemy (async) + Alembic
 - **Web Admin**: React 18 + TypeScript + Ant Design + Vite

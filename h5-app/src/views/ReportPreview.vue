@@ -209,7 +209,7 @@
       </div>
 
       <div class="report-footer">
-        本报告由 EFIS 系统自动生成 · 生成时间：{{ formatDateTime(reportData.generated_at) }}
+        本报告由 易审通 (EasyAudit) 智能审核云平台自动生成 · 生成时间：{{ formatDateTime(reportData.generated_at) }}
       </div>
     </div>
 

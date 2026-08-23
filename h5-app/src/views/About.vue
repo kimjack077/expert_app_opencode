@@ -9,16 +9,12 @@
 
     <div class="content-section">
       <div class="app-info-card">
-        <div class="app-logo">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <path d="M9 15l2 2 4-4"/>
-          </svg>
+        <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+          <EasyAuditLogo :size="52" :show-text="false" />
         </div>
-        <h1 class="app-name">专家现场工作辅助系统</h1>
-        <p class="app-version">版本 1.0.0</p>
-        <p class="app-desc">专业的现场检查工作管理平台，提供模板管理、任务分配、检查执行等全流程支持。</p>
+        <h1 class="app-name">易审通 EasyAudit</h1>
+        <p class="app-version">版本 2.4.0 SaaS Pro</p>
+        <p class="app-desc">新一代认证审核与现场评审智能云平台，提供项目策划、智能排期、智审 Agent 现场辅助与一键报告交付全流程支持。</p>
       </div>
 
       <div class="info-card">
@@ -114,7 +110,7 @@
       </div>
 
       <div class="copyright">
-        <p>© 2024 专家现场工作辅助系统</p>
+        <p>© 2026 易审通 (EasyAudit) · 认证审核与现场评审智能云平台</p>
         <p>All Rights Reserved</p>
       </div>
     </div>
@@ -124,6 +120,7 @@
 <script setup>
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
+import EasyAuditLogo from '../components/brand/EasyAuditLogo.vue'
 
 const router = useRouter()
 

@@ -23,6 +23,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import AgentSidebar from '@/components/agent/AgentSidebar'
 import { roleLabel } from '@/utils/display'
+import { EasyAuditLogoIcon } from '@/components/brand/EasyAuditLogo'
 
 const { Header, Sider, Content } = Layout
 
@@ -127,23 +128,15 @@ export default function MainLayout() {
             alignItems: 'center',
             gap: collapsed ? 0 : 10,
           }}>
-            <div style={{
-              width: 36,
-              height: 36,
-              background: 'linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%)',
-              borderRadius: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}>
-              <SafetyCertificateOutlined style={{ fontSize: 20, color: 'white' }} />
-            </div>
+            <EasyAuditLogoIcon size={36} />
             {!collapsed && (
               <div>
-                <div className="sidebar-logo-text">EFIS</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, fontWeight: 400 }}>
-                  专家现场审核平台
+                <div className="sidebar-logo-text" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>易审通</span>
+                  <span style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700, fontFamily: 'Inter, system-ui, sans-serif' }}>EasyAudit</span>
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.65)', marginTop: 2, fontWeight: 400 }}>
+                  智能审核协同云平台
                 </div>
               </div>
             )}
