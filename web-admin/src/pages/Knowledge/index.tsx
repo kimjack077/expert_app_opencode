@@ -1,6 +1,33 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Modal, Form, Input, Select, message, Space, Tag, Tabs, Upload } from 'antd'
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons'
+import {
+  Card,
+  Table,
+  Button,
+  Modal,
+  Form,
+  Input,
+  Select,
+  message,
+  Space,
+  Tag,
+  Tabs,
+  Upload,
+  Steps,
+  Progress,
+  Alert,
+} from 'antd'
+import {
+  PlusOutlined,
+  EyeOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  UploadOutlined,
+  FileMarkdownOutlined,
+  CheckCircleOutlined,
+  LoadingOutlined,
+  ArrowLeftOutlined,
+  CopyOutlined,
+} from '@ant-design/icons'
 import type { UploadFile } from 'antd/es/upload/interface'
 import { knowledgeApi } from '@/services/api'
 import dayjs from 'dayjs'
@@ -18,6 +45,7 @@ interface Document {
   issue_date: string
   effective_date: string
   status: string
+  markdown_path?: string
 }
 
 export default function Knowledge() {
@@ -25,18 +53,38 @@ export default function Knowledge() {
   const [guidelines, setGuidelines] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [docModalVisible, setDocModalVisible] = useState(false)
-  const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [guidelineModalVisible, setGuidelineModalVisible] = useState(false)
   const [detailVisible, setDetailVisible] = useState(false)
   const [currentDoc, setCurrentDoc] = useState<any>(null)
   const [docForm] = Form.useForm()
-  const [uploadForm] = Form.useForm()
   const [guidelineForm] = Form.useForm()
   const [editingDocId, setEditingDocId] = useState<string | null>(null)
-  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([])
-  const [uploading, setUploading] = useState(false)
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
+
+  // 两阶段上传 Modal 状态
+  const [uploadModalVisible, setUploadModalVisible] = useState(false)
+  const [uploadStep, setUploadStep] = useState<number>(0)
+  const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([])
+  const [uploadForm] = Form.useForm()
+  const [parsing, setParsing] = useState(false)
+  const [parsedMarkdown, setParsedMarkdown] = useState<string>('')
+  const [parsedMeta, setParsedMeta] = useState<{ filename?: string; size?: number; char_count?: number }>({})
+  const [indexing, setIndexing] = useState(false)
+  const [indexProgress, setIndexProgress] = useState<{
+    pct: number
+    statusText: string
+    current: number
+    total: number
+    completed: boolean
+    error?: string
+  }>({
+    pct: 0,
+    statusText: '',
+    current: 0,
+    total: 0,
+    completed: false,
+  })
 
   useEffect(() => {
     fetchDocuments()
@@ -68,8 +116,8 @@ export default function Knowledge() {
   }
 
   const showIndexingResult = (res: any, actionText: string) => {
-    const indexing = res?.data?.indexing
-    const count = indexing?.embeddings_created || 0
+    const indexingData = res?.data?.indexing
+    const count = indexingData?.embeddings_created || 0
     if (count > 0) {
       message.success(`${actionText}，已生成 ${count} 个知识片段索引`)
     } else {
@@ -110,7 +158,39 @@ export default function Knowledge() {
     }
   }
 
-  const handleUploadDocument = async (values: any) => {
+  // 重置上传 Modal 状态
+  const handleCloseUploadModal = () => {
+    if (indexing && !indexProgress.completed) {
+      Modal.confirm({
+        title: '提示',
+        content: '索引正在建立中，关闭窗口不会中断后台任务。确定关闭吗？',
+        onOk: () => {
+          setUploadModalVisible(false)
+          resetUploadState()
+          fetchDocuments()
+        },
+      })
+      return
+    }
+    setUploadModalVisible(false)
+    resetUploadState()
+    if (indexProgress.completed) {
+      fetchDocuments()
+    }
+  }
+
+  const resetUploadState = () => {
+    setUploadStep(0)
+    setUploadFileList([])
+    uploadForm.resetFields()
+    setParsedMarkdown('')
+    setParsedMeta({})
+    setIndexing(false)
+    setIndexProgress({ pct: 0, statusText: '', current: 0, total: 0, completed: false })
+  }
+
+  // 第一步：解析文件为 Markdown
+  const handleParseDocument = async (values: any) => {
     const file = uploadFileList[0]?.originFileObj
     if (!file) {
       message.error('请选择要上传的知识库文件')
@@ -119,24 +199,113 @@ export default function Knowledge() {
 
     const formData = new FormData()
     formData.append('file', file)
-    Object.entries(values).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        formData.append(key, String(value))
+
+    setParsing(true)
+    try {
+      const res: any = await knowledgeApi.parseDocument(formData)
+      const data = res.data
+      setParsedMarkdown(data.markdown || '')
+      setParsedMeta({
+        filename: data.filename,
+        size: data.size,
+        char_count: data.char_count,
+      })
+      // 如果没有填写标题，自动填充为文件名
+      if (!uploadForm.getFieldValue('title') && data.filename) {
+        uploadForm.setFieldValue('title', data.filename.replace(/\.[^/.]+$/, ''))
       }
+      setUploadStep(1)
+      message.success('文档已成功解析为 Markdown，请校验内容')
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || '文档解析失败，请检查文件格式')
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  // 第二步：流式建立索引 (SSE)
+  const handleStartIndexing = async () => {
+    const formValues = uploadForm.getFieldsValue()
+    const title = formValues.title || parsedMeta.filename || '未命名知识文档'
+    const doc_type = formValues.doc_type || 'standard'
+    const doc_no = formValues.doc_no || ''
+    const keywords = formValues.keywords || ''
+    const status = formValues.status || 'effective'
+    const filename = parsedMeta.filename || ''
+
+    const formData = new FormData()
+    formData.append('title', title)
+    formData.append('doc_type', doc_type)
+    formData.append('content', parsedMarkdown)
+    if (doc_no) formData.append('doc_no', doc_no)
+    if (keywords) formData.append('keywords', keywords)
+    formData.append('status', status)
+    if (filename) formData.append('filename', filename)
+
+    setUploadStep(2)
+    setIndexing(true)
+    setIndexProgress({
+      pct: 5,
+      statusText: '正在保存文档到知识库...',
+      current: 0,
+      total: 0,
+      completed: false,
     })
 
-    setUploading(true)
     try {
-      const res: any = await knowledgeApi.uploadDocument(formData)
-      showIndexingResult(res, '知识库上传并解析成功')
-      setUploadModalVisible(false)
-      setUploadFileList([])
-      uploadForm.resetFields()
-      fetchDocuments()
+      const stream = knowledgeApi.indexDocumentStream(formData)
+      for await (const event of stream) {
+        if (event.stage === 'saved') {
+          setIndexProgress((prev) => ({
+            ...prev,
+            pct: 15,
+            statusText: '文档已保存，正在按 Markdown 结构智能切块...',
+          }))
+        } else if (event.stage === 'prepare') {
+          setIndexProgress((prev) => ({
+            ...prev,
+            pct: 25,
+            statusText: event.message || '正在准备向量索引...',
+            total: event.total || prev.total,
+          }))
+        } else if (event.stage === 'embed') {
+          const calculatedPct = 25 + Math.round((event.pct || 0) * 0.7)
+          setIndexProgress({
+            pct: calculatedPct,
+            statusText: `正在生成向量嵌入 (${event.current}/${event.total})...`,
+            current: event.current,
+            total: event.total,
+            completed: false,
+          })
+        } else if (event.stage === 'done') {
+          setIndexProgress({
+            pct: 100,
+            statusText: `向量索引建立完成！共生成 ${event.embeddings_created} 个结构化知识片段。`,
+            current: event.total_chunks,
+            total: event.total_chunks,
+            completed: true,
+          })
+          message.success('知识库上传并建立索引成功！')
+        } else if (event.stage === 'error') {
+          setIndexProgress((prev) => ({
+            ...prev,
+            statusText: `建立索引失败: ${event.message}`,
+            error: event.message,
+            completed: true,
+          }))
+          message.error(event.message || '建立索引失败')
+        }
+      }
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '上传解析失败')
+      setIndexProgress((prev) => ({
+        ...prev,
+        statusText: `建立索引异常: ${error.message || '连接断开'}`,
+        error: error.message || '网络连接异常',
+        completed: true,
+      }))
+      message.error('建立索引发生异常')
     } finally {
-      setUploading(false)
+      setIndexing(false)
     }
   }
 
@@ -165,7 +334,7 @@ export default function Knowledge() {
   const handleDeleteDocument = async (id: string) => {
     Modal.confirm({
       title: '确认删除',
-      content: '确定要删除该文档吗？此操作不可恢复。',
+      content: '确定要删除该文档吗？此操作将同时清除其向量索引。',
       onOk: async () => {
         try {
           await knowledgeApi.deleteDocument(id)
@@ -200,7 +369,7 @@ export default function Knowledge() {
   }
 
   const docColumns = [
-    { title: '标题', dataIndex: 'title', key: 'title', width: 300 },
+    { title: '标题', dataIndex: 'title', key: 'title', width: 280 },
     {
       title: '类型',
       dataIndex: 'doc_type',
@@ -208,13 +377,26 @@ export default function Knowledge() {
       width: 80,
       render: (type: string) => getDocTypeTag(type),
     },
-    { title: '文号', dataIndex: 'doc_no', key: 'doc_no', width: 150 },
-    { title: '发布机关', dataIndex: 'issue_authority', key: 'issue_authority', width: 150 },
+    { title: '文号', dataIndex: 'doc_no', key: 'doc_no', width: 140 },
+    { title: '发布机关', dataIndex: 'issue_authority', key: 'issue_authority', width: 140 },
+    {
+      title: '格式形式',
+      key: 'storage_format',
+      width: 120,
+      render: (_: any, record: Document) =>
+        record.markdown_path ? (
+          <Tag color="cyan" icon={<FileMarkdownOutlined />}>
+            Markdown
+          </Tag>
+        ) : (
+          <Tag color="default">纯文本</Tag>
+        ),
+    },
     {
       title: '发布日期',
       dataIndex: 'issue_date',
       key: 'issue_date',
-      width: 120,
+      width: 110,
       render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD') : '-'),
     },
     {
@@ -227,7 +409,7 @@ export default function Knowledge() {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 200,
       render: (_: any, record: Document) => (
         <Space>
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewDocument(record.id)}>
@@ -275,8 +457,14 @@ export default function Knowledge() {
             title="政策法规管理"
             extra={
               <Space>
-                <Button icon={<UploadOutlined />} onClick={() => setUploadModalVisible(true)}>
-                  上传知识库
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={() => {
+                    resetUploadState()
+                    setUploadModalVisible(true)
+                  }}
+                >
+                  上传知识库 (Markdown 模式)
                 </Button>
                 <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDocument}>
                   新增文档
@@ -338,6 +526,7 @@ export default function Knowledge() {
         </TabPane>
       </Tabs>
 
+      {/* 新增/编辑文档 Modal */}
       <Modal
         title={editingDocId ? '编辑知识文档' : '新增知识文档'}
         open={docModalVisible}
@@ -388,7 +577,7 @@ export default function Knowledge() {
           <Form.Item name="summary" label="摘要">
             <TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="content" label="内容" rules={[{ required: true, message: '请输入知识正文' }]}>
+          <Form.Item name="content" label="内容 (支持 Markdown 语法)" rules={[{ required: true, message: '请输入知识正文' }]}>
             <TextArea rows={10} />
           </Form.Item>
           <Form.Item style={{ marginTop: 16, textAlign: 'right' }}>
@@ -402,76 +591,208 @@ export default function Knowledge() {
         </Form>
       </Modal>
 
+      {/* 两阶段上传与建立索引 Modal */}
       <Modal
-        title="上传知识库文件"
+        title="上传知识库文件（智能 Markdown 解析 & 向量化）"
         open={uploadModalVisible}
-        onCancel={() => {
-          setUploadModalVisible(false)
-          setUploadFileList([])
-          uploadForm.resetFields()
-        }}
+        onCancel={handleCloseUploadModal}
         footer={null}
-        width={640}
+        width={760}
+        destroyOnClose={false}
+        maskClosable={false}
       >
-        <Form
-          form={uploadForm}
-          layout="vertical"
-          initialValues={{ doc_type: 'standard', status: 'effective' }}
-          onFinish={handleUploadDocument}
-        >
-          <Form.Item label="知识文件" required extra="支持 PDF、Word、Excel、TXT，上传后自动提取正文并建立向量索引">
-            <Upload.Dragger
-              accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
-              maxCount={1}
-              beforeUpload={() => false}
-              fileList={uploadFileList}
-              onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
-              onRemove={() => {
-                setUploadFileList([])
-                return true
-              }}
+        <Steps
+          current={uploadStep}
+          style={{ marginBottom: 24 }}
+          items={[
+            { title: '选择并解析文档' },
+            { title: 'Markdown 预览与校对' },
+            { title: '建立向量索引' },
+          ]}
+        />
+
+        {/* Step 0: 选择文件与基础信息 */}
+        {uploadStep === 0 && (
+          <Form
+            form={uploadForm}
+            layout="vertical"
+            initialValues={{ doc_type: 'standard', status: 'effective' }}
+            onFinish={handleParseDocument}
+          >
+            <Form.Item
+              label="知识文件"
+              required
+              extra="支持 PDF、Word (.docx/.doc)、Excel (.xlsx/.xls)、TXT。上传后将自动使用结构化引擎转换为 Markdown。"
             >
-              <p className="ant-upload-drag-icon"><UploadOutlined /></p>
-              <p className="ant-upload-text">点击或拖拽文件到此区域</p>
-              <p className="ant-upload-hint">建议上传可复制文字的正式法规或标准文件</p>
-            </Upload.Dragger>
-          </Form.Item>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <Form.Item name="doc_type" label="文档类型" rules={[{ required: true }]}>
-              <Select>
-                <Select.Option value="regulation">法规</Select.Option>
-                <Select.Option value="policy">政策</Select.Option>
-                <Select.Option value="standard">标准</Select.Option>
-                <Select.Option value="guideline">细则</Select.Option>
-              </Select>
+              <Upload.Dragger
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.txt"
+                maxCount={1}
+                beforeUpload={() => false}
+                fileList={uploadFileList}
+                onChange={({ fileList }) => setUploadFileList(fileList.slice(-1))}
+                onRemove={() => {
+                  setUploadFileList([])
+                  return true
+                }}
+              >
+                <p className="ant-upload-drag-icon">
+                  <UploadOutlined />
+                </p>
+                <p className="ant-upload-text">点击或拖拽文件到此区域</p>
+                <p className="ant-upload-hint">推荐上传正式法规、标准或细则文件（PDF/Word 支持自动识别章节层级与表格）</p>
+              </Upload.Dragger>
             </Form.Item>
-            <Form.Item name="title" label="显示标题">
-              <Input placeholder="不填则使用文件名" />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <Form.Item name="doc_type" label="文档类型" rules={[{ required: true }]}>
+                <Select>
+                  <Select.Option value="regulation">法规</Select.Option>
+                  <Select.Option value="policy">政策</Select.Option>
+                  <Select.Option value="standard">标准</Select.Option>
+                  <Select.Option value="guideline">细则</Select.Option>
+                </Select>
+              </Form.Item>
+              <Form.Item name="title" label="显示标题">
+                <Input placeholder="不填则自动使用原文件名" />
+              </Form.Item>
+              <Form.Item name="doc_no" label="文号/标准号">
+                <Input placeholder="如 GB/T 38154-2019" />
+              </Form.Item>
+              <Form.Item name="keywords" label="检索关键词">
+                <Input placeholder="如 压力容器,充装追溯,安全技术规范" />
+              </Form.Item>
+              <Form.Item name="status" label="状态">
+                <Select>
+                  <Select.Option value="effective">有效</Select.Option>
+                  <Select.Option value="draft">草稿</Select.Option>
+                </Select>
+              </Form.Item>
+            </div>
+
+            <Form.Item style={{ marginTop: 12, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={handleCloseUploadModal}>取消</Button>
+                <Button type="primary" htmlType="submit" loading={parsing} icon={<FileMarkdownOutlined />}>
+                  {parsing ? '正在提取并转换为 Markdown...' : '下一步：解析文档'}
+                </Button>
+              </Space>
             </Form.Item>
-            <Form.Item name="doc_no" label="文号/标准号">
-              <Input placeholder="如 GB/T 19001-2016" />
-            </Form.Item>
-            <Form.Item name="keywords" label="检索关键词">
-              <Input placeholder="组织环境,质量管理体系,ISO 9001" />
-            </Form.Item>
-            <Form.Item name="status" label="状态">
-              <Select>
-                <Select.Option value="effective">有效</Select.Option>
-                <Select.Option value="draft">草稿</Select.Option>
-              </Select>
-            </Form.Item>
+          </Form>
+        )}
+
+        {/* Step 1: Markdown 预览与校对 */}
+        {uploadStep === 1 && (
+          <div>
+            <Alert
+              type="info"
+              showIcon
+              message="Markdown 格式转换成功"
+              description="文档已保留标题层级与表格。您可以在下方直接校对或修正文字；确认无误后点击下方按钮开始建立向量索引。"
+              style={{ marginBottom: 16 }}
+            />
+
+            <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Tag color="blue">原文件名: {parsedMeta.filename || '-'}</Tag>
+              <Tag color="cyan">解析字数: {parsedMeta.char_count || parsedMarkdown.length} 字符</Tag>
+              <Tag color="purple">格式: 结构化 Markdown</Tag>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontWeight: 500 }}>Markdown 正文内容（可在线编辑）：</span>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => {
+                    navigator.clipboard.writeText(parsedMarkdown)
+                    message.success('已复制 Markdown 内容到剪贴板')
+                  }}
+                >
+                  复制内容
+                </Button>
+              </div>
+              <TextArea
+                rows={13}
+                value={parsedMarkdown}
+                onChange={(e) => setParsedMarkdown(e.target.value)}
+                style={{ fontFamily: 'Consolas, Monaco, monospace', fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ textAlign: 'right' }}>
+              <Space>
+                <Button icon={<ArrowLeftOutlined />} onClick={() => setUploadStep(0)}>
+                  返回重选
+                </Button>
+                <Button type="primary" onClick={handleStartIndexing}>
+                  确认并建立索引
+                </Button>
+              </Space>
+            </div>
           </div>
-          <Form.Item style={{ marginTop: 8, textAlign: 'right' }}>
-            <Space>
-              <Button onClick={() => setUploadModalVisible(false)}>取消</Button>
-              <Button type="primary" htmlType="submit" loading={uploading}>
-                上传并建立索引
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
+        )}
+
+        {/* Step 2: 建立向量索引实时进度 (SSE) */}
+        {uploadStep === 2 && (
+          <div style={{ padding: '24px 12px', textAlign: 'center' }}>
+            <div style={{ marginBottom: 20 }}>
+              {indexProgress.completed && !indexProgress.error ? (
+                <CheckCircleOutlined style={{ fontSize: 52, color: '#52c41a' }} />
+              ) : indexProgress.error ? (
+                <Alert type="error" message="建立索引遇到问题" description={indexProgress.error} showIcon />
+              ) : (
+                <LoadingOutlined style={{ fontSize: 52, color: '#1677ff' }} />
+              )}
+            </div>
+
+            <div style={{ width: '80%', margin: '0 auto 20px auto' }}>
+              <Progress
+                percent={indexProgress.pct}
+                status={
+                  indexProgress.error
+                    ? 'exception'
+                    : indexProgress.completed
+                    ? 'success'
+                    : 'active'
+                }
+                strokeColor={indexProgress.completed ? '#52c41a' : '#1677ff'}
+              />
+            </div>
+
+            <p style={{ fontSize: 15, color: '#333', fontWeight: 500, minHeight: 24 }}>
+              {indexProgress.statusText || '正在处理...'}
+            </p>
+
+            {indexProgress.total > 0 && (
+              <p style={{ color: '#888', fontSize: 13 }}>
+                已完成进度: {indexProgress.current} / {indexProgress.total} 个片段
+              </p>
+            )}
+
+            <div style={{ marginTop: 28 }}>
+              {indexProgress.completed ? (
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    setUploadModalVisible(false)
+                    resetUploadState()
+                    fetchDocuments()
+                  }}
+                >
+                  完成并查看列表
+                </Button>
+              ) : (
+                <Button onClick={handleCloseUploadModal} disabled={indexing}>
+                  关闭
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
       </Modal>
 
+      {/* 新增审查细则 Modal */}
       <Modal
         title="新增审查细则"
         open={guidelineModalVisible}
@@ -514,6 +835,7 @@ export default function Knowledge() {
         </Form>
       </Modal>
 
+      {/* 文档详情 Modal */}
       <Modal
         title="文档详情"
         open={detailVisible}
@@ -523,7 +845,14 @@ export default function Knowledge() {
       >
         {currentDoc && (
           <div>
-            <h2>{currentDoc.title}</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h2>{currentDoc.title}</h2>
+              {currentDoc.markdown_path && (
+                <Tag color="cyan" icon={<FileMarkdownOutlined />}>
+                  Markdown 存储: {currentDoc.markdown_path.split(/[\\/]/).pop()}
+                </Tag>
+              )}
+            </div>
             <div style={{ marginBottom: 16, color: '#666' }}>
               <Space split={<span>|</span>}>
                 <span>文号：{currentDoc.doc_no || '-'}</span>
@@ -537,7 +866,21 @@ export default function Knowledge() {
                 <p style={{ margin: '8px 0 0' }}>{currentDoc.summary}</p>
               </div>
             )}
-            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{currentDoc.content}</div>
+            <div
+              style={{
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.8,
+                background: '#fafafa',
+                padding: 16,
+                borderRadius: 6,
+                border: '1px solid #f0f0f0',
+                fontFamily: 'Consolas, Monaco, monospace',
+                maxHeight: '500px',
+                overflowY: 'auto',
+              }}
+            >
+              {currentDoc.content}
+            </div>
           </div>
         )}
       </Modal>

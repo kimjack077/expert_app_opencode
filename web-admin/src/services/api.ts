@@ -155,9 +155,60 @@ export const knowledgeApi = {
   }),
   deleteDocument: (id: string) => api.delete(`/knowledge/documents/${id}`),
 
+  /** 第一阶段：解析文件，返回 Markdown 预览（不写 DB） */
+  parseDocument: (data: FormData) => api.post('/knowledge/documents/parse', data, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  }),
+
+  /** 第二阶段：流式建立向量索引，返回 AsyncGenerator<SSE 事件> */
+  indexDocumentStream: async function* (formData: FormData): AsyncGenerator<any> {
+    const token = useAuthStore.getState().token
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10 * 60 * 1000)
+
+    try {
+      const response = await fetch('/api/knowledge/documents/index', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) throw new Error('No reader available')
+
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              yield JSON.parse(line.slice(6))
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e)
+            }
+          }
+        }
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  },
+
   getGuidelines: (params?: any) => api.get('/knowledge/guidelines', { params }),
   createGuideline: (data: any) => api.post('/knowledge/guidelines', data),
 }
+
 
 export const recordApi = {
   // 检查记录管理

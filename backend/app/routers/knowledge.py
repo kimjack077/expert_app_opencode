@@ -1,7 +1,11 @@
+import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +20,10 @@ from app.utils.document_parser import document_parser
 from app.utils.security import get_current_admin_user, get_current_user
 
 router = APIRouter()
+
+# Markdown 文件存储目录
+KNOWLEDGE_MD_DIR = Path("uploads") / "knowledge_md"
+KNOWLEDGE_MD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def make_response(data=None, code=200, message="success"):
@@ -140,6 +148,98 @@ async def create_document(
     })
 
 
+@router.post("/documents/parse", response_model=ApiResponse)
+async def parse_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    第一阶段：上传文件并解析为 Markdown。
+    不写数据库，仅返回解析后的 Markdown 内容供前端预览/编辑。
+    """
+    md_content, metadata = await document_parser.parse_document(file)
+
+    parser_errors = ("[PDF解析", "[Word解析", "[Excel解析")
+    if not md_content.strip() or md_content.lstrip().startswith(parser_errors):
+        raise HTTPException(status_code=400, detail=md_content or "未能从文件中提取文字")
+
+    return make_response(data={
+        "markdown": md_content,
+        "filename": metadata.get("filename"),
+        "size": metadata.get("size"),
+        "char_count": metadata.get("char_count"),
+    })
+
+
+@router.post("/documents/index")
+async def index_document(
+    doc_id: Optional[str] = Form(None),
+    doc_type: str = Form(...),
+    title: str = Form(...),
+    content: str = Form(...),
+    doc_no: Optional[str] = Form(None),
+    keywords: Optional[str] = Form(None),
+    status: str = Form("effective"),
+    filename: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    第二阶段：接收用户确认后的 Markdown 内容，建立数据库记录并流式推送向量索引进度 (SSE)。
+    """
+    async def _sse_generator():
+        # 1. 保存 Markdown 到磁盘
+        md_filename = None
+        if filename:
+            safe_name = Path(filename).stem
+            md_filename = f"{safe_name}.md"
+            md_path = KNOWLEDGE_MD_DIR / md_filename
+            md_path.write_text(content, encoding="utf-8")
+
+        # 2. 写入数据库
+        document = KnowledgeDocument(
+            title=title,
+            doc_type=doc_type,
+            content=content,
+            doc_no=doc_no,
+            keywords=keywords,
+            status=status,
+            file_name=filename,
+            markdown_path=str(KNOWLEDGE_MD_DIR / md_filename) if md_filename else None,
+            created_by=current_user.id,
+        )
+        db.add(document)
+        await db.commit()
+        await db.refresh(document)
+
+        doc_id_str = str(document.id)
+
+        yield f"data: {json.dumps({'stage': 'saved', 'doc_id': doc_id_str, 'message': '文档已保存'}, ensure_ascii=False)}\n\n"
+
+        # 3. 审计日志
+        await AuditService.log_action(
+            db,
+            str(current_user.id),
+            current_user.username,
+            "upload_document",
+            "knowledge_document",
+            doc_id_str,
+        )
+
+        # 4. 流式建立向量索引
+        async for event in rag_service.create_embeddings_streaming(doc_id_str, db):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/documents/upload", response_model=ApiResponse)
 async def upload_document(
     file: UploadFile = File(...),
@@ -151,20 +251,29 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """上传知识库文件，抽取正文并立即生成 RAG 向量索引。"""
-    content, metadata = await document_parser.parse_document(file)
+    """上传知识库文件，抽取正文（Markdown）并立即生成 RAG 向量索引。"""
+    md_content, metadata = await document_parser.parse_document(file)
     parser_errors = ("[PDF解析", "[Word解析", "[Excel解析")
-    if not content.strip() or content.lstrip().startswith(parser_errors):
-        raise HTTPException(status_code=400, detail=content or "未能从文件中提取文字")
+    if not md_content.strip() or md_content.lstrip().startswith(parser_errors):
+        raise HTTPException(status_code=400, detail=md_content or "未能从文件中提取文字")
+
+    # 保存 Markdown 文件到磁盘
+    md_filename = None
+    if metadata.get("filename"):
+        safe_name = Path(metadata["filename"]).stem
+        md_filename = f"{safe_name}.md"
+        md_path = KNOWLEDGE_MD_DIR / md_filename
+        md_path.write_text(md_content, encoding="utf-8")
 
     document = KnowledgeDocument(
         title=title or metadata.get("filename") or "未命名知识文档",
         doc_type=doc_type,
-        content=content,
+        content=md_content,
         doc_no=doc_no,
         keywords=keywords,
         status=status,
         file_name=metadata.get("filename"),
+        markdown_path=str(KNOWLEDGE_MD_DIR / md_filename) if md_filename else None,
         created_by=current_user.id,
     )
     db.add(document)
@@ -190,7 +299,8 @@ async def upload_document(
         "id": str(document.id),
         "title": document.title,
         "file_name": document.file_name,
-        "content_length": len(content),
+        "markdown_path": document.markdown_path,
+        "content_length": len(md_content),
         "indexing": indexing,
     })
 
@@ -220,6 +330,7 @@ async def get_document(
         "status": document.status,
         "file_url": document.file_url,
         "file_name": document.file_name,
+        "markdown_path": document.markdown_path,
     })
 
 

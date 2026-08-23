@@ -25,6 +25,7 @@ class KnowledgeDocument(Base, SoftDeleteMixin):
     status = Column(String(20), default="effective")
     file_url = Column(String(500))
     file_name = Column(String(200))
+    markdown_path = Column(String(500))  # 转换后 .md 文件在磁盘上的相对路径
     # view_count 列仍保留在数据库中（历史兼容），业务层已弃用，不再映射/累加
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
