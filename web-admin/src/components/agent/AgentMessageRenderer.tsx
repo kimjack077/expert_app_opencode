@@ -8,6 +8,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 
+import MarkdownView from '@/components/common/MarkdownView'
 import type { AgentAction } from './AgentActionConfirm'
 
 const { Paragraph } = Typography
@@ -49,15 +50,6 @@ const toolLabels: Record<string, string> = {
   analyze_photo: '分析照片',
   get_project_summary: '汇总审核项目',
   check_project_quality: '检查资料质量',
-}
-
-const renderText = (content: string) => {
-  if (!content) return null
-  return content.split(/(\*\*.*?\*\*|\n)/g).map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>
-    if (part === '\n') return <br key={index} />
-    return <span key={index}>{part}</span>
-  })
 }
 
 export default function AgentMessageRenderer({ message }: Props) {
@@ -103,7 +95,11 @@ export default function AgentMessageRenderer({ message }: Props) {
       )}
 
       <div className={`message-bubble ${message.role}`}>
-        <div className="message-text">{renderText(message.content)}</div>
+        {message.role === 'assistant' ? (
+          <MarkdownView content={message.content} />
+        ) : (
+          <div className="message-text">{message.content}</div>
+        )}
       </div>
 
       {Boolean(message.citations?.length) && (

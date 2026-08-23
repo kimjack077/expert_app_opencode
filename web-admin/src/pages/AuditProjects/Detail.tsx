@@ -22,6 +22,7 @@ import NonconformitiesList from './components/NonconformitiesList'
 import ProjectDocuments from './components/ProjectDocuments'
 import ProjectArtifacts from './components/ProjectArtifacts'
 import MeetingManagement from './components/MeetingManagement'
+import MarkdownView from '@/components/common/MarkdownView'
 
 const auditTypeMap: Record<string, string> = {
   initial: '初审',
@@ -159,35 +160,6 @@ export default function AuditProjectDetail() {
     }
   }
 
-  const renderInlineMarkdown = (str: string) => {
-    const parts = str.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g)
-    return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i} style={{ color: '#262626' }}>{part.slice(2, -2)}</strong>
-      }
-      if (part.startsWith('*') && part.endsWith('*')) {
-        return <em key={i}>{part.slice(1, -1)}</em>
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return (
-          <code
-            key={i}
-            style={{
-              backgroundColor: '#f5f5f5',
-              padding: '2px 6px',
-              borderRadius: 4,
-              fontSize: '12px',
-              color: '#d46b08',
-            }}
-          >
-            {part.slice(1, -1)}
-          </code>
-        )
-      }
-      return part
-    })
-  }
-
   const renderStreamingMarkdown = (text: string) => {
     if (!text && aiIsStreaming) {
       return (
@@ -202,116 +174,7 @@ export default function AuditProjectDetail() {
       return <div style={{ color: '#999', padding: '24px', textAlign: 'center' }}>暂无生成内容</div>
     }
 
-    const lines = text.split('\n')
-    return (
-      <div style={{ lineHeight: '1.8', fontSize: 14 }}>
-        {lines.map((line, index) => {
-          const trimmed = line.trim()
-          if (trimmed.startsWith('### ')) {
-            return (
-              <Typography.Title
-                key={index}
-                level={5}
-                style={{
-                  marginTop: 18,
-                  marginBottom: 8,
-                  color: '#1677ff',
-                  borderLeft: '3px solid #1677ff',
-                  paddingLeft: 8,
-                }}
-              >
-                {trimmed.replace('### ', '')}
-              </Typography.Title>
-            )
-          }
-          if (trimmed.startsWith('## ')) {
-            return (
-              <Typography.Title
-                key={index}
-                level={4}
-                style={{
-                  marginTop: 20,
-                  marginBottom: 10,
-                  color: '#262626',
-                  borderBottom: '1px solid #f0f0f0',
-                  paddingBottom: 4,
-                }}
-              >
-                {trimmed.replace('## ', '')}
-              </Typography.Title>
-            )
-          }
-          if (trimmed.startsWith('# ')) {
-            return (
-              <Typography.Title
-                key={index}
-                level={3}
-                style={{ marginTop: 22, marginBottom: 12 }}
-              >
-                {trimmed.replace('# ', '')}
-              </Typography.Title>
-            )
-          }
-          if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-            return (
-              <div
-                key={index}
-                style={{
-                  paddingLeft: 16,
-                  position: 'relative',
-                  marginBottom: 4,
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    left: 4,
-                    top: 0,
-                    color: '#1677ff',
-                  }}
-                >
-                  •
-                </span>
-                {renderInlineMarkdown(trimmed.slice(2))}
-              </div>
-            )
-          }
-          if (/^\d+\.\s/.test(trimmed)) {
-            const match = trimmed.match(/^(\d+\.)\s+(.*)$/)
-            return (
-              <div
-                key={index}
-                style={{
-                  paddingLeft: 20,
-                  position: 'relative',
-                  marginBottom: 4,
-                }}
-              >
-                <span
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    fontWeight: 600,
-                    color: '#595959',
-                  }}
-                >
-                  {match?.[1]}
-                </span>
-                {renderInlineMarkdown(match?.[2] || '')}
-              </div>
-            )
-          }
-          if (!trimmed) {
-            return <div key={index} style={{ height: 8 }} />
-          }
-          return (
-            <p key={index} style={{ marginBottom: 6 }}>
-              {renderInlineMarkdown(line)}
-            </p>
-          )
-        })}
-      </div>
-    )
+    return <MarkdownView content={text} />
   }
 
   if (!project) {

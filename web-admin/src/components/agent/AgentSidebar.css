@@ -47,7 +47,8 @@
   position: fixed;
   right: 0;
   top: 0;
-  width: 380px;
+  width: 480px;
+  max-width: 95vw;
   height: 100vh;
   background: var(--card-bg);
   border-left: 1px solid var(--border-color);
@@ -175,11 +176,13 @@
 }
 
 .message-content {
-  max-width: 85%;
+  max-width: 90%;
+  flex: 1;
 }
 
 .message-wrapper.user .message-content {
   max-width: 75%;
+  flex: 0 1 auto;
 }
 
 .message-time {
