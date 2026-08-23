@@ -19,8 +19,8 @@ export const getRecords = (params) => {
 }
 
 // 获取记录详情
-export const getRecord = (id) => {
-  return request.get(`/records/${id}`)
+export const getRecord = (id, config) => {
+  return request.get(`/records/${id}`, config)
 }
 
 // 创建检查记录
@@ -39,13 +39,13 @@ export const submitRecord = (id) => {
 }
 
 // 获取记录的检查项列表
-export const getRecordItems = (recordId) => {
-  return request.get(`/records/${recordId}/items`)
+export const getRecordItems = (recordId, config) => {
+  return request.get(`/records/${recordId}/items`, config)
 }
 
 // 获取单个检查项详情
-export const getRecordItem = (recordId, itemId) => {
-  return request.get(`/records/${recordId}/items/${itemId}`)
+export const getRecordItem = (recordId, itemId, config) => {
+  return request.get(`/records/${recordId}/items/${itemId}`, config)
 }
 
 // 创建/更新记录项（快速检查使用）

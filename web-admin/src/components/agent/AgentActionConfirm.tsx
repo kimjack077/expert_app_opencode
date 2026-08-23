@@ -7,6 +7,7 @@ import {
   EditOutlined,
   FileTextOutlined,
   SafetyCertificateOutlined,
+  TeamOutlined,
   UserAddOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
@@ -53,6 +54,10 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
     action.serverAction === 'create_audit_plan' ||
     (action.type === 'operation' && Array.isArray(action.data.plan_items))
 
+  const isMeetingAction =
+    action.serverAction === 'create_meeting_record' ||
+    (action.type === 'operation' && (!!action.data.meeting_type || String(action.title || '').includes('会议')))
+
   const icon = action.type === 'create_task'
     ? <FileTextOutlined />
     : action.type === 'final_verdict'
@@ -61,7 +66,9 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
         ? <UserAddOutlined />
         : isPlanAction
           ? <CalendarOutlined />
-          : <WarningOutlined />
+          : isMeetingAction
+            ? <TeamOutlined />
+            : <WarningOutlined />
 
   const color = action.type === 'judgment'
     ? '#d46b08'
@@ -69,7 +76,9 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
       ? '#13c2c2'
       : isPlanAction
         ? '#722ed1'
-        : '#1677ff'
+        : isMeetingAction
+          ? '#0284c7'
+          : '#1677ff'
 
   const renderAuditPlan = () => {
     const planItems = (Array.isArray(action.data.plan_items) ? action.data.plan_items : []) as any[]
@@ -258,6 +267,49 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
     )
   }
 
+  const renderMeetingRecord = () => {
+    const typeDisplay = String(
+      action.data.meeting_type_display ||
+      (action.data.meeting_type === 'opening' ? '首次会议' : action.data.meeting_type === 'closing' ? '末次会议' : '沟通会议')
+    )
+    const timeStr = String(action.data.meeting_time || '-')
+    const enterpriseDesc = String(action.data.participants_enterprise || '企业负责人及各部门主管人员')
+    const auditorDesc = String(
+      action.data.participants_audit_team_desc ||
+      (Array.isArray(action.data.participant_names) ? (action.data.participant_names as string[]).join('、') : '全体审核员')
+    )
+    const keyPoints = String(action.data.key_points || action.data.meeting_minutes || '-')
+
+    return (
+      <Descriptions column={1} size="small" style={{ fontSize: 12 }}>
+        <Descriptions.Item label="会议类型">
+          <Tag color="blue" style={{ fontWeight: 600 }}>{typeDisplay}</Tag>
+        </Descriptions.Item>
+        <Descriptions.Item label="会议时间">
+          <Text strong>{timeStr}</Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="参会审核员">
+          <Text>{auditorDesc}</Text>
+        </Descriptions.Item>
+        <Descriptions.Item label="企业参会人员">
+          <Text>{enterpriseDesc}</Text>
+        </Descriptions.Item>
+        {keyPoints && keyPoints !== '-' && (
+          <Descriptions.Item label="会议要点/纪要">
+            <Paragraph style={{ marginBottom: 0, fontSize: 12, color: '#334155' }}>
+              {keyPoints}
+            </Paragraph>
+          </Descriptions.Item>
+        )}
+        <Descriptions.Item label="操作说明">
+          <span style={{ color: '#0284c7' }}>
+            💡 点击确认后将正式写入当前项目的【首末次会议管理表】（CommunicationMeeting）。
+          </span>
+        </Descriptions.Item>
+      </Descriptions>
+    )
+  }
+
   const planItemsCount = Array.isArray(action.data.plan_items) ? action.data.plan_items.length : 0
 
   return (
@@ -272,7 +324,8 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
       {action.type === 'create_task' && renderTask()}
       {action.type === 'operation' && isPlanAction && renderAuditPlan()}
       {action.type === 'operation' && isTeamMemberAction && renderTeamMember()}
-      {action.type === 'operation' && !isTeamMemberAction && !isPlanAction && (
+      {action.type === 'operation' && isMeetingAction && renderMeetingRecord()}
+      {action.type === 'operation' && !isTeamMemberAction && !isPlanAction && !isMeetingAction && (
         <Descriptions column={1} size="small">
           <Descriptions.Item label="项目ID">
             {String(action.data.project_id || '-')}
@@ -315,7 +368,9 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
               ? `确认录入计划表 (${planItemsCount}项)`
               : isTeamMemberAction
                 ? '确认加入审核组'
-                : '确认执行'}
+                : isMeetingAction
+                  ? '确认录入会议记录'
+                  : '确认执行'}
         </Button>
         {action.type === 'create_task' && !editing && (
           <Button icon={<EditOutlined />} disabled={applying} onClick={() => setEditing(true)}>修改</Button>

@@ -511,13 +511,13 @@ export default function AgentSidebar({ context }: Props) {
 
   if (collapsed) {
     return (
-      <Tooltip title="打开项目 Agent" placement="left">
+      <Tooltip title="打开智审 Agent" placement="left">
         <Button
           className="agent-sidebar-collapsed"
           type="primary"
           shape="circle"
           icon={<RobotOutlined />}
-          aria-label="打开项目 Agent"
+          aria-label="打开智审 Agent"
           onClick={() => setCollapsed(false)}
         />
       </Tooltip>
@@ -525,9 +525,9 @@ export default function AgentSidebar({ context }: Props) {
   }
 
   return (
-    <aside className="agent-sidebar" aria-label="项目 Agent">
+    <aside className="agent-sidebar" aria-label="智审 Agent">
       <div className="sidebar-header">
-        <div className="header-title"><RobotOutlined className="header-icon" /><span>智检 Agent</span></div>
+        <div className="header-title"><RobotOutlined className="header-icon" /><span>智审 Agent</span></div>
         <div className="header-actions">
           <Tooltip title="新对话"><Button type="text" icon={<PlusOutlined />} aria-label="新建对话" onClick={startNewConversation} /></Tooltip>
           <Tooltip title="收起"><Button type="text" icon={<CloseOutlined />} aria-label="收起 Agent" onClick={() => setCollapsed(true)} /></Tooltip>

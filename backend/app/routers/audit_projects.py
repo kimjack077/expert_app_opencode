@@ -94,6 +94,22 @@ def area_record_response(record: AuditAreaRecord) -> dict:
         if record.plan_item
         else None
     )
+    if not value.get("template_id") and record.plan_item and record.plan_item.template_id:
+        value["template_id"] = str(record.plan_item.template_id)
+    if record.plan_item:
+        value["plan_item"] = {
+            "id": str(record.plan_item.id),
+            "area_name": record.plan_item.area_name,
+            "plan_date": str(record.plan_item.plan_date) if record.plan_item.plan_date else None,
+            "time_start": record.plan_item.time_start,
+            "time_end": record.plan_item.time_end,
+            "group_no": record.plan_item.group_no,
+            "status": record.plan_item.status,
+        }
+    items = record.items or []
+    value["items_count"] = len(items)
+    value["pass_count"] = sum(1 for i in items if i.result == "pass" or i.evaluation_3level in {"1", "2"})
+    value["fail_count"] = sum(1 for i in items if i.result == "fail" or i.evaluation_3level == "3")
     return value
 
 
@@ -112,14 +128,14 @@ def _task_progress_fields(
         clause = str(raw_clause or "").strip()
         if clause:
             clause_keys.add(clause)
-    total_clause_count = len(clause_keys) or int(template_item_count or 0)
+    total_clause_count = int(template_item_count or 0) or len(clause_keys)
 
     record_items = list(getattr(record, "items", None) or [])
     confirmed_record_count = len(record_items)
     completion_rate = (
         round(min(100, confirmed_record_count / total_clause_count * 100), 2)
         if total_clause_count
-        else 0
+        else (100.0 if getattr(plan_item, "status", "") == "completed" else 0.0)
     )
 
     formal_ncs = [

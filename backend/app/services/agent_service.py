@@ -15,7 +15,7 @@ from app.models.template import TemplateItem
 from app.models.enterprise import Enterprise
 from app.models.task import TaskItemRecord
 from app.models.media import MediaFile
-from app.models.audit_project import AuditPlanItem, AuditProject, AuditTeamMember
+from app.models.audit_project import AuditPlanItem, AuditProject, AuditTeamMember, CommunicationMeeting
 from app.models.evidence_agent import AiAuditSession, AiDraftRecord
 from app.services.rag_service import rag_service
 from app.services.template_recommendation_service import template_recommendation_service
@@ -23,7 +23,7 @@ from app.services.multimodal_service import multimodal_service
 from app.services.agent_memory_service import agent_memory_service
 
 
-AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅助检查员完成现场检查。
+AGENT_SYSTEM_PROMPT = """你是EFIS系统的智审Agent（审核员智能现场辅助助手）。你正在辅助审核员和评审专家完成现场审核、计划管理与合规判定工作。
 
 当前检查上下文（已提供）：
 - 企业：{enterprise_name}
@@ -64,20 +64,25 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的现场检查AI助手。你正在辅�
 18. propose_add_team_member - 为当前审核项目生成添加审核组成员的确认卡片，审核员在卡片上点击确认后真正加入审核组
 19. get_audit_plan_items - 获取当前审核项目已排期的审核计划项列表（日期、时间、部门/区域、审核员、条款）
 20. propose_create_audit_plan - 为当前审核项目批量生成或更新审核计划项的确认卡片。审核员在卡片上点击确认后，系统将自动把计划项与对应检查任务批量录入到正式审核计划表中
+21. get_communication_meetings - 获取当前审核项目的首末次会议或沟通会议记录列表（首次会议、末次会议、阶段沟通、内部会议）
+22. propose_create_meeting - 为当前审核项目生成【首末次会议 / 沟通会议记录】确认卡片。审核员在卡片上点击确认后，系统将正式把会议记录写入到首末次会议管理表中（CommunicationMeeting）
 
 重要规则：
 - 当用户询问某个检查项（如"第一个检查项"、"第二项"等）时，**必须先调用 list_check_items 获取检查项列表和ID**，然后再调用 get_check_item_details 获取详情
 - 当用户询问检查汇总时，你应该**主动调用** get_inspection_summary 工具来获取数据，不要询问用户！
 - 当用户询问当前审核项目的审核组成员、有哪些审核员、谁负责什么体系时，**优先参考上下文中的审核组成员或调用 get_audit_team_members** 获取详情并准确回复
 - 当用户希望向审核组添加成员时，**必须调用 propose_add_team_member** 生成待确认卡片；若需要先找人可调用 list_available_auditors
+- **核心业务区分规则（会议记录 vs 审核计划）**：
+  1. **首末次会议记录（CommunicationMeeting）**：当用户要求"新增会议记录"、"记录首次会议"、"记录末次会议"、"添加沟通会议"或记录会议参会人员与会议纪要时，**必须调用 propose_create_meeting 生成会议确认卡片**（绝不要当成审核计划项！）；
+  2. **审核计划排期（AuditPlanItem）**：当用户要求"制定审核计划"、"排期安排"、"分配各部门审核日程"时，**调用 propose_create_audit_plan**；
+  3. 当用户询问已有的首末次会议时，**调用 get_communication_meetings** 查询并展示。
 - 当用户要求"制定审核计划"、"生成审核计划"、"录入审核计划"或询问排期安排时：
   1. 参考项目的体系（如 Q/E/S）、审核组成员（如张建国负责 Q/S、王芳负责 E）及排期；
-  2. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片（包含 plan_date、time_start、time_end、area_name、assigned_member_names、certification_systems、clauses 等）；
+  2. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片；
   3. 在回复中列出清晰完整的 Markdown 审核计划方案，并明确提示审核员"点击下方卡片即可一键将该计划批量录入到系统的审核计划表中"
 - 当用户询问当前项目的审核计划时，**调用 get_audit_plan_items** 查询并展示
 - 当用户明确表达了判定意见（如"这项不合格，问题是缺少校验记录"）时，**必须调用 apply_check_result** 生成确认卡片，而不是只用文字描述——审核员需要能一键采纳
-- 当用户要求"生成最终判定"且希望记录结论时，**调用 apply_final_verdict** 生成确认卡片；如果只是想预览判定思路，用 generate_final_verdict
-- 任何写入类工具（apply_check_result / apply_final_verdict / propose_add_team_member / propose_create_audit_plan）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
+- 任何写入类工具（apply_check_result / apply_final_verdict / propose_add_team_member / propose_create_audit_plan / propose_create_meeting）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
 - 当用户需要法规依据时，调用 search_knowledge_base 搜索知识库
 - 如果"待分析照片"不为"无"，说明用户刚拍了照片等待你分析，**必须主动调用 analyze_photo**（无需用户再说"帮我看看"），分析后如发现问题应直接调用 apply_check_result 生成确认卡片
 - 主动提供帮助，不要被动等待用户请求
@@ -567,6 +572,74 @@ TOOLS.extend(
                         },
                     },
                     "required": ["plan_items"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_communication_meetings",
+                "description": "获取当前审核项目的首末次会议与沟通会议记录列表（首次会议、末次会议、阶段沟通等）",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "审核项目ID（UUID，默认自动使用当前项目）",
+                        },
+                        "meeting_type": {
+                            "type": "string",
+                            "enum": ["opening", "closing", "interim", "internal"],
+                            "description": "会议类型筛选：opening(首次会议)/closing(末次会议)/interim(阶段沟通)/internal(内部会议)",
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_create_meeting",
+                "description": "为当前审核项目生成【首次会议 / 末次会议 / 沟通会议记录】确认卡片。审核员在界面点击确认后，将正式把会议记录写入到首末次会议管理表（CommunicationMeeting）中",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_id": {
+                            "type": "string",
+                            "description": "审核项目ID（UUID，默认自动使用当前项目）",
+                        },
+                        "meeting_type": {
+                            "type": "string",
+                            "enum": ["opening", "closing", "interim", "internal"],
+                            "description": "会议类型：opening(首次会议)/closing(末次会议)/interim(阶段沟通)/internal(内部会议)",
+                        },
+                        "meeting_time": {
+                            "type": "string",
+                            "description": "会议时间，格式 YYYY-MM-DD HH:mm，如 '2026-08-21 08:30'",
+                        },
+                        "participants_enterprise": {
+                            "type": "string",
+                            "description": "企业参会人员描述，如 '企业总经理、各部门负责人及陪同人员'",
+                        },
+                        "participant_names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "审核组参会审核员姓名列表，如 ['张建国', '王芳']，若全体参加可列出全部审核员或在描述中注明",
+                        },
+                        "participants_audit_team_desc": {
+                            "type": "string",
+                            "description": "审核组参会说明，如 'A组和B组全体审核员'",
+                        },
+                        "key_points": {
+                            "type": "string",
+                            "description": "会议要点，如确认审核目的、范围、准则、日程与分工等",
+                        },
+                        "meeting_minutes": {
+                            "type": "string",
+                            "description": "会议纪要正文",
+                        },
+                    },
+                    "required": ["meeting_type", "meeting_time"],
                 },
             },
         },
@@ -1327,6 +1400,8 @@ class AgentService:
             "propose_add_team_member": self._tool_propose_add_team_member,
             "get_audit_plan_items": self._tool_get_audit_plan_items,
             "propose_create_audit_plan": self._tool_propose_create_audit_plan,
+            "get_communication_meetings": self._tool_get_communication_meetings,
+            "propose_create_meeting": self._tool_propose_create_meeting,
         }
 
         handler = tool_handlers.get(tool_name)
@@ -2638,6 +2713,171 @@ class AgentService:
                 "project_title": project.title,
                 "plan_items": clean_items,
                 "total_items": len(clean_items),
+            },
+        }
+        return proposal
+
+    async def _tool_get_communication_meetings(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """获取当前审核项目的首末次会议及沟通会议记录列表。"""
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        # 加载项目成员映射
+        team_rows = await db.execute(
+            select(AuditTeamMember, User)
+            .join(User, AuditTeamMember.member_id == User.id)
+            .where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.is_deleted == False,
+                User.is_deleted == False,
+            )
+        )
+        user_id_to_name: dict[UUID, str] = {}
+        for tm, u in team_rows.all():
+            user_id_to_name[u.id] = u.full_name or u.username
+
+        query = select(CommunicationMeeting).where(CommunicationMeeting.project_id == UUID(project_id))
+        meeting_type = args.get("meeting_type")
+        if meeting_type:
+            query = query.where(CommunicationMeeting.meeting_type == meeting_type)
+        query = query.order_by(CommunicationMeeting.meeting_time.asc())
+
+        meetings = (await db.execute(query)).scalars().all()
+        type_name_map = {
+            "opening": "首次会议",
+            "closing": "末次会议",
+            "interim": "阶段沟通",
+            "internal": "内部会议",
+        }
+
+        meeting_list = []
+        for m in meetings:
+            audit_team_names = [
+                user_id_to_name.get(uid, str(uid))
+                for uid in (m.participants_audit_team or [])
+            ]
+            meeting_list.append({
+                "id": str(m.id),
+                "meeting_type": m.meeting_type,
+                "meeting_type_display": type_name_map.get(m.meeting_type, m.meeting_type),
+                "meeting_time": m.meeting_time.isoformat() if m.meeting_time else None,
+                "participants_enterprise": m.participants_enterprise,
+                "participants_audit_team_names": audit_team_names,
+                "key_points": m.key_points,
+                "meeting_minutes": m.meeting_minutes,
+            })
+
+        return {
+            "project_id": str(project.id),
+            "project_title": project.title,
+            "total_meetings": len(meeting_list),
+            "meetings": meeting_list,
+        }
+
+    async def _tool_propose_create_meeting(
+        self,
+        args: dict,
+        context: dict,
+        db: AsyncSession,
+    ) -> dict:
+        """为当前审核项目生成首末次会议或沟通会议记录确认卡片。"""
+        from datetime import date
+        project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
+            context.get("project_id")
+        )
+        if not project_id:
+            return {"error": "当前页面未提供正式审核项目ID"}
+
+        project = await db.get(AuditProject, UUID(project_id))
+        if not project or project.is_deleted:
+            return {"error": "审核项目不存在"}
+
+        # 加载项目成员映射
+        team_rows = await db.execute(
+            select(AuditTeamMember, User)
+            .join(User, AuditTeamMember.member_id == User.id)
+            .where(
+                AuditTeamMember.project_id == UUID(project_id),
+                AuditTeamMember.is_deleted == False,
+                User.is_deleted == False,
+            )
+        )
+        name_to_user: dict[str, User] = {}
+        all_auditor_names: list[str] = []
+        for tm, u in team_rows.all():
+            display_name = u.full_name or u.username
+            all_auditor_names.append(display_name)
+            if u.full_name:
+                name_to_user[u.full_name] = u
+            if u.username:
+                name_to_user[u.username] = u
+
+        raw_type = str(args.get("meeting_type") or "opening").strip().lower()
+        if "first" in raw_type or "首" in raw_type or raw_type == "opening":
+            meeting_type = "opening"
+            meeting_type_title = "首次会议"
+        elif "last" in raw_type or "末" in raw_type or raw_type == "closing":
+            meeting_type = "closing"
+            meeting_type_title = "末次会议"
+        elif "internal" in raw_type or "内" in raw_type:
+            meeting_type = "internal"
+            meeting_type_title = "内部会议"
+        else:
+            meeting_type = "interim"
+            meeting_type_title = "沟通会议"
+
+        meeting_time_str = str(args.get("meeting_time") or "").strip()
+        if not meeting_time_str:
+            base_date = project.scheduled_start or date.today()
+            meeting_time_str = f"{base_date} 08:30"
+
+        # 整理参会审核员名单
+        raw_names = args.get("participant_names") or args.get("auditor_names") or []
+        if isinstance(raw_names, str):
+            raw_names = [raw_names]
+        
+        assigned_names = []
+        for n in raw_names:
+            n_clean = str(n).strip()
+            if n_clean:
+                assigned_names.append(n_clean)
+
+        participants_desc = str(args.get("participants_audit_team_desc") or "")
+        if "全体" in participants_desc or not assigned_names:
+            assigned_names = all_auditor_names or ["全体审核组成员"]
+
+        enterprise_participants = str(args.get("participants_enterprise") or "企业最高管理者、管理者代表及各部门负责人").strip()
+        key_points = str(args.get("key_points") or args.get("remarks") or f"{meeting_type_title}顺利召开，明确审核目的、范围与准则").strip()
+        meeting_minutes = str(args.get("meeting_minutes") or key_points).strip()
+
+        proposal = {
+            "type": "action_proposal",
+            "action": "create_meeting_record",
+            "status": "pending",
+            "title": f"录入{meeting_type_title}记录：{meeting_time_str}",
+            "data": {
+                "project_id": str(project.id),
+                "project_title": project.title,
+                "meeting_type": meeting_type,
+                "meeting_type_display": meeting_type_title,
+                "meeting_time": meeting_time_str,
+                "participants_enterprise": enterprise_participants,
+                "participant_names": assigned_names,
+                "participants_audit_team_desc": participants_desc or "、".join(assigned_names),
+                "key_points": key_points,
+                "meeting_minutes": meeting_minutes,
             },
         }
         return proposal

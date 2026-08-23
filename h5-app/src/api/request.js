@@ -48,7 +48,7 @@ request.interceptors.response.use(
         } catch (e) {
           console.error('Toast error:', e)
         }
-      } else {
+      } else if (!error.config?.skipErrorToast) {
         try {
           showToast({ type: 'fail', message: data.detail || '请求失败' })
         } catch (e) {
@@ -58,7 +58,9 @@ request.interceptors.response.use(
     } else {
       console.error('网络错误:', error.message)
       try {
-        showToast({ type: 'fail', message: '网络错误' })
+        if (!error.config?.skipErrorToast) {
+          showToast({ type: 'fail', message: '网络连接失败，请检查网络' })
+        }
       } catch (e) {
         console.error('Toast error:', e)
       }

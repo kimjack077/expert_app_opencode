@@ -11,7 +11,7 @@
         <div class="header-content">
           <div class="header-left">
             <van-icon name="service-o" size="20" color="#1677FF" />
-            <span class="header-title">检查助手</span>
+            <span class="header-title">智审 Agent</span>
           </div>
           <van-icon name="arrow-down" size="20" color="#999" @click="handleClose" />
         </div>

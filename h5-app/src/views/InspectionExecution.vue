@@ -125,15 +125,15 @@
 
             <!-- 快速录入区域 -->
             <div class="quick-input-area" @click.stop>
-              <!-- 判定型 (pass_fail) -->
-              <div v-if="item.result_type === 'pass_fail' || (!item.result_type && !item.check_type)" class="quick-radio">
+              <!-- 判定型 (pass_fail / radio) -->
+              <div v-if="item.result_type === 'pass_fail' || item.check_type === 'pass_fail' || item.check_type === 'radio' || (!item.result_type && !item.check_type)" class="quick-radio">
                 <van-radio-group
                   v-model="quickInputs[item.id].radio_value"
                   direction="horizontal"
                   @change="(val) => onQuickInput(item, 'radio_value', val)"
                 >
                   <van-radio
-                    v-for="opt in (item.result_options || defaultResultOptions)"
+                    v-for="opt in getItemResultOptions(item)"
                     :key="opt.value"
                     :name="opt.value"
                     shape="square"
@@ -218,7 +218,7 @@
                   @change="(val) => onQuickInput(item, 'multi_value', val)"
                 >
                   <van-checkbox
-                    v-for="opt in (item.result_options || defaultMultiOptions)"
+                    v-for="opt in getItemResultOptions(item)"
                     :key="opt.value"
                     :name="opt.value"
                     shape="square"
@@ -1015,9 +1015,9 @@ const fetchRecord = async () => {
       return
     }
 
-    // 记录路由：先按检查记录加载
+    // 记录路由：先按检查记录加载（静默探测）
     try {
-      const res = await getRecord(id)
+      const res = await getRecord(id, { skipErrorToast: true })
       if (res.code === 200 && res.data) {
         await applyRecordData(res.data, id)
         refreshCachedEntry()
@@ -1120,24 +1120,61 @@ const loadExistingResults = () => {
   loadItems(record.value.template.items)
 }
 
-const initQuickInputs = async () => {
+const normalizeResultOptions = (rawOptions, defaultOptions = defaultResultOptions) => {
+  if (!rawOptions) return defaultOptions
+  let opts = rawOptions
+  if (typeof opts === 'string') {
+    try {
+      opts = JSON.parse(opts)
+    } catch (e) {
+      return defaultOptions
+    }
+  }
+  if (opts && typeof opts === 'object' && !Array.isArray(opts)) {
+    if (Array.isArray(opts.options)) {
+      opts = opts.options
+    } else if (Array.isArray(opts.items)) {
+      opts = opts.items
+    } else {
+      return defaultOptions
+    }
+  }
+  if (!Array.isArray(opts) || opts.length === 0) {
+    return defaultOptions
+  }
+  return opts.map((opt) => {
+    if (typeof opt === 'string') {
+      return { label: opt, value: opt }
+    }
+    if (opt && typeof opt === 'object') {
+      const val = opt.value !== undefined ? opt.value : (opt.label || opt.name || '')
+      const lbl = opt.label || opt.name || (val === 'pass' ? '合格' : val === 'fail' ? '不合格' : (val === 'na' || val === 'not_applicable') ? '不适用' : val)
+      return {
+        label: String(lbl),
+        value: String(val),
+        criteria: opt.criteria || '',
+      }
+    }
+    return { label: String(opt), value: String(opt) }
+  })
+}
+
+const getItemResultOptions = (item) => {
+  return normalizeResultOptions(item?.result_options)
+}
+
+const initQuickInputs = () => {
   for (const item of flattenItems.value) {
     if (item.is_category !== true) {
       const existing = itemResults.value[item.id] || {}
-      const checkType = item.check_type || item.result_type || 'pass_fail'
-      const isDefaultPass = !existing.radio_value && checkType === 'pass_fail' && !item.attachment_required
       
       quickInputs.value[item.id] = {
-        radio_value: existing.radio_value || (isDefaultPass ? 'pass' : ''),
-        score_value: existing.score_value || 0,
-        numeric_value: existing.numeric_value || '',
+        radio_value: existing.radio_value || '',
+        score_value: existing.score_value ?? '',
+        numeric_value: existing.numeric_value ?? '',
         text_value: existing.text_value || '',
         multi_value: existing.multi_value || [],
         problem_description: existing.problem_description || '',
-      }
-      
-      if (isDefaultPass) {
-        await onQuickInput(item, 'radio_value', 'pass')
       }
     }
   }
@@ -1232,6 +1269,8 @@ const getItemStatus = (item) => {
     const value = result.radio_value
     if (value === 'pass') return 'pass'
     if (value === 'fail') return 'fail'
+    if (value === 'na' || value === 'not_applicable') return 'na'
+    if (value === 'pending_rectification') return 'pending_rectification'
   }
 
   return 'completed'
@@ -1247,13 +1286,15 @@ const getItemResultText = (item) => {
     case 'radio':
     case 'pass_fail': {
       const value = result.radio_value
+      if (!value) return ''
+      const options = getItemResultOptions(item)
+      const opt = options.find(o => o.value === value)
+      if (opt?.label) return opt.label
       if (value === 'pass') return '合格'
       if (value === 'fail') return '不合格'
+      if (value === 'na' || value === 'not_applicable') return '不适用'
       if (value === 'pending_rectification') return '待整改'
-      if (value === 'not_applicable') return '未涉及'
-      const options = item.result_options || []
-      const opt = options.find(o => o.value === value)
-      return opt?.label || value
+      return value
     }
     case 'score':
       return `${result.score_value} 分`
@@ -1265,7 +1306,7 @@ const getItemResultText = (item) => {
     }
     case 'multi_check': {
       const values = result.multi_value || []
-      const options = item.result_options || defaultMultiOptions
+      const options = getItemResultOptions(item)
       return values.map(v => {
         const opt = options.find(o => o.value === v)
         return opt?.label || v
@@ -1391,12 +1432,11 @@ const onQuickInput = async (item, field, value) => {
 
 const goToItem = (item) => {
   currentItemId.value = item.id
-  const recordItem = record.value?.items?.find(i =>
-    i.template_item_id === item.id || i.id === item.id
-  )
-
-  const itemId = recordItem?.id || item.id
-  router.push(`/inspection/${currentRecordId.value}/item/${itemId}`)
+  const itemId = item.id
+  router.push({
+    path: `/inspection/${currentRecordId.value}/item/${itemId}`,
+    query: { mode: executionMode.value }
+  })
 }
 
 const showSubmitConfirm = async () => {

@@ -67,15 +67,29 @@
             <strong>{{ taskCompletionRate(priorityTask) }}%</strong>
           </div>
           <van-progress :percentage="taskCompletionRate(priorityTask)" stroke-width="7" color="#0369A1" />
-          <van-button
-            block
-            type="primary"
-            class="primary-action"
-            :loading="openingTaskId === priorityTask.id"
-            @click="openAgentSession(priorityTask)"
-          >
-            {{ actionButtonText(priorityTask) }}
-          </van-button>
+
+          <!-- 双审核模式入口按钮组 -->
+          <div class="priority-actions-group">
+            <van-button
+              type="primary"
+              class="primary-action-btn"
+              :loading="openingTaskId === priorityTask.id && openingMode === 'template'"
+              @click="openTemplateInspection(priorityTask)"
+            >
+              <van-icon name="notes-o" style="margin-right: 4px;" />
+              表格式模板检查（推荐）
+            </van-button>
+            <van-button
+              plain
+              type="primary"
+              class="sub-action-btn"
+              :loading="openingTaskId === priorityTask.id && openingMode === 'agent'"
+              @click="openAgentSession(priorityTask)"
+            >
+              <van-icon name="service-o" style="margin-right: 4px;" />
+              AI 辅助现场审核
+            </van-button>
+          </div>
         </article>
       </section>
 
@@ -153,6 +167,18 @@
         </div>
       </section>
     </van-pull-refresh>
+
+    <!-- 审核模式选择面板 -->
+    <van-action-sheet
+      v-model:show="showModeSheet"
+      :title="selectedTaskForSheet ? `选择审核方式 - ${selectedTaskForSheet.area_name || '现场审核'}` : '选择审核方式'"
+      :actions="modeActions"
+      cancel-text="取消"
+      close-on-click-action
+      description="建议优先采用【表格式模板检查】逐项核查并录入记录；也可使用【AI 辅助】进行拍照分析与会话问答。"
+      @select="onSelectMode"
+    />
+
     <BottomNav />
   </main>
 </template>
@@ -174,6 +200,22 @@ const tasks = ref([])
 const loading = ref(true)
 const refreshing = ref(false)
 const openingTaskId = ref('')
+const openingMode = ref('')
+const showModeSheet = ref(false)
+const selectedTaskForSheet = ref(null)
+
+const modeActions = [
+  {
+    name: '📋 表格式模板检查（推荐）',
+    subname: '依据检查模板逐项采集、判定与打分，生成正式条款审核记录',
+    value: 'template',
+  },
+  {
+    name: '🤖 AI 辅助现场审核',
+    subname: '现场拍照识别、多条款证据智能抽取与辅助会话',
+    value: 'agent',
+  },
+]
 
 const statusOrder = { in_progress: 0, pending: 1, completed: 2, cancelled: 3 }
 
@@ -241,7 +283,10 @@ const taskCompletionRate = (task) => {
 const taskProgressText = (task) => {
   const confirmed = Number(task?.confirmed_record_count || 0)
   const total = Number(task?.total_clause_count || 0)
-  return `已确认 ${confirmed}/${total} 条款`
+  if (total > 0) {
+    return `已确认 ${confirmed}/${total} 项`
+  }
+  return confirmed > 0 ? `已确认 ${confirmed} 项` : '未开始'
 }
 
 const hasTaskException = (task) => Boolean(task?.has_nc || Number(task?.exception_count || 0) > 0)
@@ -294,15 +339,20 @@ const openCompletedResult = async (task) => {
     const sessionsResponse = await listAuditSessions(task.project_id)
     const sessions = Array.isArray(sessionsResponse?.data) ? sessionsResponse.data : []
     const session = matchSessionForTask(sessions, task.id, ['completed', 'active'])
-    if (!session?.id) {
-      showToast('未找到该任务的审核结果')
+    if (session?.id) {
+      router.push({
+        name: 'AuditSessionResult',
+        params: { sessionId: session.id },
+        query: { projectId: task.project_id, planItemId: task.id }
+      })
       return
     }
-    router.push({
-      name: 'AuditSessionResult',
-      params: { sessionId: session.id },
-      query: { projectId: task.project_id, planItemId: task.id }
-    })
+    // 如果没有 session，直接跳转到表格式检查结果
+    if (task.inspection_task_id) {
+      router.push(`/inspection/${task.inspection_task_id}`)
+      return
+    }
+    showToast('未找到该任务的审核结果')
   } catch (error) {
     showToast(error?.message || '打开审核结果失败')
   } finally {
@@ -310,6 +360,14 @@ const openCompletedResult = async (task) => {
   }
 }
 
+/** 模式一：打开表格式模板检查 */
+const openTemplateInspection = (task) => {
+  if (!task) return
+  const targetId = task.inspection_task_id || task.id
+  router.push(`/inspection/${targetId}`)
+}
+
+/** 模式二：打开 AI 辅助审核会话 */
 const openAgentSession = async (task) => {
   if (!task?.project_id || openingTaskId.value) return
   if (task.status === 'cancelled') {
@@ -318,6 +376,7 @@ const openAgentSession = async (task) => {
   }
 
   openingTaskId.value = task.id
+  openingMode.value = 'agent'
   try {
     const sessionsResponse = await listAuditSessions(task.project_id)
     const sessions = Array.isArray(sessionsResponse?.data) ? sessionsResponse.data : []
@@ -342,12 +401,24 @@ const openAgentSession = async (task) => {
     showToast(error?.message || '进入 AI 现场审核失败，请重试')
   } finally {
     openingTaskId.value = ''
+    openingMode.value = ''
   }
 }
 
 const openTask = (task) => {
   if (task?.status === 'completed') return openCompletedResult(task)
-  return openAgentSession(task)
+  selectedTaskForSheet.value = task
+  showModeSheet.value = true
+}
+
+const onSelectMode = (action) => {
+  const task = selectedTaskForSheet.value
+  if (!task) return
+  if (action.value === 'template') {
+    openTemplateInspection(task)
+  } else if (action.value === 'agent') {
+    openAgentSession(task)
+  }
 }
 
 onMounted(loadTasks)
@@ -360,42 +431,34 @@ onMounted(loadTasks)
   background: var(--bg-light);
 }
 
-/* —— 与检查记录页一致的紧凑 banner —— */
 .page-header {
   position: relative;
-  padding: 0 0 16px;
   overflow: hidden;
+  background: linear-gradient(135deg, #0284C7 0%, #0369A1 100%);
+  padding: 16px 0 20px;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.15);
 }
-.header-bg {
-  position: absolute;
-  inset: 0;
-  background: var(--primary-gradient-dark);
+.header-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.header-bg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 10% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 40%),
-    radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.15) 0%, transparent 40%);
-}
-.header-content { position: relative; z-index: 1; }
 .header-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: calc(env(safe-area-inset-top) + 18px) 16px 10px;
+  margin: 0 16px;
 }
 .header-info {
-  flex: 1;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
 }
 .page-title {
   margin: 0;
-  font-size: 23px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--bg-white);
   font-family: var(--font-primary);
@@ -514,7 +577,25 @@ onMounted(loadTasks)
 .task-details .task-details__exception { color: var(--error-color); }
 .task-progress { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px; color: var(--text-secondary); font-size: 12px; }
 .task-progress strong { color: var(--primary-color); font-size: 13px; }
-.primary-action { min-height: 48px; margin-top: 4px; }
+
+/* 优先卡片行动按钮组 */
+.priority-actions-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.primary-action-btn {
+  flex: 1.2;
+  min-height: 44px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+.sub-action-btn {
+  flex: 0.9;
+  min-height: 44px;
+  font-weight: 500;
+  border-radius: 8px;
+}
 
 .loading-card { padding: 18px; }
 .task-row { width: 100%; min-height: 76px; display: flex; align-items: center; gap: 12px; padding: 14px 16px; text-align: left; color: inherit; background: #fff; border-bottom: 1px solid var(--border-light); }

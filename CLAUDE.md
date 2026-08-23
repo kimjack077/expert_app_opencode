@@ -316,11 +316,17 @@ Template items support multiple check types via `check_type` field:
 - `score` - Score input with pass threshold
 - `photo` - Photo capture required
 
-## Production Deployment
+## Production Deployment & Git Rules
+
+> [!IMPORTANT]
+> **【安全铁律】严禁未经用户明确指令自动部署或推送到 GitHub**：
+> 1. **严禁自动部署**：除非用户在对话中明确、单独指定“部署到服务器 / 运行 deploy”，否则任何代码修改后**严禁自动运行 `python deploy.py` 或任何部署脚本**。
+> 2. **严禁自动推送 GitHub**：除非用户明确指定“推送到 GitHub / git push”，否则**严禁自动执行 `git push`**。
+> 3. 代码修改后仅在本地完成测试与构建校验（如 `npm run build`、`pytest`），并在对话中向用户汇报。
 
 Deployment is driven by **Python scripts at the repo root** (no Docker/Makefile): `deploy.py` (full), plus targeted scripts `deploy_server.py`, `deploy_web_admin.py`, `redeploy_h5.py`, `setup_nginx.py`, `update_frontend_serving.py`. Infra config lives at root: `efis-backend.service` (systemd), `efis-nginx.conf` (nginx).
 
-Typical flow: commit to GitHub → `python deploy.py` (**skips DB migrations** — see Shared Remote Database) → verify at `http://49.232.213.79` (API `:8000`, Web Admin `:3000`, H5 `:5173`).
+When explicitly requested by the user: commit to GitHub → `python deploy.py` (**skips DB migrations** — see Shared Remote Database) → verify at `http://49.232.213.79` (API `:8000`, Web Admin `:3000`, H5 `:5173`).
 
 On the deployed Linux host the backend serves both frontends via a catch-all in `main.py`:
 - `/` → Web Admin (from `/opt/efis/web-admin`)

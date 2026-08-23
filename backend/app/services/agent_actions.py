@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
 from app.models.enterprise import Enterprise
-from app.models.audit_project import AuditProject, AuditTeamMember, AuditPlanItem
+from app.models.audit_project import AuditProject, AuditTeamMember, AuditPlanItem, CommunicationMeeting
 from app.models.user import User
 from app.utils.roles import ADMIN_ROLES
 
@@ -506,5 +506,130 @@ async def _action_create_audit_plan(
         "created_count": len(created_items),
         "plan_items": created_items,
     }
+
+
+@register("create_meeting_record")
+async def _action_create_meeting_record(
+    db: AsyncSession,
+    user: User,
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    """创建首末次会议或沟通会议记录 (CommunicationMeeting)。"""
+    from app.services.project_access_service import ensure_project_access
+
+    project_id = _as_uuid(_require(data, "project_id"), "project_id")
+    await ensure_project_access(db, project_id, user, require_manage=False)
+
+    project = await db.get(AuditProject, project_id)
+    if not project or project.is_deleted:
+        raise HTTPException(status_code=404, detail="审核项目不存在")
+
+    raw_type = str(data.get("meeting_type") or "opening").strip().lower()
+    if "first" in raw_type or "首" in raw_type or raw_type == "opening":
+        meeting_type = "opening"
+    elif "last" in raw_type or "末" in raw_type or raw_type == "closing":
+        meeting_type = "closing"
+    elif "internal" in raw_type or "内" in raw_type:
+        meeting_type = "internal"
+    else:
+        meeting_type = "interim"
+
+    raw_time = data.get("meeting_time")
+    meeting_time = datetime.now()
+    if raw_time:
+        if isinstance(raw_time, datetime):
+            meeting_time = raw_time
+        elif isinstance(raw_time, str):
+            t_str = raw_time.strip().replace("T", " ")
+            try:
+                if len(t_str) == 10:
+                    meeting_time = datetime.strptime(t_str, "%Y-%m-%d")
+                elif len(t_str) == 16:
+                    meeting_time = datetime.strptime(t_str, "%Y-%m-%d %H:%M")
+                elif len(t_str) >= 19:
+                    meeting_time = datetime.strptime(t_str[:19], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+    team_members_res = await db.execute(
+        select(AuditTeamMember, User)
+        .join(User, AuditTeamMember.member_id == User.id)
+        .where(
+            AuditTeamMember.project_id == project_id,
+            AuditTeamMember.is_deleted == False,
+            User.is_deleted == False,
+        )
+    )
+    name_to_user_id: dict[str, UUID] = {}
+    all_team_ids: list[UUID] = []
+    for tm, u in team_members_res.all():
+        all_team_ids.append(u.id)
+        if u.full_name:
+            name_to_user_id[u.full_name] = u.id
+        if u.username:
+            name_to_user_id[u.username] = u.id
+
+    participants_audit_team: list[UUID] = []
+    raw_audit_team = data.get("participants_audit_team") or []
+    if isinstance(raw_audit_team, str):
+        raw_audit_team = [raw_audit_team]
+    for p in raw_audit_team:
+        try:
+            participants_audit_team.append(UUID(str(p)))
+        except Exception:
+            p_clean = str(p).strip()
+            if p_clean in name_to_user_id:
+                participants_audit_team.append(name_to_user_id[p_clean])
+
+    raw_names = data.get("participant_names") or data.get("auditor_names") or []
+    if isinstance(raw_names, str):
+        raw_names = [raw_names]
+    for name in raw_names:
+        name_clean = str(name).strip()
+        if name_clean in name_to_user_id and name_to_user_id[name_clean] not in participants_audit_team:
+            participants_audit_team.append(name_to_user_id[name_clean])
+
+    if not participants_audit_team or "全体" in str(data.get("participants_audit_team_desc") or ""):
+        participants_audit_team = list(set(participants_audit_team + all_team_ids))
+    if not participants_audit_team:
+        participants_audit_team = [user.id]
+
+    participants_enterprise = data.get("participants_enterprise") or "企业负责人及各部门主管人员"
+    key_points = data.get("key_points") or data.get("meeting_points") or data.get("remarks") or ""
+    meeting_minutes = data.get("meeting_minutes") or data.get("content") or key_points
+
+    db_meeting = CommunicationMeeting(
+        project_id=project_id,
+        meeting_type=meeting_type,
+        meeting_time=meeting_time,
+        participants_enterprise=str(participants_enterprise),
+        participants_audit_team=participants_audit_team,
+        key_points=str(key_points) if key_points else None,
+        meeting_minutes=str(meeting_minutes) if meeting_minutes else None,
+        sign_in_sheet=data.get("sign_in_sheet"),
+        created_by=user.id,
+    )
+    db.add(db_meeting)
+    await db.commit()
+    await db.refresh(db_meeting)
+
+    type_name_map = {
+        "opening": "首次会议",
+        "closing": "末次会议",
+        "interim": "阶段沟通",
+        "internal": "内部会议",
+    }
+
+    return {
+        "applied": "create_meeting_record",
+        "meeting_id": str(db_meeting.id),
+        "project_id": str(project_id),
+        "meeting_type": db_meeting.meeting_type,
+        "meeting_type_display": type_name_map.get(db_meeting.meeting_type, db_meeting.meeting_type),
+        "meeting_time": db_meeting.meeting_time.isoformat(),
+        "participants_enterprise": db_meeting.participants_enterprise,
+        "participants_count": len(db_meeting.participants_audit_team or []),
+    }
+
 
 

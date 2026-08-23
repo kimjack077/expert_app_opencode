@@ -448,6 +448,8 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showSuccessToast, showNotify } from 'vant'
 import request from '../api/request.js'
+import { getTask, getTaskRecords, getTemplateItems, submitCheckRecord } from '../api/tasks.js'
+import { getRecordItem } from '../api/records.js'
 import { processPhoto, blobToBase64 } from '../utils/photoUtils.js'
 import AgentFab from '../components/agent/AgentFab.vue'
 import AgentChatPanel from '../components/agent/AgentChatPanel.vue'
@@ -457,6 +459,7 @@ const route = useRoute()
 
 const loading = ref(true)
 const saving = ref(false)
+const isTaskMode = ref(false)
 const aiLoading = ref(false)
 const aiThinking = ref(false)
 const aiThinkingContent = ref('')
@@ -516,16 +519,54 @@ const hasKnowledgeBase = computed(() => {
   return itemData.value?.description || itemData.value?.legal_basis || itemData.value?.standard_ref || itemData.value?.check_method
 })
 
-const resultOptions = computed(() => {
-  if (itemData.value?.result_options && Array.isArray(itemData.value.result_options)) {
-    return itemData.value.result_options
+const defaultPassFailOptions = [
+  { label: '合格', value: 'pass' },
+  { label: '不合格', value: 'fail' },
+  { label: '待整改', value: 'pending_rectification' },
+  { label: '未涉及', value: 'not_applicable' },
+]
+
+const normalizeResultOptions = (rawOptions, defaultOptions = defaultPassFailOptions) => {
+  if (!rawOptions) return defaultOptions
+  let opts = rawOptions
+  if (typeof opts === 'string') {
+    try {
+      opts = JSON.parse(opts)
+    } catch (e) {
+      return defaultOptions
+    }
   }
-  return [
-    { label: '合格', value: 'pass' },
-    { label: '不合格', value: 'fail' },
-    { label: '待整改', value: 'pending_rectification' },
-    { label: '未涉及', value: 'not_applicable' }
-  ]
+  if (opts && typeof opts === 'object' && !Array.isArray(opts)) {
+    if (Array.isArray(opts.options)) {
+      opts = opts.options
+    } else if (Array.isArray(opts.items)) {
+      opts = opts.items
+    } else {
+      return defaultOptions
+    }
+  }
+  if (!Array.isArray(opts) || opts.length === 0) {
+    return defaultOptions
+  }
+  return opts.map((opt) => {
+    if (typeof opt === 'string') {
+      return { label: opt, value: opt }
+    }
+    if (opt && typeof opt === 'object') {
+      const val = opt.value !== undefined ? opt.value : (opt.label || opt.name || '')
+      const lbl = opt.label || opt.name || (val === 'pass' ? '合格' : val === 'fail' ? '不合格' : (val === 'na' || val === 'not_applicable') ? '未涉及' : val)
+      return {
+        label: String(lbl),
+        value: String(val),
+        criteria: opt.criteria || '',
+      }
+    }
+    return { label: String(opt), value: String(opt) }
+  })
+}
+
+const resultOptions = computed(() => {
+  return normalizeResultOptions(itemData.value?.result_options)
 })
 
 const isFailRequired = computed(() => {
@@ -753,49 +794,159 @@ const getMultiCheckLabel = (value) => {
   return opt?.label || value
 }
 
-// 加载数据
+// 展开模板层级项
+const flattenTemplateItems = (items) => {
+  let result = []
+  for (const it of (items || [])) {
+    result.push(it)
+    if (it.children && it.children.length > 0) {
+      result = result.concat(flattenTemplateItems(it.children))
+    }
+  }
+  return result
+}
+
+const setupPhotos = () => {
+  const normalizeUrl = (url) => {
+    if (!url) return url
+    url = url.replace(/\\/g, '/')
+    if (url.startsWith('http')) return url
+    if (!url.startsWith('/')) url = '/' + url
+    return url
+  }
+  formData.value.photos = (formData.value.photos || []).map(normalizeUrl)
+  photoList.value = formData.value.photos.map((url) => ({
+    url,
+    isImage: true,
+  }))
+}
+
+// 加载数据（支持 Record 模式与 Task 模式）
 const fetchItemData = async () => {
   loading.value = true
   try {
     const recordId = route.params.id
     const itemId = route.params.itemId
+    const isExplicitTask = route.query.mode === 'task'
 
-    const res = await request.get(`/records/${recordId}/items/${itemId}`)
-    itemData.value = res.data
+    // 1. 如果不是显式 task 模式，先尝试按 Record 项加载
+    if (!isExplicitTask) {
+      try {
+        const res = await getRecordItem(recordId, itemId, { skipErrorToast: true })
+        if (res?.data || res?.id) {
+          const data = res.data || res
+          itemData.value = data
+          isTaskMode.value = false
 
-    // 填充表单数据
+          formData.value = {
+            result: data.result || '',
+            result_value: data.result_value || '',
+            result_text: data.result_text || '',
+            score_value: data.score_value || '',
+            radio_value: data.radio_value || data.result || '',
+            multi_value: data.multi_value || [],
+            numeric_value: data.numeric_value || data.result_value || '',
+            text_value: data.text_value || data.result_text || '',
+            problem_description: data.problem_description || '',
+            rectification_suggestion: data.rectification_suggestion || '',
+            inspector_note: data.inspector_note || '',
+            photos: data.photos || [],
+          }
+
+          setupPhotos()
+          fetchHistoryStats()
+          return
+        }
+      } catch (e) {
+        console.log('Not a record item, loading as task item...', e?.message || e)
+      }
+    }
+
+    // 2. 尝试以 Task 任务模式加载
+    isTaskMode.value = true
+    const taskRes = await getTask(recordId, { skipErrorToast: true })
+    const task = taskRes?.data || taskRes
+    if (!task || !task.id) {
+      showToast('获取检查任务失败')
+      return
+    }
+
+    let templateId = task.template_id
+    let taskRecords = []
+    try {
+      const recordsRes = await getTaskRecords(task.id)
+      taskRecords = Array.isArray(recordsRes?.data) ? recordsRes.data : (Array.isArray(recordsRes) ? recordsRes : [])
+    } catch (e) {
+      console.warn('获取任务检查项记录失败', e)
+    }
+
+    if (!templateId) {
+      const linked = taskRecords.find((r) => r.template_item_id || r.template_item?.template_id)
+      if (linked?.template_item?.template_id) {
+        templateId = linked.template_item.template_id
+      }
+    }
+
+    let rawTemplate = null
+    if (templateId) {
+      try {
+        const tplRes = await getTemplateItems(templateId)
+        rawTemplate = tplRes?.data || tplRes
+      } catch (e) {
+        console.error('获取检查模板失败', e)
+      }
+    }
+
+    const allTemplateItems = flattenTemplateItems(rawTemplate?.items || [])
+    const tplItem = allTemplateItems.find((it) => String(it.id) === String(itemId)) ||
+      taskRecords.find((r) => String(r.template_item_id) === String(itemId))?.template_item ||
+      { id: itemId, title: '检查项' }
+
+    const taskRec = taskRecords.find((r) => String(r.template_item_id) === String(itemId) || String(r.id) === String(itemId))
+
+    const defaultOptions = [
+      { label: '合格', value: 'pass' },
+      { label: '不合格', value: 'fail' },
+      { label: '待整改', value: 'pending_rectification' },
+      { label: '未涉及', value: 'not_applicable' }
+    ]
+
+    itemData.value = {
+      ...tplItem,
+      task_id: task.id,
+      enterprise_id: task.enterprise_id || null,
+      enterprise_name: task.target_name || '',
+      result_options: (tplItem.result_options && tplItem.result_options.length > 0)
+        ? tplItem.result_options
+        : defaultOptions,
+      result: taskRec?.result || '',
+      result_value: taskRec?.result_value || '',
+      result_text: taskRec?.result_text || '',
+      score_value: taskRec?.result_value || '',
+      radio_value: taskRec?.result || '',
+      numeric_value: taskRec?.result_value || '',
+      text_value: taskRec?.result_text || '',
+      problem_description: taskRec?.inspector_note || '',
+      inspector_note: taskRec?.inspector_note || '',
+      photos: [],
+    }
+
     formData.value = {
       result: itemData.value.result || '',
       result_value: itemData.value.result_value || '',
       result_text: itemData.value.result_text || '',
       score_value: itemData.value.score_value || '',
       radio_value: itemData.value.radio_value || '',
-      multi_value: itemData.value.multi_value || [],
+      multi_value: [],
       numeric_value: itemData.value.numeric_value || '',
       text_value: itemData.value.text_value || '',
       problem_description: itemData.value.problem_description || '',
-      rectification_suggestion: itemData.value.rectification_suggestion || '',
+      rectification_suggestion: '',
       inspector_note: itemData.value.inspector_note || '',
-      photos: itemData.value.photos || [],
+      photos: [],
     }
 
-    // Normalize photo URLs (ensure forward slashes and leading /)
-    const normalizeUrl = (url) => {
-      if (!url) return url
-      url = url.replace(/\\/g, '/')
-      if (url.startsWith('http')) return url
-      if (!url.startsWith('/')) url = '/' + url
-      return url
-    }
-    formData.value.photos = formData.value.photos.map(normalizeUrl)
-
-    // 设置照片列表
-    photoList.value = formData.value.photos.map((url, index) => ({
-      url,
-      isImage: true,
-    }))
-
-    // 获取历史统计数据
+    setupPhotos()
     fetchHistoryStats()
 
   } catch (error) {
@@ -808,13 +959,13 @@ const fetchItemData = async () => {
 
 // 获取历史统计数据
 const fetchHistoryStats = async () => {
+  if (isTaskMode.value) return
   loadingHistory.value = true
   try {
     const recordId = route.params.id
     const itemId = route.params.itemId
-    const res = await request.get(`/records/${recordId}/items/${itemId}/history-stats`)
-    historyStats.value = res.data
-    // 等待 DOM 更新后绘制趋势图
+    const res = await request.get(`/records/${recordId}/items/${itemId}/history-stats`, { skipErrorToast: true })
+    historyStats.value = res.data || res
     await nextTick()
     drawTrendChart()
   } catch (error) {
@@ -905,7 +1056,11 @@ const generateAI = async () => {
     const token = localStorage.getItem('token')
     
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/items/${itemId}/ai-stream`, {
+    const url = isTaskMode.value
+      ? `${API_BASE_URL}/api/tasks/${recordId}/records/${itemId}/ai-stream`
+      : `${API_BASE_URL}/api/records/${recordId}/items/${itemId}/ai-stream`
+
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Accept': 'text/event-stream',
@@ -994,6 +1149,37 @@ const saveItem = async () => {
         saving.value = false
         return
       }
+    }
+
+    if (isTaskMode.value) {
+      const payload = {
+        template_item_id: itemData.value.template_item_id || itemData.value.id || route.params.itemId,
+      }
+      if (checkType === 'pass_fail' || checkType === 'radio' || (!itemData.value.result_type && !itemData.value.check_type)) {
+        if (formData.value.radio_value) payload.result = formData.value.radio_value
+      } else if (checkType === 'text') {
+        if (formData.value.text_value) payload.result_text = formData.value.text_value
+      } else if (checkType === 'numeric' || checkType === 'score') {
+        const val = checkType === 'score' ? formData.value.score_value : formData.value.numeric_value
+        if (val !== '' && val != null) {
+          payload.result_value = String(val)
+          payload.result = formData.value.radio_value || 'pass'
+        }
+      } else if (checkType === 'multi_check') {
+        if (Array.isArray(formData.value.multi_value) && formData.value.multi_value.length) {
+          payload.result_text = formData.value.multi_value.join(',')
+        }
+      }
+      if (formData.value.problem_description) {
+        payload.inspector_note = formData.value.problem_description
+      } else if (formData.value.inspector_note) {
+        payload.inspector_note = formData.value.inspector_note
+      }
+
+      await submitCheckRecord(recordId, payload)
+      showSuccessToast('保存成功')
+      router.replace(`/inspection/${recordId}?t=${Date.now()}`)
+      return
     }
 
     const saveData = {

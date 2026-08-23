@@ -604,4 +604,92 @@ def test_execute_action_create_audit_plan():
     assert db.commit.called
 
 
+def test_propose_create_meeting():
+    project_id = uuid4()
+    project = AuditProject(
+        id=project_id,
+        title="国投检测三体系审核",
+        certification_systems=["Q", "E", "S"],
+        enterprise_id=None,
+        is_deleted=False,
+    )
+    db = AsyncMock()
+    db.get.return_value = project
+
+    team_res = Mock()
+    team_res.all.return_value = []
+    db.execute.return_value = team_res
+
+    proposal = asyncio.run(
+        agent_service._tool_propose_create_meeting(
+            {
+                "project_id": str(project_id),
+                "meeting_type": "opening",
+                "meeting_time": "2026-08-21 08:30",
+                "participants_enterprise": "总经理、副总经理及各部门负责人",
+                "participants_audit_team_desc": "A组和B组全体成员",
+                "key_points": "确认审核目的与范围",
+            },
+            {},
+            db,
+        )
+    )
+
+    assert proposal["type"] == "action_proposal"
+    assert proposal["action"] == "create_meeting_record"
+    assert proposal["data"]["meeting_type"] == "opening"
+    assert proposal["data"]["meeting_type_display"] == "首次会议"
+    assert "2026-08-21 08:30" in proposal["data"]["meeting_time"]
+
+
+def test_execute_action_create_meeting_record():
+    project_id = uuid4()
+    user_id = uuid4()
+
+    admin_user = User(
+        id=user_id,
+        username="admin",
+        full_name="系统管理员",
+        role="admin",
+        is_deleted=False,
+    )
+    project = AuditProject(
+        id=project_id,
+        title="国投检测三体系审核",
+        certification_systems=["Q", "E", "S"],
+        enterprise_id=None,
+        is_deleted=False,
+    )
+
+    db = AsyncMock()
+    db.get.return_value = project
+
+    team_res = Mock()
+    team_res.all.return_value = []
+    db.execute.return_value = team_res
+
+    result = asyncio.run(
+        execute_action(
+            db,
+            admin_user,
+            "create_meeting_record",
+            {
+                "project_id": str(project_id),
+                "meeting_type": "opening",
+                "meeting_time": "2026-08-21 08:30",
+                "participants_enterprise": "总经理及主管",
+                "participant_names": ["张建国", "王芳"],
+                "key_points": "明确审核日程与分工",
+            },
+        )
+    )
+
+    assert result["applied"] == "create_meeting_record"
+    assert result["meeting_type"] == "opening"
+    assert result["meeting_type_display"] == "首次会议"
+    assert db.add.called
+    assert db.commit.called
+
+
+
 

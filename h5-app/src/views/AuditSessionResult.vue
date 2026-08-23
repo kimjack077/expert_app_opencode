@@ -29,6 +29,32 @@
         <p class="conclusion">{{ conclusion || '（未填写结论）' }}</p>
       </section>
 
+      <!-- 模板检查项覆盖进度 -->
+      <section v-if="templateTotalItems > 0" class="card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">检查完整性</p>
+            <h2>检查项覆盖率</h2>
+          </div>
+          <van-tag :type="uncoveredItems.length === 0 ? 'success' : 'warning'">
+            {{ templateCoveredItems }} / {{ templateTotalItems }} 项 ({{ completionRate }}%)
+          </van-tag>
+        </div>
+        <van-progress :percentage="completionRate" :color="uncoveredItems.length === 0 ? '#059669' : '#d97706'" stroke-width="6" style="margin-bottom: 10px;" />
+        <div v-if="uncoveredItems.length" class="uncovered-notice">
+          <div class="uncovered-title">
+            <van-icon name="warning-o" color="#d97706" />
+            <span>尚有 {{ uncoveredItems.length }} 项未完成审核：</span>
+          </div>
+          <ul class="uncovered-list">
+            <li v-for="item in uncoveredItems" :key="item.id">
+              <van-tag size="mini" type="danger" plain>未完成</van-tag>
+              <span class="uncovered-name">{{ item.title }}</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
       <section class="card">
         <div class="section-title">
           <div>
@@ -142,6 +168,15 @@ const drafts = computed(() => session.value.drafts || [])
 const confirmedDrafts = computed(() => drafts.value.filter((d) => d.status === 'confirmed'))
 const submissions = computed(() => (session.value.submissions || []).filter((s) => s.status !== 'failed'))
 
+const qualityCheck = computed(() => session.value.quality_check || {})
+const templateTotalItems = computed(() => qualityCheck.value.template_total_items || 0)
+const templateCoveredItems = computed(() => qualityCheck.value.template_covered_items ?? confirmedDrafts.value.length)
+const uncoveredItems = computed(() => qualityCheck.value.uncovered_items || [])
+const completionRate = computed(() => {
+  if (!templateTotalItems.value) return 100
+  return Math.round((templateCoveredItems.value / templateTotalItems.value) * 100)
+})
+
 const scheduleText = computed(() => {
   if (!planItem.value) return '计划信息加载中'
   const date = planItem.value.plan_date || ''
@@ -154,7 +189,11 @@ const scheduleText = computed(() => {
 const evaluationCode = (draft) => String(draft.record_payload?.evaluation_3level || draft.evaluation || '2')
 const evaluationText = (draft) => ({ 1: '符合', 2: '基本符合', 3: '不符合' }[evaluationCode(draft)] || '待确认')
 const evaluationType = (draft) => ({ 1: 'success', 2: 'warning', 3: 'danger' }[evaluationCode(draft)] || 'default')
-const clauseText = (draft) => draft.primary_clause_no || draft.clause_refs?.map((c) => c.clause_no).filter(Boolean).join(' / ') || '条款'
+const clauseText = (draft) => {
+  const itemTitle = draft.record_payload?.item_title || draft.clause_refs?.[0]?.title
+  if (itemTitle) return itemTitle
+  return draft.primary_clause_no || draft.clause_refs?.map((c) => c.clause_no).filter(Boolean).join(' / ') || '检查项'
+}
 const qualityText = (draft) => ({ sufficient: '充分', partial: '部分充分', insufficient: '不足' }[draft.quality?.level || draft.quality?.evidence_quality] || '—')
 const confidenceText = (draft) => `${Math.round(Number(draft.confidence || 0) * 100)}%`
 const formatTime = (value) => {
@@ -321,6 +360,43 @@ onMounted(load)
   border-radius: 8px;
   background: var(--bg-light);
   font-size: 12px;
+}
+.uncovered-notice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.uncovered-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+.uncovered-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.uncovered-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #78350f;
+}
+.uncovered-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .actions-card {
   display: flex;

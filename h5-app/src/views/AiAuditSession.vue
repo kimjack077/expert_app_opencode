@@ -5,45 +5,23 @@
     <section class="session-summary">
       <div>
         <p class="eyebrow">{{ planItem?.area_name || session.title || '现场审核' }}</p>
-        <h1>{{ statusText }}</h1>
+        <h1>{{ isCompleted ? '审核记录已提交' : (planItem?.area_name || session.title || '现场审核') }}</h1>
         <p>{{ planItem ? `${planItem.plan_date} ${planItem.time_start || ''}-${planItem.time_end || ''}` : '正在加载审核任务' }}</p>
-        <p v-if="analyzing" class="progress-hint">
-          <van-icon name="loading" spin /> {{ analyzeStepText }}
-        </p>
-        <p v-else-if="isCompleted" class="progress-hint success">
+        <p v-if="isCompleted" class="progress-hint success">
           <van-icon name="checked" /> 本区域审核记录已提交，可返回继续其他任务
+        </p>
+        <p v-else-if="templateTotalItems > 0" class="progress-hint" :class="{ success: uncoveredItems.length === 0, warning: uncoveredItems.length > 0 }">
+          <van-icon :name="uncoveredItems.length === 0 ? 'checked' : 'info-o'" />
+          检查项进度：{{ templateCoveredItems }} / {{ templateTotalItems }} 项已完成（{{ displayProgress }}%）
         </p>
         <p v-else-if="session.model_status === 'fallback'" class="progress-hint warning">
           <van-icon name="warning-o" /> {{ session.model_status_message || '部分草稿由保守回退生成，需人工复核' }}
         </p>
       </div>
       <van-progress :percentage="displayProgress" stroke-width="8" color="#0369A1" />
-      <p v-if="analyzing" class="progress-step-label">{{ analyzeStepText }}（{{ analyzeProgress }}%）</p>
-    </section>
-
-    <!-- 分析中的步骤条 -->
-    <section v-if="analyzing" class="work-card analyze-status-card" aria-live="polite">
-      <div class="section-title">
-        <div>
-          <p class="eyebrow">进行中</p>
-          <h2>AI 多条款分析</h2>
-        </div>
-        <van-tag type="primary">请稍候</van-tag>
-      </div>
-      <ol class="analyze-steps">
-        <li v-for="step in analyzeSteps" :key="step.key" :class="stepClass(step.key)">
-          <span class="step-dot">
-            <van-icon v-if="isStepDone(step.key)" name="success" />
-            <van-loading v-else-if="isStepActive(step.key)" size="14" />
-            <span v-else class="step-index">{{ step.index }}</span>
-          </span>
-          <div class="step-body">
-            <strong>{{ step.title }}</strong>
-            <p>{{ step.desc }}</p>
-          </div>
-        </li>
-      </ol>
-      <p class="analyze-tip">通常需要数秒到半分钟，请勿关闭页面。分析完成后请逐条人工复核再采纳。</p>
+      <p v-if="templateTotalItems > 0 && uncoveredItems.length > 0 && !isCompleted" class="progress-step-label">
+        尚有 {{ uncoveredItems.length }} 项未完成审核
+      </p>
     </section>
 
     <!-- 提交成功引导 -->
@@ -66,6 +44,22 @@
     <section v-if="blockers.length" class="alert-card" role="alert">
       <div class="card-title"><van-icon name="warning-o" /> 提交前必须处理</div>
       <ul><li v-for="item in blockers" :key="item.code || item.message">{{ item.message || item.title }}</li></ul>
+    </section>
+
+    <!-- 快捷跳转到表格式模板检查 -->
+    <section v-if="!isCompleted && (planItem?.inspection_task_id || planItem?.template_id)" class="template-nav-card">
+      <div class="template-nav-inner">
+        <div class="template-nav-info">
+          <van-icon name="todo-list-o" size="20" color="#0284C7" />
+          <div>
+            <strong>关联模板逐项检查</strong>
+            <p>可直接在模板检查表上打分与拍照，确保每项条款无遗漏</p>
+          </div>
+        </div>
+        <van-button size="small" type="primary" plain @click="goToTemplateInspection">
+          前往检查表
+        </van-button>
+      </div>
     </section>
 
     <section v-if="!isCompleted" class="mode-card" aria-label="记录方式">
@@ -190,23 +184,6 @@
     </section>
 
     <template v-if="!isCompleted && entryMode === 'ai'">
-      <section v-if="!loading && savedSubmissions.length" class="work-card">
-        <div class="section-title">
-          <div><p class="eyebrow">已保存</p><h2>AI 证据提交</h2></div>
-          <van-tag type="primary">{{ savedSubmissions.length }} 条</van-tag>
-        </div>
-        <article v-for="submission in savedSubmissions" :key="submission.id" class="saved-evidence-card">
-          <div class="draft-heading">
-            <strong>{{ submissionTitle(submission) }}</strong>
-            <van-tag :type="submission.status === 'completed' ? 'success' : 'warning'">
-              {{ submission.status === 'completed' ? '已处理' : '处理中' }}
-            </van-tag>
-          </div>
-          <p class="draft-evidence">{{ submission.description || '已保存现场证据' }}</p>
-          <p class="draft-meta">{{ submission.source_files?.length || 0 }} 个附件 · {{ formatSubmissionTime(submission) }}</p>
-        </article>
-      </section>
-
       <section class="work-card">
         <div class="section-title">
           <div><p class="eyebrow">可选辅助</p><h2>AI 多条款分析</h2></div>
@@ -232,21 +209,49 @@
         <van-button block type="primary" class="primary-action" :loading="analyzing" :loading-text="analyzeStepText" :disabled="isCompleted || !evidenceText.trim()" @click="analyzeEvidence">
           {{ analyzing ? analyzeStepText : '生成多条款 AI 记录' }}
         </van-button>
+
+        <!-- AI 分析中状态进度与步骤展示：仅在生成按钮下方展示唯一一个进度条 -->
+        <div v-if="analyzing" class="work-card analyze-status-card" style="margin-top: 14px;">
+          <div class="section-title" style="margin-bottom: 8px;">
+            <div>
+              <p class="eyebrow" style="color: #0284c7;">AI 正在分析</p>
+              <h2 style="font-size: 16px;">{{ analyzeStepText }}</h2>
+            </div>
+            <van-tag type="primary" size="medium">{{ Math.round(analyzeProgress) }}%</van-tag>
+          </div>
+          <van-progress :percentage="Math.round(analyzeProgress)" :show-pivot="false" color="#0284c7" stroke-width="4" style="margin-bottom: 12px;" />
+          <ul class="analyze-steps">
+            <li v-for="step in analyzeSteps" :key="step.key" :class="stepClass(step.key)">
+              <div class="step-dot">
+                <van-icon v-if="isStepDone(step.key)" name="success" size="14" />
+                <span v-else>{{ step.index }}</span>
+              </div>
+              <div class="step-body">
+                <strong>{{ step.title }}</strong>
+                <p>{{ step.desc }}</p>
+              </div>
+            </li>
+          </ul>
+          <div class="analyze-tip">
+            <van-icon name="info-o" style="margin-right: 4px;" />
+            AI 正在对照检查模板中的各个检查项进行多条款匹配与合规判定，请稍候...
+          </div>
+        </div>
       </section>
 
-      <section class="work-card">
+      <!-- 分析完成后的结论：仅在有待确认记录时才在按钮下方展示人工复核卡片 -->
+      <section v-if="pendingDrafts.length > 0" class="work-card">
         <div class="section-title">
           <div>
             <p class="eyebrow">人工复核</p>
             <h2>待确认 AI 记录</h2>
-            <p v-if="confirmedDrafts.length || pendingDrafts.length" class="section-subhint">
-              按条款去重展示 · 已确认 {{ confirmedDrafts.length }} · 待确认 {{ pendingDrafts.length }}
+            <p class="section-subhint">
+              待确认 {{ pendingDrafts.length }} 条 · 已确认 {{ confirmedDrafts.length }} 条
             </p>
           </div>
-          <van-tag v-if="pendingDrafts.length" type="warning">{{ pendingDrafts.length }} 条</van-tag>
+          <van-tag type="warning">{{ pendingDrafts.length }} 条</van-tag>
         </div>
-        <van-empty v-if="!loading && pendingDrafts.length === 0" description="提交现场证据后，AI 草稿会显示在这里。请逐条核对、编辑或拒绝。" />
-        <van-checkbox-group v-else v-model="selectedDraftIds">
+        <van-checkbox-group v-model="selectedDraftIds">
           <article v-for="draft in sortedDrafts" :key="draft.id" class="draft-card" :class="{ abnormal: isAbnormal(draft), fallback: isFallback(draft) }">
             <van-checkbox :name="draft.id" shape="square" :disabled="isFallback(draft) || isCompleted">
               <div class="draft-heading">
@@ -284,12 +289,31 @@
             </div>
           </article>
         </van-checkbox-group>
-        <div v-if="pendingDrafts.length && !isCompleted" class="review-actions">
+        <div v-if="!isCompleted" class="review-actions">
           <van-button block plain type="primary" :loading="confirming" :disabled="isCompleted || safeDraftCount === 0" @click="confirmSafeDrafts">
             批量采纳安全项（排除回退/异常）
           </van-button>
-          <van-button block type="primary" :loading="confirming" :disabled="isCompleted || selectedDraftIds.length === 0" @click="confirmSelected">采纳已选择记录</van-button>
+          <van-button block type="primary" :loading="confirming" :disabled="isCompleted || selectedDraftIds.length === 0" @click="confirmSelected">
+            采纳已选择记录 ({{ selectedDraftIds.length }})
+          </van-button>
         </div>
+      </section>
+
+      <section v-if="!loading && savedSubmissions.length" class="work-card">
+        <div class="section-title">
+          <div><p class="eyebrow">已保存</p><h2>AI 证据提交</h2></div>
+          <van-tag type="primary">{{ savedSubmissions.length }} 条</van-tag>
+        </div>
+        <article v-for="submission in savedSubmissions" :key="submission.id" class="saved-evidence-card">
+          <div class="draft-heading">
+            <strong>{{ submissionTitle(submission) }}</strong>
+            <van-tag :type="submission.status === 'completed' ? 'success' : 'warning'">
+              {{ submission.status === 'completed' ? '已处理' : '处理中' }}
+            </van-tag>
+          </div>
+          <p class="draft-evidence">{{ submission.description || '已保存现场证据' }}</p>
+          <p class="draft-meta">{{ submission.source_files?.length || 0 }} 个附件 · {{ formatSubmissionTime(submission) }}</p>
+        </article>
       </section>
     </template>
 
@@ -473,11 +497,6 @@ const analyzeStepText = computed(() => {
   return current.title
 })
 
-const displayProgress = computed(() => {
-  if (analyzing.value) return Math.max(session.value.progress || 10, analyzeProgress.value)
-  return session.value.progress ?? (drafts.value.length ? Math.min(95, 20 + drafts.value.filter((item) => item.status === 'confirmed').length * 15) : 10)
-})
-
 const drafts = computed(() => session.value.drafts || [])
 const pendingDrafts = computed(() => drafts.value.filter((item) => item.status === 'draft'))
 const confirmedDrafts = computed(() => drafts.value.filter((item) => item.status === 'confirmed'))
@@ -485,6 +504,22 @@ const manualRecords = computed(() => session.value.manual_records || [])
 const savedSubmissions = computed(() => (session.value.submissions || []).filter((item) => item.status !== 'failed'))
 const isCompleted = computed(() => session.value.status === 'completed')
 const blockers = computed(() => qualityCheck.value.blockers || qualityCheck.value.blocking_items || [])
+
+const templateTotalItems = computed(() => qualityCheck.value.template_total_items || 0)
+const templateCoveredItems = computed(() => qualityCheck.value.template_covered_items ?? (confirmedDrafts.value.length + manualRecords.value.length))
+const uncoveredItems = computed(() => qualityCheck.value.uncovered_items || [])
+
+const displayProgress = computed(() => {
+  if (isCompleted.value) return 100
+  if (templateTotalItems.value > 0) {
+    return Math.round((templateCoveredItems.value / templateTotalItems.value) * 100)
+  }
+  const total = drafts.value.length + manualRecords.value.length
+  if (total > 0) {
+    return Math.round(((confirmedDrafts.value.length + manualRecords.value.length) / total) * 100)
+  }
+  return session.value.progress || 0
+})
 const statusText = computed(() => {
   if (session.value.status === 'completed') return '审核记录已提交'
   if (analyzing.value) return 'AI 正在生成多条款记录'
@@ -506,7 +541,11 @@ const safeDraftCount = computed(
 )
 const evaluationText = (draft) => ({ 1: '符合', 2: '基本符合', 3: '不符合' }[evaluationCode(draft)] || '待确认')
 const evaluationType = (draft) => ({ 1: 'success', 2: 'warning', 3: 'danger' }[evaluationCode(draft)] || 'default')
-const clauseText = (draft) => draft.primary_clause_no || draft.clause_refs?.map((item) => item.clause_no).filter(Boolean).join(' / ') || '候选条款'
+const clauseText = (draft) => {
+  const itemTitle = draft.record_payload?.item_title || draft.clause_refs?.[0]?.title
+  if (itemTitle) return itemTitle
+  return draft.primary_clause_no || draft.clause_refs?.map((item) => item.clause_no).filter(Boolean).join(' / ') || '检查项'
+}
 const qualityText = (draft) => ({ sufficient: '充分', partial: '部分充分', insufficient: '不足' }[draft.quality?.level || draft.quality?.evidence_quality] || '待复核')
 const confidenceText = (draft) => `${Math.round(Number(draft.confidence || 0) * 100)}%`
 const confidenceLevel = (draft) => {
@@ -917,6 +956,14 @@ const goTodayAudit = () => {
 const goAuditTasks = () => {
   router.replace('/audit-tasks')
 }
+const goToTemplateInspection = () => {
+  const targetId = planItem.value?.inspection_task_id || planItem.value?.id || planItemId.value
+  if (targetId) {
+    router.push(`/inspection/${targetId}`)
+  } else {
+    showToast('未找到关联的检查任务')
+  }
+}
 const goResultPage = () => {
   router.replace({
     name: 'AuditSessionResult',
@@ -1011,5 +1058,10 @@ onBeforeUnmount(() => {
 .edit-sheet__header strong{font-size:16px}
 .edit-sheet__body{flex:1;overflow-y:auto;padding:12px 12px calc(24px + env(safe-area-inset-bottom))}
 .edit-sheet__clause{margin:0 0 10px;padding:10px 16px;border-radius:var(--radius-sm);color:var(--text-primary);background:#fff;font-size:14px;font-weight:600}
+.template-nav-card{margin-bottom:14px;padding:12px 14px;border:1px solid #bae6fd;border-radius:var(--radius-lg);background:#f0f9ff;box-shadow:var(--shadow-sm)}
+.template-nav-inner{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.template-nav-info{display:flex;align-items:center;gap:10px}
+.template-nav-info strong{display:block;font-size:14px;color:#0369a1}
+.template-nav-info p{margin:2px 0 0;font-size:11px;color:#0284c7}
 @media(min-width:700px){.audit-session-page{max-width:680px;margin:0 auto}}
 </style>

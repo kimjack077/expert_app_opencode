@@ -1,6 +1,7 @@
 """Project-scoped formal audit Agent, knowledge and artifact APIs."""
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -226,13 +227,12 @@ def session_dict(item: AiAuditSession, include_children: bool = False) -> dict[s
         pending = sum(1 for draft in visible_drafts if draft.status == "draft")
         manual_count = len(manual_records)
         active_total = confirmed + manual_count + pending
-        # 阶段：分析中(10) → 草稿就绪(30+) → 部分确认(50+) → 全部确认(90) → 提交完成(100)
         if item.status == "completed":
             progress = 100
         elif active_total == 0:
-            progress = 10  # 已创建会话但还未提交证据
+            progress = 0
         else:
-            progress = min(90, 30 + confirmed * 60 // max(active_total, 1))
+            progress = round((confirmed + manual_count) * 100 / max(active_total, 1))
         value["progress"] = progress
         # 仅统计待确认中的 fallback，避免历史回退草稿继续吓人
         fallback_count = sum(
@@ -647,7 +647,12 @@ async def get_session(project_id: UUID, session_id: UUID, db: AsyncSession = Dep
         await db.commit()
         item = await _load_session(db, project_id, session_id, True)
     value = session_dict(item, True)
-    value["quality_check"] = await _session_quality(item)
+    quality = await _session_quality(item, db)
+    value["quality_check"] = quality
+    if quality.get("template_total_items", 0) > 0:
+        total_items = quality["template_total_items"]
+        covered_items = quality.get("template_covered_items", 0)
+        value["progress"] = 100 if item.status == "completed" else round((covered_items / total_items) * 100)
     return response(value)
 
 
@@ -724,12 +729,25 @@ async def _candidates(db: AsyncSession, project_id: UUID, session: AiAuditSessio
     items = (await db.execute(stmt.order_by(TemplateItem.sort_order))).scalars().all()
     candidates: list[EvidenceCandidate] = []
     for item in items:
-        clause_key = (
-            (item.clause_no or "").strip()
-            or (item.standard_ref or "").strip()
-            or (item.title or "").strip()
-            or str(item.id)
-        )
+        clause_no = (item.clause_no or "").strip()
+        standard_ref = (item.standard_ref or "").strip()
+        title = (item.title or "").strip()
+
+        # 优先提取具体条款号（例如标题 "*1.3 卫生间..." 提取 "1.3"）
+        if not clause_no and title:
+            m = re.match(r"^[\*\s]*(\d+(?:\.\d+)*)", title)
+            if m:
+                clause_no = m.group(1)
+
+        if clause_no:
+            clause_key = f"{standard_ref} {clause_no}".strip() if standard_ref else clause_no
+        elif standard_ref and title:
+            clause_key = f"{standard_ref} {title[:20]}".strip()
+        elif title:
+            clause_key = title[:30]
+        else:
+            clause_key = str(item.id)
+
         if not clause_key:
             continue
         systems = item.applicable_systems or [None]
@@ -861,6 +879,7 @@ async def submit_evidence(project_id: UUID, session_id: UUID, payload: EvidenceS
             finding_text=result["audit_findings"] or payload.content,
             record_payload={
                 "template_item_id": candidate.template_item_id,
+                "item_title": candidate.title,
                 "audit_evidence": payload.content,
                 "evaluation_3level": evaluation,
                 "audit_findings": result["audit_findings"],
@@ -1122,20 +1141,95 @@ async def create_manual_record(
     return response(manual_record, "手工审核记录已保存")
 
 
-async def _session_quality(session: AiAuditSession) -> dict[str, Any]:
-    blockers=[]; warnings=[]
-    confirmed_ai_count = sum(1 for draft in session.drafts if draft.status == "confirmed")
+async def _session_quality(session: AiAuditSession, db: AsyncSession | None = None) -> dict[str, Any]:
+    blockers = []
+    warnings = []
+    confirmed_ai_count = sum(1 for draft in (session.drafts or []) if draft.status == "confirmed")
     manual_record_count = len(_manual_records_from_session(session))
     if confirmed_ai_count + manual_record_count == 0:
         blockers.append({"code": "NO_CONFIRMED_RECORDS", "message": "尚未形成已确认 AI 记录或手工审核记录"})
-    for draft in session.drafts:
-        if draft.status != "draft": continue
-        risk = str((draft.quality or {}).get("risk_level", "")).lower(); missing = bool((draft.quality or {}).get("attachment_missing")); insufficient = (draft.quality or {}).get("level") == "insufficient"
-        if risk in {"high", "a", "高风险"} and insufficient: blockers.append({"code": "HIGH_RISK_EVIDENCE", "draft_id": str(draft.id), "message": f"高风险条款 {draft.primary_clause_no} 证据不足"})
-        elif missing: blockers.append({"code": "ATTACHMENT_REQUIRED", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 缺少必传附件"})
-        elif str(draft.evaluation) == "3": blockers.append({"code": "NC_UNCONFIRMED", "draft_id": str(draft.id), "message": f"不符合条款 {draft.primary_clause_no} 尚未确认"})
-        else: blockers.append({"code": "DRAFT_PENDING", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 尚未确认"})
-    return {"passed": not blockers, "blockers": blockers, "warnings": warnings, "blocking_count": len(blockers), "warning_count": len(warnings), "confirmed_ai_count": confirmed_ai_count, "manual_record_count": manual_record_count, "confirmed_record_count": confirmed_ai_count + manual_record_count}
+    for draft in (session.drafts or []):
+        if draft.status != "draft":
+            continue
+        risk = str((draft.quality or {}).get("risk_level", "")).lower()
+        missing = bool((draft.quality or {}).get("attachment_missing"))
+        insufficient = (draft.quality or {}).get("level") == "insufficient"
+        if risk in {"high", "a", "高风险"} and insufficient:
+            blockers.append({"code": "HIGH_RISK_EVIDENCE", "draft_id": str(draft.id), "message": f"高风险条款 {draft.primary_clause_no} 证据不足"})
+        elif missing:
+            blockers.append({"code": "ATTACHMENT_REQUIRED", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 缺少必传附件"})
+        elif str(draft.evaluation) == "3":
+            blockers.append({"code": "NC_UNCONFIRMED", "draft_id": str(draft.id), "message": f"不符合条款 {draft.primary_clause_no} 尚未确认"})
+        else:
+            blockers.append({"code": "DRAFT_PENDING", "draft_id": str(draft.id), "message": f"条款 {draft.primary_clause_no} 尚未确认"})
+
+    # 检查模板检查项完整覆盖率
+    template_id = (getattr(session, "context_snapshot", None) or {}).get("template_id")
+    total_items_count = 0
+    covered_items_count = 0
+    uncovered_items = []
+
+    if db and template_id:
+        try:
+            stmt = select(TemplateItem).where(
+                TemplateItem.template_id == UUID(template_id),
+                TemplateItem.is_category.is_not(True),
+                TemplateItem.is_deleted == False
+            ).order_by(TemplateItem.sort_order)
+            template_items = (await db.execute(stmt)).scalars().all()
+            total_items_count = len(template_items)
+
+            # 收集所有已确认记录覆盖的 template_item_id
+            confirmed_ti_ids = set()
+            for draft in (getattr(session, "drafts", []) or []):
+                if getattr(draft, "status", None) == "confirmed":
+                    ti_id = (getattr(draft, "record_payload", {}) or {}).get("template_item_id")
+                    if ti_id:
+                        confirmed_ti_ids.add(str(ti_id))
+            for sub in (getattr(session, "submissions", []) or []):
+                man = (getattr(sub, "source_snapshot", {}) or {}).get("manual_record") or {}
+                ti_id = man.get("template_item_id")
+                if ti_id:
+                    confirmed_ti_ids.add(str(ti_id))
+
+            for ti in template_items:
+                if str(ti.id) in confirmed_ti_ids:
+                    covered_items_count += 1
+                else:
+                    uncovered_items.append({
+                        "id": str(ti.id),
+                        "title": ti.title or "检查项",
+                        "is_required": bool(ti.is_required),
+                    })
+
+            if total_items_count > 0 and uncovered_items:
+                uncovered_names = [it["title"][:20] for it in uncovered_items[:3]]
+                more_suffix = f" 等 {len(uncovered_items)} 项" if len(uncovered_items) > 3 else ""
+                blockers.append({
+                    "code": "ITEMS_INCOMPLETE",
+                    "message": f"模板包含 {total_items_count} 项检查，尚有 {len(uncovered_items)} 项未完成审核（未完成：{', '.join(uncovered_names)}{more_suffix}）",
+                    "total_items": total_items_count,
+                    "covered_items": covered_items_count,
+                    "uncovered_items": uncovered_items,
+                })
+        except Exception as exc:
+            print(f"[_session_quality] query template items error: {exc}")
+    elif total_items_count == 0 and (confirmed_ai_count + manual_record_count) > 0:
+        covered_items_count = confirmed_ai_count + manual_record_count
+
+    return {
+        "passed": not blockers,
+        "blockers": blockers,
+        "warnings": warnings,
+        "blocking_count": len(blockers),
+        "warning_count": len(warnings),
+        "confirmed_ai_count": confirmed_ai_count,
+        "manual_record_count": manual_record_count,
+        "confirmed_record_count": confirmed_ai_count + manual_record_count,
+        "template_total_items": total_items_count,
+        "template_covered_items": covered_items_count,
+        "uncovered_items": uncovered_items,
+    }
 
 
 async def perform_draft_confirmation(
@@ -1230,12 +1324,12 @@ async def confirm_drafts(
 
 @router.post("/{project_id}/sessions/{session_id}/quality-check")
 async def session_quality(project_id: UUID, session_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await ensure_project_access(db, project_id, current_user); return response(await _session_quality(await _load_session(db, project_id, session_id, True)))
+    await ensure_project_access(db, project_id, current_user); return response(await _session_quality(await _load_session(db, project_id, session_id, True), db))
 
 
 @router.post("/{project_id}/sessions/{session_id}/submit")
 async def submit_session(project_id: UUID, session_id: UUID, payload: dict[str, Any] = Body(...), db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await ensure_project_access(db, project_id, current_user); session=await _load_session(db, project_id, session_id, True); check=await _session_quality(session)
+    await ensure_project_access(db, project_id, current_user); session=await _load_session(db, project_id, session_id, True); check=await _session_quality(session, db)
     if session.status == "completed":
         return response(session_dict(session, True), "审核记录已提交")
     if check["blockers"]: raise HTTPException(status_code=409, detail={"message":"存在阻断项，不能提交","quality_check":check})
