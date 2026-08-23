@@ -591,15 +591,14 @@ body {
 }
 
 .sidebar-logo {
-  height: var(--header-height, 64px);
+  height: 64px;
   display: flex;
   align-items: center;
-  padding: 0 16px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  padding: 0 18px;
+  border-bottom: 1px solid #f1f5f9;
   background: #ffffff;
   overflow: hidden;
   box-sizing: border-box;
-  transition: all 0.2s ease;
 }
 
 .sidebar-logo.collapsed {
@@ -616,18 +615,16 @@ body {
 }
 
 .header-container {
-  padding: 0 20px;
-  background: linear-gradient(90deg, #ffffff 0%, #f8fafc 60%, #f0fdfa 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 0 24px;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
   z-index: 9;
   position: sticky;
   top: 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.85);
+  border-bottom: 1px solid #f1f5f9;
   height: 64px;
 }
 
@@ -636,13 +633,13 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 12px;
-  border-radius: var(--border-radius-sm);
-  transition: var(--transition);
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
 }
 
 .user-dropdown-trigger:hover {
-  background: rgba(226, 232, 240, 0.6) !important;
+  background: #f8fafc !important;
 }
 
 .user-dropdown-trigger .user-name {

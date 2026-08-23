@@ -132,42 +132,35 @@ export default function MainLayout() {
             gap: 10,
             width: '100%',
             overflow: 'hidden',
-            paddingLeft: collapsed ? 0 : 4,
           }}>
-            <EasyAuditLogoIcon size={32} style={{ flexShrink: 0 }} />
+            <EasyAuditLogoIcon size={34} style={{ flexShrink: 0 }} />
             {!collapsed && (
-              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.2 }}>
-                  <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.2 }}>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
                     易审通
                   </span>
                   <span style={{
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: 700,
                     color: '#2563eb',
-                    background: 'rgba(37, 99, 235, 0.08)',
-                    border: '1px solid rgba(37, 99, 235, 0.18)',
-                    borderRadius: 4,
-                    padding: '1px 5px',
-                    fontFamily: 'Inter, system-ui, sans-serif',
-                    lineHeight: 1.2,
-                    letterSpacing: '0.03em',
-                    whiteSpace: 'nowrap',
+                    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                    letterSpacing: '0.02em',
                   }}>
                     EasyAudit
                   </span>
                 </div>
                 <div style={{
                   fontSize: 11,
-                  color: '#64748b',
+                  color: '#94a3b8',
                   fontWeight: 500,
-                  marginTop: 3,
+                  marginTop: 2,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   letterSpacing: '0.02em',
                 }}>
-                  智能审核协同云平台
+                  认证审核智能云平台
                 </div>
               </div>
             )}
@@ -216,158 +209,110 @@ export default function MainLayout() {
       </Sider>
       <Layout>
         <Header className="header-container">
-          {/* 左侧：折叠按钮 + Slogan 品牌胶囊横幅 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* 左侧：折叠按钮 + Slogan 优雅排版（无生硬方框，纯净融合） */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <Button
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined style={{ fontSize: 16 }} /> : <MenuFoldOutlined style={{ fontSize: 16 }} />}
               onClick={toggleCollapsed}
               style={{
-                width: 34,
-                height: 34,
+                width: 32,
+                height: 32,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: '#64748b',
                 borderRadius: 6,
+                padding: 0,
               }}
             />
 
-            {/* Slogan 品牌胶囊横幅 */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'linear-gradient(90deg, rgba(37, 99, 235, 0.07) 0%, rgba(6, 182, 212, 0.07) 100%)',
-              border: '1px solid rgba(37, 99, 235, 0.15)',
-              borderRadius: 20,
-              padding: '4px 14px',
-            }}>
-              <span style={{ fontSize: 13, display: 'flex', alignItems: 'center' }}>✨</span>
+            {/* Slogan 品牌排版 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, userSelect: 'none' }}>
               <span style={{
-                fontSize: 13,
-                fontWeight: 700,
-                background: 'linear-gradient(135deg, #1d4ed8 0%, #0284c7 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                letterSpacing: '0.02em',
-                whiteSpace: 'nowrap',
+                fontSize: 14,
+                fontWeight: 600,
+                color: '#1e293b',
+                letterSpacing: '0.01em',
               }}>
                 让每一次审核都简单高效
               </span>
-              <span style={{ width: 1, height: 12, background: 'rgba(37, 99, 235, 0.2)' }} />
-              <span style={{ fontSize: 11, color: '#64748b', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                新一代认证审核与现场评审智能云平台
+              <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 300 }}>/</span>
+              <span style={{
+                fontSize: 12,
+                color: '#64748b',
+                fontWeight: 400,
+              }}>
+                新一代认证审核与现场评审智能协同系统
               </span>
             </div>
           </div>
 
-          {/* 中间/右侧前：核心状态与能力徽章（消除空白） */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* 智审状态 */}
+          {/* 右侧：纯净状态指示器 + 分割线 + 用户信息（去方框化，轻盈一体） */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {/* 系统服务在线呼吸灯 */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              background: '#f0fdf4',
-              border: '1px solid #bbf7d0',
-              borderRadius: 6,
-              padding: '3px 10px',
               fontSize: 12,
-              color: '#166534',
-              fontWeight: 600,
+              color: '#059669',
+              fontWeight: 500,
             }}>
               <div style={{
-                width: 7,
-                height: 7,
+                width: 6,
+                height: 6,
                 borderRadius: '50%',
-                background: '#22c55e',
-                boxShadow: '0 0 6px rgba(34, 197, 94, 0.6)',
+                background: '#10b981',
+                boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)',
               }} />
-              <span>智审 Agent 在线</span>
+              <span>智审服务在线</span>
             </div>
 
-            {/* 质量门禁 */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: 6,
-              padding: '3px 10px',
-              fontSize: 12,
-              color: '#1e40af',
-              fontWeight: 500,
-            }}>
-              <span>🛡️ 6重质量门禁已就绪</span>
-            </div>
+            <div style={{ width: 1, height: 16, background: '#e2e8f0' }} />
 
-            {/* 知识检索 */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: '#faf5ff',
-              border: '1px solid #e9d5ff',
-              borderRadius: 6,
-              padding: '3px 10px',
-              fontSize: 12,
-              color: '#6b21a8',
-              fontWeight: 500,
-            }}>
-              <span>⚡ RAG 语义索引就绪</span>
-            </div>
-          </div>
-
-          {/* 右侧：用户下拉 */}
-          <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
-            <div className="user-dropdown-trigger" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              cursor: 'pointer',
-              padding: '5px 12px',
-              borderRadius: 8,
-              background: 'rgba(241, 245, 249, 0.8)',
-              border: '1px solid rgba(226, 232, 240, 0.85)',
-              transition: 'all 0.2s',
-            }}>
-              <Avatar
-                style={{
-                  background: 'linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)',
-                  boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)',
-                  flexShrink: 0,
-                  fontWeight: 700,
-                }}
-                size={34}
-              >
-                {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
-              </Avatar>
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                lineHeight: 1.25,
-              }}>
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#0f172a',
-                  whiteSpace: 'nowrap',
+            {/* 用户下拉菜单 */}
+            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
+              <div className="user-dropdown-trigger">
+                <Avatar
+                  style={{
+                    background: 'linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)',
+                    boxShadow: '0 1px 4px rgba(37, 99, 235, 0.25)',
+                    flexShrink: 0,
+                    fontWeight: 700,
+                  }}
+                  size={32}
+                >
+                  {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
+                </Avatar>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
                 }}>
-                  {user?.full_name || user?.username || '用户'}
-                </span>
-                <span style={{
-                  fontSize: 11,
-                  color: '#2563eb',
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                }}>
-                  {roleLabel(user?.role)}
-                </span>
+                  <span style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#1e293b',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {user?.full_name || user?.username || '用户'}
+                  </span>
+                  <span style={{
+                    fontSize: 11,
+                    color: '#2563eb',
+                    background: '#eff6ff',
+                    fontWeight: 600,
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {roleLabel(user?.role)}
+                  </span>
+                </div>
               </div>
-            </div>
-          </Dropdown>
+            </Dropdown>
+          </div>
         </Header>
         <Content className="site-layout-content">
           <Outlet />
