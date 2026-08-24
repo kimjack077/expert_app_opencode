@@ -154,28 +154,35 @@ async def get_task(
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized to view this task")
 
-    # 兼容历史数据：任务未写 template_id 时，尝试从关联审核计划项回填
-    if not task.template_id:
-        try:
-            from app.models.audit_project import AuditPlanItem
+    # 查询关联的审核计划项信息，并兼容回填缺失的 template_id
+    plan_item = None
+    try:
+        from app.models.audit_project import AuditPlanItem
 
-            task_uuid = UUID(str(task_id))
-            plan_result = await db.execute(
-                select(AuditPlanItem).where(
-                    AuditPlanItem.inspection_task_id == task_uuid,
-                    AuditPlanItem.is_deleted == False,  # noqa: E712
-                )
+        task_uuid = UUID(str(task_id))
+        plan_result = await db.execute(
+            select(AuditPlanItem).where(
+                AuditPlanItem.inspection_task_id == task_uuid,
+                AuditPlanItem.is_deleted == False,  # noqa: E712
             )
-            plan_item = plan_result.scalar_one_or_none()
-            if plan_item and plan_item.template_id:
-                task.template_id = plan_item.template_id
-                await db.commit()
-                await db.refresh(task)
-        except Exception:
-            # 回填失败不影响任务详情返回
-            pass
+        )
+        plan_item = plan_result.scalar_one_or_none()
+        if plan_item and not task.template_id and plan_item.template_id:
+            task.template_id = plan_item.template_id
+            await db.commit()
+            await db.refresh(task)
+    except Exception:
+        # 容错处理
+        pass
 
-    return make_response(data=InspectionTaskResponse.model_validate(task).model_dump())
+    data = InspectionTaskResponse.model_validate(task).model_dump()
+    if plan_item:
+        data["audit_project_id"] = plan_item.project_id
+        data["plan_item_id"] = plan_item.id
+        data["area_name"] = plan_item.area_name
+        data["clauses"] = plan_item.clauses
+
+    return make_response(data=data)
 
 
 @router.put("/{task_id}", response_model=ApiResponse)

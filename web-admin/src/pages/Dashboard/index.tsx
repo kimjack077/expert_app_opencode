@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
-import { Row, Col, Card, Statistic, Progress, Table, Tag, Space, Button, DatePicker, Select, message } from 'antd'
+import { useState, useEffect, useMemo } from 'react'
+import { Row, Col, Card, Progress, Table, Tag, Space, Button, DatePicker, Tooltip, message } from 'antd'
 import {
   CheckCircleOutlined,
-  CloseCircleOutlined,
   ClockCircleOutlined,
   UserOutlined,
   FileTextOutlined,
@@ -12,16 +11,23 @@ import {
   SafetyCertificateOutlined,
   DownloadOutlined,
   CalendarOutlined,
+  AppstoreOutlined,
+  AuditOutlined,
+  ScheduleOutlined,
+  BookOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { analyticsApi, taskApi } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
 import { formatTaskDisplay } from '@/utils/display'
+import { useAuthStore } from '@/stores/auth'
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [stats, setStats] = useState<any>(null)
   const [recentTasks, setRecentTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +52,7 @@ export default function Dashboard() {
     try {
       const [dashboardRes, tasksRes, riskRes]: any[] = await Promise.all([
         analyticsApi.getDashboard(),
-        taskApi.getTasks({ limit: 10 }),
+        taskApi.getTasks({ limit: 8 }),
         analyticsApi.getEnterpriseRisk(),
       ])
       setStats(dashboardRes.data)
@@ -78,7 +84,7 @@ export default function Dashboard() {
         start_date: dateRange[0].format('YYYY-MM-DD'),
         end_date: dateRange[1].format('YYYY-MM-DD'),
       })
-      
+
       const csvContent = generateCSV(res.data.items)
       downloadCSV(csvContent, `检查数据导出_${dayjs().format('YYYY-MM-DD_HHmmss')}.csv`)
       message.success({ content: '数据导出成功', key: 'export' })
@@ -89,7 +95,7 @@ export default function Dashboard() {
 
   const generateCSV = (data: any[]) => {
     const headers = ['任务编号', '任务标题', '被检查对象', '状态', '创建时间', '完成时间', '合规项数', '不合规项数']
-    const rows = data.map(item => [
+    const rows = (data || []).map((item) => [
       item.task_no,
       item.title,
       item.target_name,
@@ -99,7 +105,7 @@ export default function Dashboard() {
       item.compliant_items,
       item.non_compliant_items,
     ])
-    return [headers, ...rows].map(row => row.join(',')).join('\n')
+    return [headers, ...rows].map((row) => row.join(',')).join('\n')
   }
 
   const downloadCSV = (content: string, filename: string) => {
@@ -120,86 +126,64 @@ export default function Dashboard() {
       cancelled: { color: 'error', text: '已取消' },
     }
     const item = statusMap[status] || { color: 'default', text: status }
-    return <Tag color={item.color}>{item.text}</Tag>
+    return <Tag color={item.color} style={{ margin: 0 }}>{item.text}</Tag>
   }
-
-  const pendingTodos = (recentTasks || []).filter((t) => t.status === 'pending' || t.status === 'in_progress')
-  const todoCards = [
-    {
-      title: '待开始 / 进行中任务',
-      value: pendingTodos.length,
-      action: () => navigate('/tasks?status=in_progress'),
-      color: '#0369a1',
-      hint: '点击进入日常检查任务',
-    },
-    {
-      title: '高风险企业',
-      value: enterpriseRisk?.high || enterpriseRisk?.high_risk || 0,
-      action: () => navigate('/enterprises'),
-      color: '#dc2626',
-      hint: '优先安排现场复核',
-    },
-    {
-      title: '中风险企业',
-      value: enterpriseRisk?.medium || enterpriseRisk?.medium_risk || 0,
-      action: () => navigate('/enterprises'),
-      color: '#d97706',
-      hint: '关注整改闭环',
-    },
-    {
-      title: '审核项目',
-      value: '进入',
-      action: () => navigate('/audit-projects'),
-      color: '#0f766e',
-      hint: '计划 · 现场 · 交付',
-    },
-  ]
 
   const columns = [
     {
-      title: '任务',
+      title: '任务名称',
       key: 'display',
       render: (_: any, record: any) => {
         const d = formatTaskDisplay(record)
         return (
-          <div>
-            <div style={{ fontWeight: 600 }}>{d.primary}</div>
-            <div style={{ fontSize: 12, color: '#64748b' }}>{d.secondary || record.task_no}</div>
+          <div style={{ lineHeight: 1.3 }}>
+            <div style={{ fontWeight: 600, color: '#1e293b', fontSize: 13 }}>{d.primary}</div>
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1 }}>{d.secondary || record.task_no}</div>
           </div>
         )
       },
     },
     {
-      title: '企业/对象',
+      title: '受审对象',
       dataIndex: 'target_name',
       key: 'target_name',
-      width: 150,
+      width: 140,
       ellipsis: true,
-      render: (v: string) => v || '-',
+      render: (v: string) => (
+        <span style={{ fontSize: 12, color: '#475569' }}>{v || '-'}</span>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 80,
       render: (status: string) => getStatusTag(status),
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 160,
-      render: (date: string) => new Date(date).toLocaleString('zh-CN'),
+      width: 120,
+      render: (date: string) => (
+        <span style={{ fontSize: 11, color: '#64748b' }}>
+          {dayjs(date).format('MM-DD HH:mm')}
+        </span>
+      ),
     },
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 70,
       render: (_: any, record: any) => (
         <Button
           type="link"
           size="small"
-          onClick={() => navigate(record.status === 'completed' ? `/tasks/${record.id}` : `/inspection/${record.id}`)}
+          style={{ padding: 0, height: 'auto', fontSize: 12 }}
+          onClick={(e) => {
+            e.stopPropagation()
+            navigate(record.status === 'completed' ? `/tasks/${record.id}` : `/inspection/${record.id}`)
+          }}
         >
           {record.status === 'completed' ? '查看' : record.status === 'pending' ? '开始' : '继续'}
         </Button>
@@ -207,572 +191,593 @@ export default function Dashboard() {
     },
   ]
 
-  const statCards = [
-    {
-      title: '总任务数',
-      value: stats?.tasks?.total || 0,
-      icon: <FileTextOutlined />,
-      color: 'var(--primary-color)',
-      bgColor: 'linear-gradient(135deg, rgba(100, 116, 139, 0.1) 0%, rgba(100, 116, 139, 0.05) 100%)',
-    },
-    {
-      title: '已完成',
-      value: stats?.tasks?.completed || 0,
-      icon: <CheckCircleOutlined />,
-      color: 'var(--success-color)',
-      bgColor: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)',
-    },
-    {
-      title: '进行中',
-      value: stats?.tasks?.in_progress || 0,
-      icon: <ClockCircleOutlined />,
-      color: 'var(--info-color)',
-      bgColor: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%)',
-    },
-    {
-      title: '合规率',
-      value: stats?.inspections?.compliance_rate || 0,
-      suffix: '%',
-      icon: <SafetyCertificateOutlined />,
-      color: 'var(--accent-color)',
-      bgColor: 'linear-gradient(135deg, rgba(249, 115, 22, 0.1) 0%, rgba(249, 115, 22, 0.05) 100%)',
-    },
-  ]
+  // KPI Metrics Calculation
+  const pendingCount = (stats?.tasks?.pending || 0) + (stats?.tasks?.in_progress || 0)
+  const totalTasks = stats?.tasks?.total || 0
+  const completedTasks = stats?.tasks?.completed || 0
+  const completionRate = stats?.tasks?.completion_rate || 0
+  const complianceRate = stats?.inspections?.compliance_rate || 0
+  const compliantItems = stats?.inspections?.compliant || 0
+  const nonCompliantItems = stats?.inspections?.non_compliant || 0
+  const totalItems = stats?.inspections?.total || 0
 
-  const maxInspectionCount = trends?.inspection_trend 
+  const highRisk = enterpriseRisk?.high || 0
+  const mediumRisk = enterpriseRisk?.medium || 0
+  const lowRisk = enterpriseRisk?.low || 0
+  const totalRiskEnterprises = highRisk + mediumRisk + lowRisk || 1
+
+  const maxInspectionCount = trends?.inspection_trend
     ? Math.max(...trends.inspection_trend.map((t: any) => t.count), 1)
     : 1
-
   const maxComplianceRate = 100
 
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">工作台</h1>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            优先处理待办事项；合规率口径 = 已填报合格项 / 已填报项
+    <div className="dashboard-container">
+      {/* 1. Light Modern Filter Header Bar */}
+      <div className="dashboard-header-bar">
+        <div className="dashboard-header-left">
+          <h1 className="dashboard-header-title">
+            工作台
+          </h1>
+          <div className="dashboard-header-desc">
+            全生命周期协同 · 优先处理待办事项（合规率口径 = 已填报合格项 / 已填报项）
           </div>
         </div>
-        <Space>
-          <RangePicker
-            value={dateRange}
-            onChange={(dates) => dates && setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs])}
-            allowClear={false}
-            placeholder={['开始日期', '结束日期']}
-          />
-          <Button 
-            type="default"
-            icon={<DownloadOutlined />}
-            onClick={handleExport}
-          >
-            导出数据
-          </Button>
-          <Button 
-            type="default"
-            icon={<RiseOutlined />}
-            onClick={() => navigate('/analytics')}
-          >
-            数据分析
-          </Button>
-        </Space>
+
+        <div className="dashboard-header-actions">
+          <Space size={6}>
+            <Button
+              size="small"
+              onClick={() => setDateRange([dayjs().subtract(7, 'days'), dayjs()])}
+            >
+              近7天
+            </Button>
+            <Button
+              size="small"
+              onClick={() => setDateRange([dayjs().subtract(30, 'days'), dayjs()])}
+            >
+              近30天
+            </Button>
+            <RangePicker
+              value={dateRange}
+              size="small"
+              onChange={(dates) => dates && setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs])}
+              allowClear={false}
+              placeholder={['开始日期', '结束日期']}
+              style={{ width: 210 }}
+            />
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={handleExport}
+            >
+              导出数据
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<RiseOutlined />}
+              onClick={() => navigate('/analytics')}
+            >
+              数据分析
+            </Button>
+          </Space>
+        </div>
       </div>
 
-      <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        {todoCards.map((card) => (
-          <Col xs={24} sm={12} lg={6} key={card.title}>
-            <Card
-              hoverable
-              bordered={false}
-              onClick={card.action}
-              style={{ cursor: 'pointer', borderTop: `3px solid ${card.color}` }}
-            >
-              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 6 }}>{card.title}</div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: card.color }}>{card.value}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{card.hint}</div>
-            </Card>
-          </Col>
-        ))}
+      {/* 2. Unified High-Density KPI Layer (1 Row, 4 Columns) */}
+      <Row gutter={[10, 10]}>
+        {/* Metric 1: Pending & Active Tasks */}
+        <Col xs={24} sm={12} lg={6}>
+          <div
+            className="dashboard-kpi-card"
+            onClick={() => navigate('/tasks?status=in_progress')}
+          >
+            <div>
+              <div className="dashboard-kpi-header">
+                <span className="dashboard-kpi-title">待办 / 进行中任务</span>
+                <div className="dashboard-kpi-icon" style={{ background: '#e0f2fe', color: '#0284c7' }}>
+                  <ClockCircleOutlined />
+                </div>
+              </div>
+              <div className="dashboard-kpi-body">
+                <span className="dashboard-kpi-value" style={{ color: '#0369a1' }}>
+                  {pendingCount}
+                </span>
+                <Tag color={pendingCount > 0 ? 'processing' : 'default'} style={{ margin: 0, fontSize: 11 }}>
+                  {pendingCount > 0 ? '待推进' : '全部就绪'}
+                </Tag>
+              </div>
+            </div>
+            <div className="dashboard-kpi-footer">
+              <span>进行中 {stats?.tasks?.in_progress || 0} · 待开始 {stats?.tasks?.pending || 0}</span>
+              <span style={{ color: '#0284c7', fontWeight: 600 }}>去处理 →</span>
+            </div>
+          </div>
+        </Col>
+
+        {/* Metric 2: Audit Tasks & Completion */}
+        <Col xs={24} sm={12} lg={6}>
+          <div
+            className="dashboard-kpi-card"
+            onClick={() => navigate('/audit-projects')}
+          >
+            <div>
+              <div className="dashboard-kpi-header">
+                <span className="dashboard-kpi-title">审核任务总览</span>
+                <div className="dashboard-kpi-icon" style={{ background: '#ccfbf1', color: '#0d9488' }}>
+                  <FileTextOutlined />
+                </div>
+              </div>
+              <div className="dashboard-kpi-body">
+                <span className="dashboard-kpi-value" style={{ color: '#0f766e' }}>
+                  {totalTasks}
+                </span>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>完成率 </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0d9488' }}>{completionRate}%</span>
+                </div>
+              </div>
+            </div>
+            <div className="dashboard-kpi-footer">
+              <span>已完成 {completedTasks} / {totalTasks} 项</span>
+              <span style={{ color: '#0d9488', fontWeight: 600 }}>项目库 →</span>
+            </div>
+          </div>
+        </Col>
+
+        {/* Metric 3: Overall Compliance Rate */}
+        <Col xs={24} sm={12} lg={6}>
+          <div
+            className="dashboard-kpi-card"
+            onClick={() => navigate('/records')}
+          >
+            <div>
+              <div className="dashboard-kpi-header">
+                <span className="dashboard-kpi-title">综合检查合规率</span>
+                <div className="dashboard-kpi-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
+                  <SafetyCertificateOutlined />
+                </div>
+              </div>
+              <div className="dashboard-kpi-body">
+                <span className="dashboard-kpi-value" style={{ color: '#15803d' }}>
+                  {complianceRate}%
+                </span>
+                <Tag color={complianceRate >= 80 ? 'success' : complianceRate >= 60 ? 'warning' : 'error'} style={{ margin: 0, fontSize: 11 }}>
+                  {complianceRate >= 80 ? '达标' : '预警'}
+                </Tag>
+              </div>
+            </div>
+            <div className="dashboard-kpi-footer">
+              <span>合格 {compliantItems} · 不合规 {nonCompliantItems}</span>
+              <span style={{ color: '#16a34a', fontWeight: 600 }}>记录明细 →</span>
+            </div>
+          </div>
+        </Col>
+
+        {/* Metric 4: Enterprise Risk Warnings */}
+        <Col xs={24} sm={12} lg={6}>
+          <div
+            className="dashboard-kpi-card"
+            onClick={() => navigate('/enterprises')}
+          >
+            <div>
+              <div className="dashboard-kpi-header">
+                <span className="dashboard-kpi-title">风险预警企业</span>
+                <div className="dashboard-kpi-icon" style={{ background: '#fee2e2', color: '#dc2626' }}>
+                  <BankOutlined />
+                </div>
+              </div>
+              <div className="dashboard-kpi-body">
+                <span className="dashboard-kpi-value" style={{ color: highRisk > 0 ? '#dc2626' : '#d97706' }}>
+                  {highRisk + mediumRisk}
+                </span>
+                <Space size={4}>
+                  {highRisk > 0 && (
+                    <Tag color="error" style={{ margin: 0, fontSize: 10, padding: '0 4px' }}>
+                      高风险 {highRisk}
+                    </Tag>
+                  )}
+                  {mediumRisk > 0 && (
+                    <Tag color="warning" style={{ margin: 0, fontSize: 10, padding: '0 4px' }}>
+                      中风险 {mediumRisk}
+                    </Tag>
+                  )}
+                </Space>
+              </div>
+            </div>
+            <div className="dashboard-kpi-footer">
+              <span>企业总库 {stats?.enterprises?.total || (highRisk + mediumRisk + lowRisk)} 家</span>
+              <span style={{ color: '#dc2626', fontWeight: 600 }}>风险排查 →</span>
+            </div>
+          </div>
+        </Col>
       </Row>
 
-      {stats && (
-        <>
-          <Row gutter={[16, 16]}>
-            {statCards.map((card, index) => (
-              <Col xs={24} sm={12} lg={6} key={index}>
-                <Card 
-                  className="stat-card" 
-                  bordered={false}
-                  style={{ background: card.bgColor }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                    <div>
-                      <div style={{ 
-                        color: 'var(--text-muted)', 
-                        fontSize: 14,
-                        marginBottom: 8,
-                        fontWeight: 500,
-                      }}>
-                        {card.title}
-                      </div>
-                      <div style={{ 
-                        fontSize: 32, 
-                        fontWeight: 700,
-                        color: card.color,
-                        lineHeight: 1,
-                      }}>
-                        {card.value}{card.suffix || ''}
-                      </div>
-                    </div>
-                    <div style={{
-                      width: 48,
-                      height: 48,
-                      background: card.color,
-                      borderRadius: 12,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: `0 4px 12px ${card.color}40`,
-                    }}>
-                      {card.icon && <span style={{ fontSize: 24, color: 'white' }}>{card.icon}</span>}
-                    </div>
+      {/* 3. Dual Column High-Density Workstation */}
+      <Row gutter={[10, 10]}>
+        {/* Left Column (15/24): Trends + Recent Tasks Table */}
+        <Col xs={24} lg={15} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Trends Monitor */}
+          <Card
+            className="dashboard-section-card"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <RiseOutlined style={{ color: 'var(--primary-color)' }} />
+                <span>检查与合规趋势态势</span>
+              </div>
+            }
+            extra={
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                最近 14 日走势
+              </span>
+            }
+            bordered={false}
+            loading={!trends}
+          >
+            {trends && (
+              <Row gutter={16}>
+                {/* Left Mini Chart: Inspection Volume */}
+                <Col span={12} style={{ borderRight: '1px solid #f1f5f9', paddingRight: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>每日检查频次</span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>峰值: {maxInspectionCount} 次</span>
                   </div>
-                </Card>
-              </Col>
-            ))}
-          </Row>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    height: 100,
+                    gap: 3,
+                    paddingTop: 8,
+                  }}>
+                    {trends.inspection_trend.slice(-14).map((item: any, idx: number) => {
+                      const pct = (item.count / maxInspectionCount) * 100
+                      return (
+                        <Tooltip key={idx} title={`${item.date} : 检查 ${item.count} 次`}>
+                          <div style={{
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            height: '100%',
+                            justifyContent: 'flex-end',
+                            cursor: 'pointer',
+                          }}>
+                            <div style={{
+                              width: '100%',
+                              height: `${pct}%`,
+                              minHeight: item.count > 0 ? 4 : 2,
+                              background: 'linear-gradient(180deg, #0284c7 0%, #38bdf8 100%)',
+                              borderRadius: '3px 3px 0 0',
+                              transition: 'all 0.2s ease',
+                            }} />
+                            <div style={{
+                              fontSize: 9,
+                              color: '#94a3b8',
+                              marginTop: 3,
+                              transform: 'scale(0.85)',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {item.date.slice(5)}
+                            </div>
+                          </div>
+                        </Tooltip>
+                      )
+                    })}
+                  </div>
+                </Col>
 
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col xs={24} lg={12}>
-              <Card 
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <FileTextOutlined style={{ color: 'var(--primary-color)' }} />
-                    <span>任务完成进度</span>
+                {/* Right Mini Chart: Compliance Rate */}
+                <Col span={12} style={{ paddingLeft: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>合规率走势 (%)</span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>基准: 100%</span>
                   </div>
-                }
-                bordered={false}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    height: 100,
+                    gap: 3,
+                    paddingTop: 8,
+                  }}>
+                    {trends.compliance_trend.slice(-14).map((item: any, idx: number) => {
+                      const pct = (item.rate / maxComplianceRate) * 100
+                      const barColor = item.rate >= 80
+                        ? 'linear-gradient(180deg, #10b981 0%, #34d399 100%)'
+                        : item.rate >= 60
+                          ? 'linear-gradient(180deg, #f59e0b 0%, #fbbf24 100%)'
+                          : 'linear-gradient(180deg, #ef4444 0%, #f87171 100%)'
+                      return (
+                        <Tooltip key={idx} title={`${item.date} : 合规率 ${item.rate}%`}>
+                          <div style={{
+                            flex: 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            height: '100%',
+                            justifyContent: 'flex-end',
+                            cursor: 'pointer',
+                          }}>
+                            <div style={{
+                              width: '100%',
+                              height: `${pct}%`,
+                              minHeight: 4,
+                              background: barColor,
+                              borderRadius: '3px 3px 0 0',
+                              transition: 'all 0.2s ease',
+                            }} />
+                            <div style={{
+                              fontSize: 9,
+                              color: '#94a3b8',
+                              marginTop: 3,
+                              transform: 'scale(0.85)',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {item.date.slice(5)}
+                            </div>
+                          </div>
+                        </Tooltip>
+                      )
+                    })}
+                  </div>
+                </Col>
+              </Row>
+            )}
+          </Card>
+
+          {/* Recent Tasks Compact Table */}
+          <Card
+            className="dashboard-section-card"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <ClockCircleOutlined style={{ color: 'var(--primary-color)' }} />
+                <span>最近审核任务</span>
+              </div>
+            }
+            extra={
+              <Button
+                type="link"
+                size="small"
+                onClick={() => navigate('/tasks')}
+                style={{ padding: 0, display: 'flex', alignItems: 'center', gap: 2, fontSize: 12 }}
               >
-                <div style={{ marginBottom: 24 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>完成率</span>
-                    <span style={{ fontWeight: 600, color: 'var(--primary-color)' }}>
-                      {stats.tasks.completion_rate}%
-                    </span>
-                  </div>
-                  <Progress
-                    percent={stats.tasks.completion_rate}
-                    strokeColor={{
-                      '0%': 'var(--primary-color)',
-                      '100%': 'var(--accent-color)',
+                全部任务 <ArrowRightOutlined />
+              </Button>
+            }
+            loading={loading}
+            bordered={false}
+          >
+            <Table
+              dataSource={recentTasks}
+              columns={columns}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              onRow={(record) => ({
+                onClick: () => navigate(`/tasks/${record.id}`),
+                style: { cursor: 'pointer' },
+              })}
+            />
+          </Card>
+        </Col>
+
+        {/* Right Column (9/24): Quick Actions + Risk Meters + Inspection Health */}
+        <Col xs={24} lg={9} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* Quick Operations 2x2 Tiles */}
+          <Card
+            className="dashboard-section-card"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AppstoreOutlined style={{ color: 'var(--primary-color)' }} />
+                <span>常用工作流</span>
+              </div>
+            }
+            bordered={false}
+          >
+            <div className="dashboard-quick-grid">
+              <div
+                className="dashboard-quick-tile"
+                onClick={() => navigate('/audit-projects')}
+              >
+                <div className="dashboard-tile-icon" style={{ background: '#eff6ff', color: '#2563eb' }}>
+                  <AuditOutlined />
+                </div>
+                <div>
+                  <div className="dashboard-tile-title">审核项目</div>
+                  <div className="dashboard-tile-desc">策划 · 现场 · 交付</div>
+                </div>
+              </div>
+
+              <div
+                className="dashboard-quick-tile"
+                onClick={() => navigate('/my-audit-tasks')}
+              >
+                <div className="dashboard-tile-icon" style={{ background: '#f0fdf4', color: '#16a34a' }}>
+                  <ScheduleOutlined />
+                </div>
+                <div>
+                  <div className="dashboard-tile-title">我的任务</div>
+                  <div className="dashboard-tile-desc">现场检查快捷录入</div>
+                </div>
+              </div>
+
+              <div
+                className="dashboard-quick-tile"
+                onClick={() => navigate('/enterprises')}
+              >
+                <div className="dashboard-tile-icon" style={{ background: '#fff7ed', color: '#ea580c' }}>
+                  <BankOutlined />
+                </div>
+                <div>
+                  <div className="dashboard-tile-title">企业档案</div>
+                  <div className="dashboard-tile-desc">风险资质全景</div>
+                </div>
+              </div>
+
+              <div
+                className="dashboard-quick-tile"
+                onClick={() => navigate('/knowledge')}
+              >
+                <div className="dashboard-tile-icon" style={{ background: '#f5f3ff', color: '#7c3aed' }}>
+                  <BookOutlined />
+                </div>
+                <div>
+                  <div className="dashboard-tile-title">智审知识库</div>
+                  <div className="dashboard-tile-desc">标准与法规检索</div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Enterprise Risk Distribution */}
+          <Card
+            className="dashboard-section-card"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BankOutlined style={{ color: '#dc2626' }} />
+                <span>企业风险分布态势</span>
+              </div>
+            }
+            extra={
+              <span style={{ fontSize: 11, color: '#64748b' }}>
+                已纳管 {stats?.enterprises?.total || (highRisk + mediumRisk + lowRisk)} 家
+              </span>
+            }
+            bordered={false}
+          >
+            <div className="dashboard-risk-meter">
+              <div className="dashboard-risk-row">
+                <span style={{ color: '#dc2626', fontWeight: 600, minWidth: 70 }}>
+                  ● 高风险 ({highRisk})
+                </span>
+                <div className="dashboard-risk-bar-bg">
+                  <div
+                    className="dashboard-risk-bar-fill"
+                    style={{
+                      width: `${(highRisk / totalRiskEnterprises) * 100}%`,
+                      background: '#ef4444',
                     }}
-                    trailColor="var(--border-color)"
                   />
                 </div>
-                <Row gutter={16}>
-                  <Col span={8}>
-                    <div style={{
-                      padding: 16,
-                      background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%)',
-                      borderRadius: 8,
-                      textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--success-color)' }}>
-                        {stats.inspections.compliant}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>合规项</div>
-                    </div>
-                  </Col>
-                  <Col span={8}>
-                    <div style={{
-                      padding: 16,
-                      background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.02) 100%)',
-                      borderRadius: 8,
-                      textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--error-color)' }}>
-                        {stats.inspections.non_compliant}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>不合规项</div>
-                    </div>
-                  </Col>
-                  <Col span={8}>
-                    <div style={{
-                      padding: 16,
-                      background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.08) 0%, rgba(100, 116, 139, 0.02) 100%)',
-                      borderRadius: 8,
-                      textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--primary-color)' }}>
-                        {stats.inspections.total}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>总检查项</div>
-                    </div>
-                  </Col>
-                </Row>
-              </Card>
-            </Col>
-            <Col xs={24} lg={12}>
-              <Card 
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <BankOutlined style={{ color: 'var(--primary-color)' }} />
-                    <span>系统概览</span>
-                  </div>
-                }
-                bordered={false}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 16,
-                    background: 'linear-gradient(90deg, rgba(100, 116, 139, 0.06) 0%, rgba(249, 115, 22, 0.06) 100%)',
-                    borderRadius: 8,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{
-                        width: 40,
-                        height: 40,
-                        background: 'linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%)',
-                        borderRadius: 10,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}>
-                        <UserOutlined style={{ color: 'white', fontSize: 18 }} />
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>系统用户</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>已注册用户数量</div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--primary-color)' }}>
-                      {stats.users.total}
-                    </div>
-                  </div>
+                <span style={{ color: '#94a3b8', fontSize: 11, width: 36, textAlign: 'right' }}>
+                  {Math.round((highRisk / totalRiskEnterprises) * 100)}%
+                </span>
+              </div>
 
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: 16,
-                    background: 'linear-gradient(90deg, rgba(100, 116, 139, 0.06) 0%, rgba(249, 115, 22, 0.06) 100%)',
-                    borderRadius: 8,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{
-                        width: 40,
-                        height: 40,
-                        background: 'linear-gradient(135deg, var(--info-color) 0%, #60A5FA 100%)',
-                        borderRadius: 10,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}>
-                        <BankOutlined style={{ color: 'white', fontSize: 18 }} />
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>企业数量</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>已录入企业信息</div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--info-color)' }}>
-                      {stats.enterprises?.total || 0}
-                    </div>
-                  </div>
-
-                  <Button 
-                    type="link" 
-                    style={{ padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}
-                    onClick={() => navigate('/enterprises')}
-                  >
-                    查看全部企业 <ArrowRightOutlined />
-                  </Button>
+              <div className="dashboard-risk-row">
+                <span style={{ color: '#d97706', fontWeight: 600, minWidth: 70 }}>
+                  ● 中风险 ({mediumRisk})
+                </span>
+                <div className="dashboard-risk-bar-bg">
+                  <div
+                    className="dashboard-risk-bar-fill"
+                    style={{
+                      width: `${(mediumRisk / totalRiskEnterprises) * 100}%`,
+                      background: '#f59e0b',
+                    }}
+                  />
                 </div>
-              </Card>
-            </Col>
-          </Row>
+                <span style={{ color: '#94a3b8', fontSize: 11, width: 36, textAlign: 'right' }}>
+                  {Math.round((mediumRisk / totalRiskEnterprises) * 100)}%
+                </span>
+              </div>
 
-          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-            <Col xs={24} lg={12}>
-              <Card 
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <RiseOutlined style={{ color: 'var(--primary-color)' }} />
-                    <span>检查趋势图</span>
-                  </div>
-                }
-                bordered={false}
-                loading={!trends}
-              >
-                {trends && (
-                  <div style={{ height: 200, position: 'relative' }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'flex-end', 
-                      height: 160, 
-                      gap: 2,
-                      paddingBottom: 20,
-                    }}>
-                      {trends.inspection_trend.slice(-14).map((item: any, index: number) => (
-                        <div key={index} style={{ 
-                          flex: 1, 
-                          display: 'flex', 
-                          flexDirection: 'column', 
-                          alignItems: 'center',
-                          height: '100%',
-                        }}>
-                          <div style={{ 
-                            width: '100%', 
-                            height: `${(item.count / maxInspectionCount) * 100}%`,
-                            minHeight: item.count > 0 ? 4 : 0,
-                            background: 'linear-gradient(180deg, var(--primary-color) 0%, var(--accent-color) 100%)',
-                            borderRadius: '4px 4px 0 0',
-                            transition: 'height 0.3s ease',
-                          }} />
-                          <div style={{ 
-                            fontSize: 10, 
-                            color: 'var(--text-muted)', 
-                            marginTop: 4,
-                            transform: 'rotate(-45deg)',
-                            transformOrigin: 'center',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {item.date.slice(5)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ 
-                      position: 'absolute', 
-                      top: 0, 
-                      right: 0,
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                    }}>
-                      最大值: {maxInspectionCount}
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </Col>
-            <Col xs={24} lg={12}>
-              <Card 
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <SafetyCertificateOutlined style={{ color: 'var(--success-color)' }} />
-                    <span>合规率趋势图</span>
-                  </div>
-                }
-                bordered={false}
-                loading={!trends}
-              >
-                {trends && (
-                  <div style={{ height: 200, position: 'relative' }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'flex-end', 
-                      height: 160, 
-                      gap: 2,
-                      paddingBottom: 20,
-                    }}>
-                      {trends.compliance_trend.slice(-14).map((item: any, index: number) => (
-                        <div key={index} style={{ 
-                          flex: 1, 
-                          display: 'flex', 
-                          flexDirection: 'column', 
-                          alignItems: 'center',
-                          height: '100%',
-                        }}>
-                          <div style={{ 
-                            width: '100%', 
-                            height: `${(item.rate / maxComplianceRate) * 100}%`,
-                            minHeight: 4,
-                            background: item.rate >= 80 
-                              ? 'linear-gradient(180deg, #10B981 0%, #34D399 100%)'
-                              : item.rate >= 60
-                                ? 'linear-gradient(180deg, #F59E0B 0%, #FBBF24 100%)'
-                                : 'linear-gradient(180deg, #EF4444 0%, #F87171 100%)',
-                            borderRadius: '4px 4px 0 0',
-                            transition: 'height 0.3s ease',
-                          }} />
-                          <div style={{ 
-                            fontSize: 10, 
-                            color: 'var(--text-muted)', 
-                            marginTop: 4,
-                            transform: 'rotate(-45deg)',
-                            transformOrigin: 'center',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {item.date.slice(5)}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{ 
-                      position: 'absolute', 
-                      top: 0, 
-                      right: 0,
-                      fontSize: 12,
-                      color: 'var(--text-muted)',
-                    }}>
-                      单位: %
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </Col>
-          </Row>
-
-          {enterpriseRisk && (
-            <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-              <Col xs={24}>
-                <Card 
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <BankOutlined style={{ color: 'var(--primary-color)' }} />
-                      <span>企业风险分布</span>
-                    </div>
-                  }
-                  bordered={false}
-                >
-                  <Row gutter={16}>
-                    <Col xs={24} sm={8}>
-                      <div style={{
-                        padding: 20,
-                        background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%)',
-                        borderRadius: 12,
-                        textAlign: 'center',
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                      }}>
-                        <div style={{ 
-                          fontSize: 36, 
-                          fontWeight: 700, 
-                          color: '#EF4444',
-                          marginBottom: 8,
-                        }}>
-                          {enterpriseRisk.high}
-                        </div>
-                        <div style={{ 
-                          fontSize: 14, 
-                          color: '#EF4444',
-                          fontWeight: 500,
-                        }}>
-                          高风险企业
-                        </div>
-                        <div style={{ 
-                          marginTop: 12,
-                          height: 4,
-                          background: '#EF4444',
-                          borderRadius: 2,
-                        }} />
-                      </div>
-                    </Col>
-                    <Col xs={24} sm={8}>
-                      <div style={{
-                        padding: 20,
-                        background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%)',
-                        borderRadius: 12,
-                        textAlign: 'center',
-                        border: '1px solid rgba(245, 158, 11, 0.2)',
-                      }}>
-                        <div style={{ 
-                          fontSize: 36, 
-                          fontWeight: 700, 
-                          color: '#F59E0B',
-                          marginBottom: 8,
-                        }}>
-                          {enterpriseRisk.medium}
-                        </div>
-                        <div style={{ 
-                          fontSize: 14, 
-                          color: '#F59E0B',
-                          fontWeight: 500,
-                        }}>
-                          中风险企业
-                        </div>
-                        <div style={{ 
-                          marginTop: 12,
-                          height: 4,
-                          background: '#F59E0B',
-                          borderRadius: 2,
-                        }} />
-                      </div>
-                    </Col>
-                    <Col xs={24} sm={8}>
-                      <div style={{
-                        padding: 20,
-                        background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)',
-                        borderRadius: 12,
-                        textAlign: 'center',
-                        border: '1px solid rgba(16, 185, 129, 0.2)',
-                      }}>
-                        <div style={{ 
-                          fontSize: 36, 
-                          fontWeight: 700, 
-                          color: '#10B981',
-                          marginBottom: 8,
-                        }}>
-                          {enterpriseRisk.low}
-                        </div>
-                        <div style={{ 
-                          fontSize: 14, 
-                          color: '#10B981',
-                          fontWeight: 500,
-                        }}>
-                          低风险企业
-                        </div>
-                        <div style={{ 
-                          marginTop: 12,
-                          height: 4,
-                          background: '#10B981',
-                          borderRadius: 2,
-                        }} />
-                      </div>
-                    </Col>
-                  </Row>
-                </Card>
-              </Col>
-            </Row>
-          )}
-        </>
-      )}
-
-      <Card 
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ClockCircleOutlined style={{ color: 'var(--primary-color)' }} />
-              <span>最近任务</span>
+              <div className="dashboard-risk-row">
+                <span style={{ color: '#16a34a', fontWeight: 600, minWidth: 70 }}>
+                  ● 低风险 ({lowRisk})
+                </span>
+                <div className="dashboard-risk-bar-bg">
+                  <div
+                    className="dashboard-risk-bar-fill"
+                    style={{
+                      width: `${(lowRisk / totalRiskEnterprises) * 100}%`,
+                      background: '#10b981',
+                    }}
+                  />
+                </div>
+                <span style={{ color: '#94a3b8', fontSize: 11, width: 36, textAlign: 'right' }}>
+                  {Math.round((lowRisk / totalRiskEnterprises) * 100)}%
+                </span>
+              </div>
             </div>
-            <Button 
-              type="link" 
-              size="small"
-              onClick={() => navigate('/tasks')}
-              style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+          </Card>
+
+          {/* Inspection Items Health Breakdown */}
+          {stats && (
+            <Card
+              className="dashboard-section-card"
+              title={
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CheckCircleOutlined style={{ color: '#16a34a' }} />
+                  <span>现场检查项体检</span>
+                </div>
+              }
+              bordered={false}
             >
-              查看全部 <ArrowRightOutlined />
-            </Button>
-          </div>
-        }
-        style={{ marginTop: 16 }} 
-        loading={loading}
-        bordered={false}
-      >
-        <Table
-          dataSource={recentTasks}
-          columns={columns}
-          rowKey="id"
-          pagination={false}
-          size="middle"
-          onRow={(record) => ({
-            onClick: () => navigate(`/tasks/${record.id}`),
-            style: { cursor: 'pointer' },
-          })}
-        />
-      </Card>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span style={{ color: '#64748b' }}>检查项达标率</span>
+                  <span style={{ fontWeight: 700, color: '#16a34a' }}>{complianceRate}%</span>
+                </div>
+                <Progress
+                  percent={complianceRate}
+                  strokeColor={{
+                    '0%': '#10b981',
+                    '100%': '#0284c7',
+                  }}
+                  trailColor="#f1f5f9"
+                  size="small"
+                />
+              </div>
+
+              <Row gutter={8}>
+                <Col span={8}>
+                  <div style={{
+                    padding: '8px 4px',
+                    background: '#f0fdf4',
+                    borderRadius: 6,
+                    textAlign: 'center',
+                    border: '1px solid #dcfce7',
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#16a34a', lineHeight: 1.1 }}>
+                      {compliantItems}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#15803d', marginTop: 2 }}>合格项</div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{
+                    padding: '8px 4px',
+                    background: '#fef2f2',
+                    borderRadius: 6,
+                    textAlign: 'center',
+                    border: '1px solid #fee2e2',
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#ef4444', lineHeight: 1.1 }}>
+                      {nonCompliantItems}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>不合格项</div>
+                  </div>
+                </Col>
+                <Col span={8}>
+                  <div style={{
+                    padding: '8px 4px',
+                    background: '#f8fafc',
+                    borderRadius: 6,
+                    textAlign: 'center',
+                    border: '1px solid #e2e8f0',
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#0369a1', lineHeight: 1.1 }}>
+                      {totalItems}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>总检查项</div>
+                  </div>
+                </Col>
+              </Row>
+            </Card>
+          )}
+        </Col>
+      </Row>
     </div>
   )
 }

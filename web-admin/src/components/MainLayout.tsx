@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Dropdown, Avatar, Button } from 'antd'
+import { Layout, Menu, Dropdown, Avatar, Button, Tooltip } from 'antd'
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -18,6 +18,7 @@ import {
   AuditOutlined,
   PieChartOutlined,
   ScheduleOutlined,
+  DownOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
@@ -129,21 +130,21 @@ export default function MainLayout() {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 9,
             width: '100%',
             overflow: 'hidden',
           }}>
-            <EasyAuditLogoIcon size={34} style={{ flexShrink: 0 }} />
+            <EasyAuditLogoIcon size={30} style={{ flexShrink: 0 }} />
             {!collapsed && (
               <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.2 }}>
-                  <span style={{ fontSize: 17, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, lineHeight: 1.1 }}>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>
                     易审通
                   </span>
                   <span style={{
                     fontSize: 11,
                     fontWeight: 700,
-                    color: '#2563eb',
+                    color: '#38bdf8',
                     fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
                     letterSpacing: '0.02em',
                   }}>
@@ -151,14 +152,15 @@ export default function MainLayout() {
                   </span>
                 </div>
                 <div style={{
-                  fontSize: 11,
+                  fontSize: 10,
                   color: '#94a3b8',
                   fontWeight: 500,
-                  marginTop: 2,
+                  marginTop: 1,
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   letterSpacing: '0.02em',
+                  lineHeight: 1,
                 }}>
                   认证审核智能云平台
                 </div>
@@ -209,106 +211,87 @@ export default function MainLayout() {
       </Sider>
       <Layout>
         <Header className="header-container">
-          {/* 左侧：折叠按钮 + Slogan 优雅排版（无生硬方框，纯净融合） */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* 左侧：折叠按钮 + 品牌 Slogan 与系统标识 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Button
               type="text"
+              className="header-toggle-btn"
               icon={collapsed ? <MenuUnfoldOutlined style={{ fontSize: 16 }} /> : <MenuFoldOutlined style={{ fontSize: 16 }} />}
               onClick={toggleCollapsed}
-              style={{
-                width: 32,
-                height: 32,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#64748b',
-                borderRadius: 6,
-                padding: 0,
-              }}
             />
 
             {/* Slogan 品牌排版 */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, userSelect: 'none' }}>
-              <span style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: '#1e293b',
-                letterSpacing: '0.01em',
-              }}>
+            <div style={{ display: 'flex', alignItems: 'center', userSelect: 'none' }}>
+              <span className="header-brand-title">
                 让每一次审核都简单高效
               </span>
-              <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 300 }}>/</span>
-              <span style={{
-                fontSize: 12,
-                color: '#64748b',
-                fontWeight: 400,
-              }}>
-                新一代认证审核与现场评审智能协同系统
+              <span className="header-brand-divider">/</span>
+              <span className="header-brand-sub">
+                新一代认证审核与现场评审智能协同云平台
               </span>
             </div>
           </div>
 
-          {/* 右侧：纯净状态指示器 + 分割线 + 用户信息（去方框化，轻盈一体） */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            {/* 系统服务在线呼吸灯 */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              fontSize: 12,
-              color: '#059669',
-              fontWeight: 500,
-            }}>
-              <div style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: '#10b981',
-                boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)',
-              }} />
+          {/* 右侧：状态指示器 + 快捷入口 + 分割线 + 用户信息 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* 系统服务在线呼吸灯胶囊 */}
+            <div className="header-status-pill">
+              <span className="pulse-dot" />
               <span>智审服务在线</span>
             </div>
 
-            <div style={{ width: 1, height: 16, background: '#e2e8f0' }} />
+            {/* 快捷知识库检索 */}
+            <Tooltip title="知识库与审核标准">
+              <Button
+                type="text"
+                className="header-icon-btn"
+                icon={<BookOutlined style={{ fontSize: 15 }} />}
+                onClick={() => navigate('/knowledge')}
+              />
+            </Tooltip>
+
+            {/* 快捷审核项目 */}
+            <Tooltip title="审核项目库">
+              <Button
+                type="text"
+                className="header-icon-btn"
+                icon={<AuditOutlined style={{ fontSize: 15 }} />}
+                onClick={() => navigate('/audit-projects')}
+              />
+            </Tooltip>
+
+            <div className="header-divider-v" />
 
             {/* 用户下拉菜单 */}
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
               <div className="user-dropdown-trigger">
                 <Avatar
                   style={{
-                    background: 'linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)',
-                    boxShadow: '0 1px 4px rgba(37, 99, 235, 0.25)',
+                    background: 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)',
+                    border: '1.5px solid rgba(255, 255, 255, 0.6)',
                     flexShrink: 0,
                     fontWeight: 700,
+                    fontSize: 13,
+                    color: '#ffffff',
                   }}
-                  size={32}
+                  size={28}
                 >
                   {user?.full_name?.[0] || user?.username?.[0]?.toUpperCase() || 'U'}
                 </Avatar>
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 6,
                 }}>
-                  <span style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: '#1e293b',
-                    whiteSpace: 'nowrap',
-                  }}>
+                  <span className="user-name-text">
                     {user?.full_name || user?.username || '用户'}
                   </span>
-                  <span style={{
-                    fontSize: 11,
-                    color: '#2563eb',
-                    background: '#eff6ff',
-                    fontWeight: 600,
-                    padding: '1px 6px',
-                    borderRadius: 4,
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {roleLabel(user?.role)}
-                  </span>
+                  {(user?.full_name || user?.username) && (user?.full_name || user?.username) !== roleLabel(user?.role) && (
+                    <span className="user-role-badge">
+                      {roleLabel(user?.role)}
+                    </span>
+                  )}
+                  <DownOutlined style={{ fontSize: 10, color: 'rgba(255, 255, 255, 0.6)', marginLeft: 2 }} />
                 </div>
               </div>
             </Dropdown>

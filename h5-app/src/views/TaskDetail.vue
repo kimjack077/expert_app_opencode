@@ -157,7 +157,8 @@
           block
           class="action-btn primary"
           style="margin-top: 10px;"
-          @click="goToTodayAudit"
+          :loading="openingAiAudit"
+          @click="openAiAuditSession"
         >
           <van-icon name="smile-comment-o" size="20" />
           <span>{{ isAuditLinkedTask ? '进入 AI 现场审核（推荐）' : '打开今日审核' }}</span>
@@ -210,6 +211,11 @@ import {
   startTask as startTaskApi,
 } from '../api/tasks.js'
 import {
+  createAuditSession,
+  getMyAuditTasks,
+  listAuditSessions,
+} from '../api/auditProjects.js'
+import {
   cacheTaskForOffline,
   formatCachedAt,
   getCachedEntry,
@@ -221,6 +227,7 @@ const router = useRouter()
 const route = useRoute()
 const task = ref(null)
 const loading = ref(true)
+const openingAiAudit = ref(false)
 
 // 出发前离线缓存
 const cachedEntry = ref(null)
@@ -420,8 +427,81 @@ const isAuditLinkedTask = computed(() => {
   return /审核|初审|监督|再认证|车间|部门/.test(title) || !!t.audit_project_id
 })
 
-const goToTodayAudit = () => {
-  router.push('/today-audit')
+const openAiAuditSession = async () => {
+  if (openingAiAudit.value) return
+
+  let projectId = task.value?.audit_project_id
+  let planItemId = task.value?.plan_item_id
+  let areaName = task.value?.area_name || task.value?.target_name
+  let clauses = task.value?.clauses
+
+  openingAiAudit.value = true
+  try {
+    // 1. 若任务详情未直接返回 project_id/plan_item_id，尝试从分配任务列表中匹配
+    if (!projectId || !planItemId) {
+      try {
+        const myTasksRes = await getMyAuditTasks({ today_only: false })
+        const items = Array.isArray(myTasksRes?.data) ? myTasksRes.data : []
+        const matched = items.find(
+          (item) =>
+            String(item.inspection_task_id) === String(task.value?.id) ||
+            String(item.id) === String(task.value?.id)
+        )
+        if (matched) {
+          projectId = matched.project_id
+          planItemId = matched.id
+          areaName = matched.area_name || areaName
+          clauses = matched.clauses || clauses
+        }
+      } catch (err) {
+        console.warn('查询我的审核任务匹配失败:', err)
+      }
+    }
+
+    // 2. 匹配到审核项目与计划项，直接进入或创建 AI 现场审核会话
+    if (projectId && planItemId) {
+      const sessionsResponse = await listAuditSessions(projectId)
+      const sessions = Array.isArray(sessionsResponse?.data) ? sessionsResponse.data : []
+      let session = sessions.find(
+        (s) => String(s.plan_item_id) === String(planItemId) && s.status === 'active'
+      )
+
+      if (!session) {
+        const created = await createAuditSession(projectId, {
+          title: `${areaName || '现场'}审核`,
+          plan_item_id: planItemId,
+          focus: Array.isArray(clauses) ? clauses.join('、') : '',
+        })
+        session = created?.data
+      }
+
+      if (session?.id) {
+        // 如果处于未开始状态，自动触发开始
+        if (task.value?.status === 'pending') {
+          try {
+            await startTaskApi(task.value.id)
+          } catch (e) {
+            console.warn('自动开始任务提示:', e)
+          }
+        }
+
+        router.push({
+          name: 'AiAuditSession',
+          params: { sessionId: session.id },
+          query: { projectId, planItemId },
+        })
+        return
+      }
+    }
+
+    // 3. 兜底方案：无法关联具体项目计划项时跳转今日审核
+    router.push('/today-audit')
+  } catch (error) {
+    console.error('进入 AI 现场审核失败:', error)
+    showToast(error?.message || '进入 AI 现场审核失败，请重试')
+  } finally {
+    openingAiAudit.value = false
+  }
 }
 
 onMounted(() => {

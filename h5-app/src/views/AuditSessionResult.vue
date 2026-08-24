@@ -55,7 +55,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section v-if="confirmedDrafts.length" class="card">
         <div class="section-title">
           <div>
             <p class="eyebrow">审核条款</p>
@@ -63,7 +63,6 @@
           </div>
           <van-tag type="success">{{ confirmedDrafts.length }} 条</van-tag>
         </div>
-        <van-empty v-if="confirmedDrafts.length === 0" description="暂无已确认的审核记录" />
         <article v-for="draft in confirmedDrafts" :key="draft.id" class="record-card">
           <div class="record-head">
             <strong>{{ clauseText(draft) }}</strong>

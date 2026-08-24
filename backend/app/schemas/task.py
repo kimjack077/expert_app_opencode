@@ -36,12 +36,16 @@ class InspectionTaskUpdate(BaseModel):
 class InspectionTaskResponse(InspectionTaskBase):
     id: UUID
     task_no: str
-    assigned_by: Optional[UUID]
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    assigned_by: Optional[UUID] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     status: str
     created_at: datetime
     updated_at: datetime
+    audit_project_id: Optional[UUID] = None
+    plan_item_id: Optional[UUID] = None
+    area_name: Optional[str] = None
+    clauses: Optional[List[str]] = None
 
     class Config:
         from_attributes = True
