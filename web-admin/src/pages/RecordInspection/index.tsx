@@ -317,7 +317,7 @@ export default function RecordInspection() {
             <span>✅ 合格：{passCount} 项</span>
             {failCount > 0 && <span style={{ color: '#ff4d4f' }}>❌ 不合格：{failCount} 项</span>}
             {pendingRectificationCount > 0 && <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>}
-            {notApplicableCount > 0 && <span style={{ color: '#999' }}>⚪ 未涉及：{notApplicableCount} 项</span>}
+            {notApplicableCount > 0 && <span style={{ color: '#999' }}>⚪ 不适用：{notApplicableCount} 项</span>}
           </div>
           <div style={{ marginBottom: 8 }}>
             <strong>最终判定：</strong>
@@ -350,7 +350,8 @@ export default function RecordInspection() {
     const file = uploadInfo.file as File
     if (!id || !currentItem) return
     try {
-      const res: any = await mediaApi.upload(file, { record_id: id })
+      // 传「检查记录项 ID」而非记录 ID，后端据此换算成任务检查项，保住照片与条目的关联
+      const res: any = await mediaApi.upload(file, { record_id: currentItem.id || id })
       const photoUrl = res.data?.file_path
       if (photoUrl) {
         const currentPhotos = currentItem.photos || []
@@ -398,7 +399,8 @@ export default function RecordInspection() {
         'pass': { color: 'success', text: '合格' },
         'fail': { color: 'error', text: '不合格' },
         'pending_rectification': { color: 'warning', text: '待整改' },
-        'not_applicable': { color: 'default', text: '未涉及' },
+        'not_applicable': { color: 'default', text: '不适用' },
+        'na': { color: 'default', text: '不适用' },
         'complete': { color: 'success', text: '全部整改完成' },
         'partial': { color: 'warning', text: '部分整改' },
         'none': { color: 'error', text: '未整改' },
@@ -542,10 +544,10 @@ export default function RecordInspection() {
                   {(currentItem.result_options?.options || currentItem.result_options || [
                     { value: 'pass', label: '合格' },
                     { value: 'fail', label: '不合格' },
-                    { value: 'not_applicable', label: '未涉及' },
+                    { value: 'not_applicable', label: '不适用' },
                   ]).map((opt: any) => (
                     <Radio.Button key={opt.value} value={opt.value}>
-                      {opt.label}
+                      {opt.label === '未涉及' ? '不适用' : opt.label}
                     </Radio.Button>
                   ))}
                 </Radio.Group>
@@ -715,7 +717,7 @@ export default function RecordInspection() {
                 </Col>
                 <Col span={4}>
                   <Card size="small" style={{ background: '#fafafa', borderColor: '#d9d9d9' }}>
-                    <Statistic title="未涉及" value={notApplicableCount} valueStyle={{ color: '#999' }} />
+                    <Statistic title="不适用" value={notApplicableCount} valueStyle={{ color: '#999' }} />
                   </Card>
                 </Col>
                 <Col span={4}>

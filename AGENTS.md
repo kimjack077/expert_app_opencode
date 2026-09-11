@@ -1,351 +1,78 @@
 # AGENTS.md
 
-Guidelines for agentic coding agents working in this repository.
+易审通 (EasyAudit) —— 面向认证机构、审核员与评审专家的认证审核 / 现场评审云平台。
+本文件是给编码 Agent 的**入口索引**：只放硬约束和导航，细节在专题文档里按需读取。
 
-## Project Overview
-
-易审通 (EasyAudit) - 一个专为认证机构、审核员与评审专家打造的认证审核与现场评审智能云平台，包含三大核心组件：
-
-- **Backend**: FastAPI (Python 3.11+) + PostgreSQL + SQLAlchemy (async) + Alembic
-- **Web Admin**: React 18 + TypeScript + Ant Design + Vite
-- **H5 Mobile App**: Vue 3 + Vant UI + Vite
-
-**关键业务能力**：
-- 审核项目全生命周期管理
-- AI Agent 辅助审核（RAG + LLM）
-- 检查模板设计与复用
-- 现场检查记录与数据采集
-- 审核报告自动生成
-- 知识库与智能问答
-
-## Build/Lint/Test Commands
-
-### Backend (FastAPI)
-
-```bash
-cd backend
-.venv\Scripts\activate                    # Windows: activate venv
-pip install -r requirements.txt           # Install dependencies
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000  # Dev server
-alembic upgrade head                      # Run migrations (仅本地运行一次)
-alembic revision --autogenerate -m "description"  # Create migration
-python -m pytest tests/ -v                # Run all tests
-python -m pytest tests/test_file.py -v    # Run single test file
-python test_all_crud.py                   # Run comprehensive CRUD tests
-```
-
-### Web Admin (React)
-
-```bash
-cd web-admin
-npm install
-npm run dev                               # Dev server (uses .env.development)
-npm run build                             # Production build (tsc && vite build)
-npx tsc --noEmit                          # Type check only
-```
-
-### H5 App (Vue 3)
-
-```bash
-cd h5-app
-npm install
-npm run dev                               # Dev server
-npm run build                             # Production build (includes type-check)
-npm run type-check                        # vue-tsc --build
-npm run format                            # oxfmt src/ (no semicolons, single quotes)
-```
-
-**Node requirement**: `^20.19.0 || >=22.12.0`
-
-## Core Modules & Routes
-
-### Backend API Modules
-
-| Module | Router | Prefix | Description |
-|--------|--------|--------|-------------|
-| Auth | auth.py | `/api/auth` | JWT 登录、注册、令牌刷新 |
-| Templates | templates.py | `/api/templates` | 检查模板 CRUD、项目管理、AI 辅助录入 |
-| Tasks | tasks.py | `/api/tasks` | 检查任务分配、进度跟踪 |
-| Records | records.py | `/api/records` | 检查记录 CRUD、项目详情、AI 建议 |
-| Audit Projects | audit_projects.py | `/api/audit-projects` | 审核项目、工作组、计划项、区域记录、不符合项 |
-| AI Agent | agent.py | `/api/agent` | AI 助手对话、检查建议 |
-| Project Agent | project_agent.py | `/api/agent/projects` | 项目级 AI 审核、文档管理、成果生成 |
-| Knowledge | knowledge.py | `/api/knowledge` | 知识库分类、文档管理、RAG 索引 |
-| Users | users.py | `/api/users` | 用户管理、角色权限 |
-| Enterprises | enterprises.py | `/api/enterprises` | 企业管理、资质信息 |
-| Industries | industries.py | `/api/industries` | 行业分类字典 |
-| Media | media.py | `/api/media` | 文件上传、图片管理 |
-| LLM | llm.py | `/api/llm` | LLM 建议生成 |
-| AI Extract | ai_extract.py | `/api/ai-extract` | AI 辅助数据提取 |
-| AI Enhanced | ai_enhanced.py | `/api/ai-enhanced` | AI 增强功能（多模态等） |
-| Analytics | analytics.py | `/api/analytics` | 数据分析统计 |
-| Statistics | statistics.py | `/api/statistics` | 审核统计报表 |
-
-### Core Services
-
-```
-services/
-├── agent_service.py          # AI 助手服务
-├── audit_agent.py            # 审核 Agent 核心逻辑
-├── evidence_agent_service.py # 证据收集 Agent
-├── llm_service.py            # LLM 调用封装
-├── multimodal_service.py     # 多模态 AI 服务
-├── rag_service.py            # RAG 知识库检索
-├── report_generator.py       # 审核报告生成
-├── report_service.py         # 报告业务逻辑
-├── project_knowledge_service.py  # 项目知识库服务
-├── project_artifact_service.py   # 项目成果管理
-├── project_document_parser.py    # 文档解析
-├── ai_extract_service.py     # AI 提取服务
-├── template_recommendation_service.py  # 模板推荐
-└── project_access_service.py # 项目访问权限控制
-```
-
-## Key Architecture Patterns
-
-### Auth
-- JWT `access_token` (8h) + `refresh_token` (30d)
-- `Depends(get_current_user)` / `Depends(get_current_admin_user)` 权限检查
-- 前端发送 `Authorization: Bearer <token>`
-
-### Soft Delete (软删除)
-- 所有业务实体使用软删除模式（标记 `is_deleted=True`，保留数据）
-- 使用 `SoftDeleteMixin` 统一添加 `is_deleted` 和 `deleted_at` 字段
-- 所有查询自动过滤 `is_deleted == False` 的记录
-- 唯一字段软删除时追加 `_deleted_<timestamp>` 后缀避免约束冲突
-- 工具函数：`app/utils/soft_delete.py`
-
-### Audit
-- 所有写操作自动记录审计日志（`AuditMiddleware`）
-- 使用 `AuditService.log_action()` 手动记录
-
-### File Uploads
-- UUID 文件名，MIME 类型验证
-- 存储路径：`uploads/`
-- 文件管理：`utils/file_handler.py`
-
-### RAG (Retrieval-Augmented Generation)
-- 知识库文档向量化存储
-- 检索增强生成，提供上下文相关的 AI 建议
-- `rag_service.py` 封装 RAG 核心逻辑
-
-### Path Aliases
-- Frontend: `@/` → `src/`
-- Backend: `app.*` → `app/`
-
-## Code Style: Python (Backend)
-
-**Imports** - Group in order, each group separated by blank line:
-1. Standard library (alphabetically)
-2. Third-party (alphabetically)
-3. Local imports (`from app.*`)
-
-```python
-from datetime import datetime
-from typing import Optional, List
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.database import get_db
-from app.models.user import User
-```
-
-**Naming**: `snake_case` functions/vars, `PascalCase` classes, `UPPER_SNAKE_CASE` constants.
-**Routers**: `router = APIRouter(prefix="/api/xxx", tags=["xxx"])`.
-**Schemas**: `*Base`, `*Create`, `*Update`, `*Response` naming; inherit from `BaseModel`; use `Field(...)` for validation; add `class Config: from_attributes = True` for response models.
-**Database**: Always async - `AsyncSession`, `await db.execute()`, `selectinload` for eager loading, `Depends(get_db)` for injection.
-**Error handling**: `HTTPException(status_code=..., detail=...)`, always check auth with `Depends(get_current_user)`, use `result.scalar_one_or_none()` for single results.
-**Response format**: All endpoints return `{code, message, data, timestamp}` via `make_response()`.
-
-## Code Style: TypeScript/React (Web Admin)
-
-**Imports** - Use `@/` alias for src, group by: React → libraries → local.
-```typescript
-import { useState, useEffect } from 'react'
-import { Card, Table, Button } from 'antd'
-import { taskApi } from '@/services/api'
-```
-
-**Naming**: PascalCase components (export default), camelCase vars/functions, PascalCase types.
-**Components**: Functional with hooks, `const [s, setS] = useState<Type>()`, destructure props.
-**State**: Zustand stores in `stores/`, API calls in `services/api.ts` and `services/auditProjectApi.ts`.
-**Ant Design**: Use `Form` + `form.submit()`, `message.success()`/`message.error()` for notifications.
-
-## Code Style: Vue 3 (H5 App)
-
-```vue
-<script setup>
-import { ref, onMounted } from 'vue'
-const items = ref([])
-const loading = ref(false)
-</script>
-```
-
-**Formatting**: oxfmt - no semicolons, single quotes. **Naming**: camelCase vars, PascalCase component files.
-**Vant**: Use `van-` prefix components, `van-pull-refresh` + `van-list` for infinite scroll.
-**CSS**: Scoped styles, CSS variables (`--primary-color`, `--bg-white`).
-
-## Database Structure
-
-### Core Tables
-
-```
-├── users                    # 用户表（软删除）
-├── organizations            # 组织机构表（软删除）
-├── enterprises              # 企业表（软删除）
-├── enterprise_qualifications # 企业资质（软删除）
-├── industries               # 行业分类（软删除）
-├── inspection_templates     # 检查模板（软删除）
-├── template_items           # 模板项目（软删除，层级结构）
-├── inspection_tasks         # 检查任务（软删除）
-├── inspection_records       # 检查记录（软删除）
-├── audit_projects           # 审核项目（软删除，核心业务实体）
-├── audit_team_members       # 审核组成员（软删除）
-├── audit_plan_items         # 审核计划项（软删除）
-├── audit_areas              # 审核区域
-├── audit_area_records       # 审核区域记录
-├── nonconformities          # 不符合项
-├── audit_reports            # 审核报告
-├── knowledge_categories     # 知识分类（软删除）
-├── knowledge_documents      # 知识文档（软删除）
-├── media_files              # 媒体文件（软删除）
-├── project_artifacts        # 项目成果（软删除）
-├── project_documents        # 项目文档（软删除）
-├── rag_documents            # RAG 文档索引
-├── agent_conversations      # Agent 对话记录
-├── evidence_agent_sessions  # 证据收集会话
-└── audit_logs               # 审计日志（不可软删除）
-```
-
-### Database Migrations
-
-本地开发和远程服务器使用 **同一个远程 PostgreSQL 数据库** (`PG_HOST=49.232.213.79`)，因此：
-
-- **迁移只需要在本地运行一次**，远程服务器共享同一个数据库，无需再次迁移
-- 模型变更后：`cd backend && alembic revision --autogenerate -m "description" && alembic upgrade head`
-- **部署时不需要执行迁移**，数据库已同步
-
-## Environment Config
-
-### Backend
-
-```env
-PG_HOST=49.232.213.79           # 远程数据库地址（本地和服务器共享）
-PG_PORT=5432
-PG_DB=db_expert_claude
-PG_USER=ad_admin_claude
-PG_PASSWORD=***
-
-SECRET_KEY=efis-secret-key-change-in-production-2024
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=480
-REFRESH_TOKEN_EXPIRE_DAYS=30
-
-# LLM Configuration
-LLM_BASE_URL=https://token.sensenova.cn/v1
-LLM_MODEL=deepseek-v4-flash
-LLM_API_KEY=***
-
-# RAG/Embedding
-EMBEDDING_BASE_URL=https://api.edgefn.net/v1
-EMBEDDING_MODEL=BAAI/bge-m3
-EMBEDDING_API_KEY=***
-
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=10485760
-DEBUG=true
-```
-
-### Frontend
-
-- `web-admin/.env.development` / `.env.production` - `VITE_API_URL`
-- `h5-app/.env.development` / `.env.production` - `VITE_API_URL`
-
-## User Roles
-
-| Role | Permissions |
-|------|-------------|
-| `super_admin` | 完全访问权限 |
-| `admin` | 模板/任务/企业管理 |
-| `expert` | 执行检查、提交记录 |
-| `auditor` | 只读访问 |
-
-## Deployment & Git Guidelines (核心安全约束)
+## 硬约束（先读这三条）
 
 > [!IMPORTANT]
-> **【铁律】严禁未经用户明确指令自动部署到服务器或推送到 GitHub**：
-> 1. **严禁自动部署**：除非用户在当前对话中**单独、明确、特定**指示“部署到服务器 / 运行 deploy”，否则任何代码编写、Bug 修复或功能实现后，**绝对严禁自动运行 `python deploy.py` 或任何部署命令**。
-> 2. **严禁自动推送 GitHub**：除非用户**单独、明确、特定**指示“推送到 GitHub / git push”，否则**绝对严禁自动执行 `git push`**。
-> 3. 代码修改后，仅在本地进行编译校验和测试（如 `npm run build`、`pytest` 等），并在对话中向用户汇报修改结果即可。
+> **1. 严禁自动部署。** 除非用户在当前对话中单独、明确地说"部署到服务器 / 运行 deploy"，
+> 否则任何改动后**绝不**执行 `python deploy.py` 或任何部署脚本。
+>
+> **2. 严禁自动 push。** 除非用户单独、明确地说"推送到 GitHub / git push"，
+> 否则**绝不**执行 `git push`。改完代码只做本地构建与测试校验，然后在对话里汇报。
+>
+> **3. 本地和线上共用同一个远程数据库**（`PG_HOST=49.232.213.79`，`PG_DB=db_expert_claude`）。
+> 后果：迁移只在本地跑一次，部署不再迁移；本地冒烟测试会写脏生产数据，
+> 跑完用 `scripts/clear_db_records.py` 清理。
 
-本地和远程服务器共享同一个数据库，当用户明确要求部署时的流程：
+## 技术栈与目录
 
-1. 本地运行迁移（仅首次或模型变更后）：`alembic upgrade head`
-2. 提交代码到 GitHub（需用户指令）
-3. 运行部署脚本：`python deploy.py`（需用户指令）
-4. 验证服务状态：http://49.232.213.79
+| 目录 | 栈 | 端口 |
+|------|-----|------|
+| `backend/` | FastAPI + PostgreSQL + SQLAlchemy(async) + Alembic，Python 3.11+ | 8000 |
+| `web-admin/` | React 18 + TS + Ant Design + Vite | 3000 |
+| `h5-app/` | Vue 3 + Vant + Vite（base path `/h5/`） | 5174 |
+| `mobile-app/` | React 18 + antd-mobile（早期端，Agent 写回已禁用） | 3001 |
+| `inspection_app/` | Flutter 3.x + Riverpod + Dio + GoRouter（在建） | — |
 
-**服务地址**：
-- 后端 API: http://49.232.213.79:8000
-- Web Admin: http://49.232.213.79:3000
-- H5 App: http://49.232.213.79:5173
+核心业务能力：审核项目全生命周期 · AI Agent 辅助审核（RAG + LLM）·
+检查模板设计与复用 · 现场检查记录采集 · 审核报告自动生成 · 知识库智能问答。
 
-**关键要点**：由于数据库共享，本地测试会影响远程服务器数据，测试完成后建议清理测试数据。
+## 常用命令
 
-## Project Structure
+```bash
+# 后端（pytest 只装在 venv 里）
+cd backend && .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m pytest tests/ -v
+alembic revision --autogenerate -m "描述" && alembic upgrade head   # 仅本地跑一次
 
-```
-backend/app/
-├── models/          # SQLAlchemy ORM models (17个业务模型)
-├── schemas/         # Pydantic request/response models
-├── routers/         # FastAPI route handlers (16个路由模块)
-├── services/        # Business logic (14个服务模块)
-├── utils/           # Security (JWT), file handling, soft_delete
-└── middleware/      # AuditMiddleware
+# 管理后台
+cd web-admin && npm install && npm run dev        # npm run build / npx tsc --noEmit
 
-web-admin/src/
-├── pages/           # Route-based page components
-│   ├── AuditProjects/   # 审核项目管理（核心页面）
-│   ├── Templates/       # 模板管理
-│   ├── Records/         # 检查记录
-│   ├── Tasks/           # 检查任务
-│   ├── Knowledge/       # 知识库
-│   ├── Enterprises/     # 企业管理
-│   ├── Users/           # 用户管理
-│   └── Analytics/       # 数据分析
-├── components/      # Shared components (MainLayout, AgentSidebar)
-├── stores/          # Zustand state (auth, app)
-└── services/        # API client (api.ts, auditProjectApi.ts)
-
-h5-app/src/
-├── views/           # Vue page components
-│   ├── AiAuditSession.vue   # AI 审核会话
-│   ├── InspectionExecution.vue # 检查执行
-│   ├── AuditTasks.vue       # 审核任务
-│   └── Records.vue          # 检查记录
-├── api/             # API modules
-├── components/      # AgentChat, AiAssistCard 等组件
-├── utils/           # photoUtils
-└── main.js          # Entry with Vant registration
+# H5（Node ^20.19.0 || >=22.12.0）
+cd h5-app && npm install && npm run dev           # npm run build / type-check / format
 ```
 
-## Testing
+## 专题文档（按需读，不要一次全读）
 
-### Automated Tests
-- `tests/` - 单元测试（agent_service, llm_service, rag_service, project_audit_agent）
-- `test_all_crud.py` - 综合 CRUD 测试（覆盖所有核心模块）
+| 文档 | 什么时候读 |
+|------|-----------|
+| [docs/agents/backend.md](docs/agents/backend.md) | 改后端。路由前缀表、服务层地图、统一响应体 / 角色 / 软删除 / 审计 / 异常处理约定、Python 代码风格 |
+| [docs/agents/frontend.md](docs/agents/frontend.md) | 改前端。三端目录结构、代理与别名、React/Vue 风格规则、离线能力的真实状态 |
+| [docs/agents/data-model.md](docs/agents/data-model.md) | 碰数据库或业务流程。42 张表分域清单、哪些表是软删除、关键关系、**三套并行记录模型的架构债**、角色权限、迁移流程 |
+| [docs/agents/ai-agent.md](docs/agents/ai-agent.md) | 碰 LLM / RAG / Agent。共享运行时 `app/agents/`、工具循环与人在回路、证据管线、Agent 端点清单、已知缺口 |
+| [docs/agents/ops.md](docs/agents/ops.md) | 配环境、跑测试、部署。全部环境变量、两类测试文件的区别、部署脚本与线上拓扑 |
 
-### Manual Testing
-- Web Admin: http://localhost:3000
-- H5 App: http://localhost:5173
-- API Docs: http://localhost:8000/api/docs
+`CLAUDE.md` 与本文件内容重叠，以本文件及上述专题文档为准。
 
-## Important Notes
+## 全局速记（细节见专题文档）
 
-1. **数据库共享**：本地和服务器使用同一数据库，迁移只在本地执行
-2. **软删除**：所有业务实体使用软删除，查询需过滤 `is_deleted == False`
-3. **唯一字段处理**：软删除时唯一字段（如 `code`, `project_no`）需追加后缀避免冲突
-4. **RAG 索引**：知识库文档上传后自动生成向量索引，需 LLM API 配置正确
-5. **文件存储**：上传文件存储在 `backend/uploads/`，部署时需同步
-6. **前端代理**：开发环境前端通过 Vite proxy 访问后端 API
+- **API 不做版本化**，没有 `/api/v1/`；路由都在 `backend/app/routers/`（没有 `app/api/`）。
+  前缀在 `main.py` 的 `include_router()` 指定，例外是 `audit_projects.py` /
+  `project_agent.py` 自声明 `prefix="/api/audit-projects"`。
+- **统一响应体** `{code, message, data, timestamp}`，从 `app/utils/response.py` 引入
+  `make_response`（仍有 15 个路由留着本地副本，顺手换掉，别新增）。
+- **数据库全异步**：`AsyncSession` + `await db.execute()` + `selectinload` + `Depends(get_db)`。
+- **软删除**只对挂了 `SoftDeleteMixin` 的模型生效——不是所有表都有 `is_deleted`，
+  盲加过滤会报字段不存在。带唯一约束的字段软删除时追加 `_deleted_<timestamp>` 后缀。
+- **角色判断**统一走 `app/utils/roles.py`，不要硬编码 `role != "admin"`。
+  角色：`super_admin` / `admin` / `expert` / `auditor`。
+- **Agent 写回一律人在回路**：产出 `action_proposal` 确认卡，用户确认后才落库。
+- **全局异常处理靠字符串匹配异常消息**归类（非法 UUID→404、约束冲突→409、其余→500），
+  改异常文案前先确认不会打乱映射。
+- 路径别名：前端 `@/` → `src/`；后端 `app.*` → `app/`。
+- 上传文件用 UUID 名 + MIME 校验，落 `backend/uploads/`，静态挂 `/uploads`。
+- 交互文档 `/api/docs`，ReDoc `/api/redoc`。

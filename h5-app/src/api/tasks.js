@@ -18,6 +18,11 @@ export const getTask = (id) => {
   return request.get(`/tasks/${id}`)
 }
 
+// 任务状态统计（后端全量口径，避免前端分页累加导致「已完成 > 总数」）
+export const getTaskStatistics = () => {
+  return request.get('/tasks/statistics')
+}
+
 export const createTask = (data) => {
   return request.post('/tasks', data)
 }

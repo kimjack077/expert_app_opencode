@@ -133,7 +133,8 @@ export default function Inspection() {
       pass: { color: 'success', icon: <CheckCircleOutlined />, text: '合格' },
       fail: { color: 'error', icon: <CloseCircleOutlined />, text: '不合格' },
       pending_rectification: { color: 'warning', icon: <MinusCircleOutlined />, text: '待整改' },
-      not_applicable: { color: 'default', icon: <MinusCircleOutlined />, text: '未涉及' },
+      not_applicable: { color: 'default', icon: <MinusCircleOutlined />, text: '不适用' },
+      na: { color: 'default', icon: <MinusCircleOutlined />, text: '不适用' },
     }
     const item = resultMap[result] || { color: 'default', icon: null, text: '未填写' }
     return <Tag color={item.color} icon={item.icon}>{item.text}</Tag>
@@ -365,10 +366,10 @@ export default function Inspection() {
                   { value: 'pass', label: '合格' },
                   { value: 'fail', label: '不合格' },
                   { value: 'pending_rectification', label: '待整改' },
-                  { value: 'not_applicable', label: '未涉及' },
+                  { value: 'not_applicable', label: '不适用' },
                 ]).map((opt: any) => (
                   <Radio.Button key={opt.value} value={opt.value}>
-                    {opt.label}
+                    {opt.label === '未涉及' ? '不适用' : opt.label}
                   </Radio.Button>
                 ))}
               </Radio.Group>

@@ -5,6 +5,7 @@ import { recordApi, templateApi } from '@/services/api'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import InspectionReport from './InspectionReport'
+import { hasQuantifiedItems } from '@/utils/display'
 
 const { RangePicker } = DatePicker
 const { Panel } = Collapse
@@ -346,7 +347,7 @@ export default function Records() {
       width: 70,
       sorter: true,
       sortOrder: sorter.field === 'total_score' ? (sorter.order || null) : null,
-      render: (score: string, record: any) => record.template?.is_quantified ? <span style={{ color: '#F59E0B', fontWeight: 'bold' }}>{score ?? '-'}</span> : '-',
+      render: (score: string, record: any) => (record.template?.is_quantified && hasQuantifiedItems(record.template)) ? <span style={{ color: '#F59E0B', fontWeight: 'bold' }}>{score ?? '-'}</span> : '-',
     },
     {
       title: '总体结果',
@@ -651,7 +652,7 @@ export default function Records() {
                 </div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                {selectedRecord.template?.is_quantified && (
+                {selectedRecord.template?.is_quantified && hasQuantifiedItems(selectedRecord.template) && (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ color: '#888', fontSize: 12, marginBottom: 4 }}>总分</div>
                     <span style={{ fontSize: 24, fontWeight: 'bold', color: '#F59E0B' }}>{selectedRecord.total_score || 0}</span>

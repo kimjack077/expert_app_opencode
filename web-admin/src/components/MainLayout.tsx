@@ -45,7 +45,6 @@ export default function MainLayout() {
 
   // 根据角色过滤菜单
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
-  const isFieldUser = user?.role === 'expert' || user?.role === 'auditor'
 
   // 分组菜单：现场工作 / 项目管理 / 基础配置
   const menuItems = [
@@ -55,11 +54,9 @@ export default function MainLayout() {
       children: [
         { key: '/dashboard', icon: <DashboardOutlined />, label: '工作台' },
         { key: '/my-audit-tasks', icon: <ScheduleOutlined />, label: '我的审核任务' },
-        // 日常检查任务：管理员常用；审核员也可见但降为次要
-        ...(!isFieldUser || isAdmin
-          ? [{ key: '/tasks', icon: <UnorderedListOutlined />, label: '日常检查任务' }]
-          : [{ key: '/tasks', icon: <UnorderedListOutlined />, label: '日常检查任务' }]),
-        { key: '/records', icon: <FileDoneOutlined />, label: '检查记录' },
+        // 「日常检查（待执行）」= 部署下去、待现场执行的任务；「检查记录与报告」= 已完成的归档成果
+        { key: '/tasks', icon: <UnorderedListOutlined />, label: '日常检查（待执行）' },
+        { key: '/records', icon: <FileDoneOutlined />, label: '检查记录与报告' },
       ],
     },
     {

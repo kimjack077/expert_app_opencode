@@ -1715,13 +1715,18 @@ async def download_report_pdf(
 
     pdf_bytes = report_service.generate_pdf(record)
 
+    from urllib.parse import quote
     enterprise_name = record.enterprise_name or (
         record.enterprise.name if record.enterprise else "未知企业"
     )
     filename = f"检查报告_{enterprise_name}_{datetime.now().strftime('%Y%m%d')}.pdf"
+    encoded_filename = quote(filename)
 
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"report.pdf\"; filename*=UTF-8''{encoded_filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
     )

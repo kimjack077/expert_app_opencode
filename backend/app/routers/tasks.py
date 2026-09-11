@@ -86,6 +86,39 @@ async def get_tasks(
     )
 
 
+@router.get("/statistics", response_model=ApiResponse)
+async def get_task_statistics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """任务状态统计。
+
+    与列表接口使用完全一致的可见范围，供 H5 顶部汇总使用，
+    避免前端基于分页数组累加导致「已完成 > 总数」的口径错误。
+    """
+    conditions = [InspectionTask.is_deleted == False]  # noqa: E712
+    if current_user.role not in RECORD_VIEW_ALL_ROLES:
+        conditions.append(InspectionTask.assigned_to == current_user.id)
+
+    rows = await db.execute(
+        select(InspectionTask.status, func.count(InspectionTask.id))
+        .where(*conditions)
+        .group_by(InspectionTask.status)
+    )
+    counts = {(status or "unknown"): count for status, count in rows.all()}
+    total = sum(counts.values())
+
+    return make_response(
+        data={
+            "total": total,
+            "pending": counts.get("pending", 0),
+            "in_progress": counts.get("in_progress", 0),
+            "completed": counts.get("completed", 0),
+            "cancelled": counts.get("cancelled", 0),
+        }
+    )
+
+
 @router.post("", response_model=ApiResponse)
 async def create_task(
     task_data: InspectionTaskCreate,
@@ -476,6 +509,12 @@ async def get_task_records(
                 if r.template_item.allow_attachment is not None
                 else True,
                 "unit": r.template_item.unit,
+                "parent_id": str(r.template_item.parent_id)
+                if r.template_item.parent_id
+                else None,
+                "sort_order": r.template_item.sort_order
+                if r.template_item.sort_order is not None
+                else 0,
                 "min_value": float(r.template_item.min_value)
                 if r.template_item.min_value is not None
                 else None,
@@ -496,6 +535,40 @@ async def get_task_records(
             # 兼容旧前端字段名 check_item
             item["check_item"] = check_item
         payload.append(item)
+
+    # 先按模板 sort_order 排序，再按父子层级展开为树序（避免分类节点与子项错位）
+    def _item_meta(raw):
+        return raw.get("template_item") or raw.get("check_item") or {}
+
+    children_by_parent = {}
+    for item in payload:
+        parent_key = _item_meta(item).get("parent_id")
+        children_by_parent.setdefault(parent_key, []).append(item)
+    for key in children_by_parent:
+        children_by_parent[key].sort(
+            key=lambda x: _item_meta(x).get("sort_order", 0) or 0
+        )
+
+    ordered = []
+
+    def _walk(parent_key):
+        for node in children_by_parent.get(parent_key, []):
+            ordered.append(node)
+            _walk(_item_meta(node).get("id"))
+
+    _walk(None)
+
+    if len(ordered) != len(payload):
+        # 兜底：存在父节点缺失的孤儿项时，按 sort_order 追加，避免条目被丢弃
+        seen = {id(node) for node in ordered}
+        ordered.extend(
+            sorted(
+                (x for x in payload if id(x) not in seen),
+                key=lambda x: _item_meta(x).get("sort_order", 0) or 0,
+            )
+        )
+
+    payload = ordered
 
     return make_response(data=payload)
 
@@ -632,7 +705,9 @@ async def get_task_summary(
     non_compliant = sum(1 for r in countable if _is_fail(r.result))
     not_applicable = sum(1 for r in countable if _is_na(r.result))
 
-    compliance_rate = (compliant / completed * 100) if completed > 0 else 0
+    # 合规率分母仅计有效参评项（剔除不适用/未涉及项）
+    applicable_evaluated = compliant + non_compliant
+    compliance_rate = (compliant / applicable_evaluated * 100) if applicable_evaluated > 0 else 0
 
     summary = InspectionSummary(
         total=total,

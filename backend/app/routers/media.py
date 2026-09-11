@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.media import MediaFile
 from app.models.task import InspectionTask, TaskItemRecord
+from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.user import User
 from app.schemas import ApiResponse, MediaFileResponse
 from app.utils.security import get_current_user
@@ -40,14 +41,43 @@ async def upload_file(
         if not is_assignee and not is_admin:
             raise HTTPException(status_code=403, detail="Not authorized")
 
-    if record_id and not await db.get(TaskItemRecord, record_id):
-        raise HTTPException(status_code=400, detail="Invalid task item record ID")
+    valid_record_id = None
+    if record_id:
+        try:
+            task_item = await db.get(TaskItemRecord, record_id)
+            if task_item:
+                valid_record_id = record_id
+            else:
+                # 记录流上传时前端可能传的是 InspectionRecordItem 的 ID；
+                # media_files.record_id 外键指向 task_item_records，
+                # 因此需换算成同一任务、同一模板项对应的 TaskItemRecord ID，才能保住关联。
+                rec_item = await db.get(InspectionRecordItem, record_id)
+                if rec_item and rec_item.template_item_id:
+                    parent = (
+                        await db.get(InspectionRecord, rec_item.record_id)
+                        if rec_item.record_id
+                        else None
+                    )
+                    if parent and parent.task_id:
+                        matched = (
+                            await db.execute(
+                                select(TaskItemRecord).where(
+                                    TaskItemRecord.task_id == parent.task_id,
+                                    TaskItemRecord.template_item_id
+                                    == rec_item.template_item_id,
+                                )
+                            )
+                        ).scalar_one_or_none()
+                        if matched:
+                            valid_record_id = str(matched.id)
+        except Exception:
+            valid_record_id = None
 
     stored_name, file_path, file_size = await save_upload_file(file, "inspections")
 
     media = MediaFile(
         task_id=task_id,
-        record_id=record_id,
+        record_id=valid_record_id,
         file_type="image"
         if file.content_type and file.content_type.startswith("image/")
         else "document",

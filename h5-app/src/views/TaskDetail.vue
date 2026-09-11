@@ -29,7 +29,7 @@
 
       <div class="content-card">
         <h1 class="task-title">{{ task.title }}</h1>
-        <p class="task-desc">{{ task.description || '暂无描述' }}</p>
+        <p class="task-desc" :class="{ 'empty-desc': !task.description }">{{ task.description || '暂无详细描述' }}</p>
 
         <div class="info-section">
           <h3 class="section-title">基本信息</h3>
@@ -187,9 +187,20 @@
         </van-button>
         <van-button
           v-if="task.status === 'completed'"
+          type="primary"
+          block
+          class="action-btn primary"
+          @click="goToExecution"
+        >
+          <van-icon name="records-o" size="20" />
+          <span>查看检查记录</span>
+        </van-button>
+        <van-button
+          v-if="task.status === 'completed'"
           disabled
           block
           class="action-btn disabled"
+          style="margin-top: 10px;"
         >
           <van-icon name="passed" size="20" />
           <span>任务已完成</span>
@@ -653,6 +664,11 @@ onUnmounted(() => {
   margin-bottom: 24px;
   padding-bottom: 24px;
   border-bottom: 1px solid var(--border-light);
+}
+
+.task-desc.empty-desc {
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .section-title {

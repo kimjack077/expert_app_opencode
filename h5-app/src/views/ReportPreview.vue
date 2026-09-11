@@ -69,7 +69,7 @@
           </div>
           <div class="stat-card na">
             <div class="stat-value">{{ reportData.statistics.na }}</div>
-            <div class="stat-label">未涉及</div>
+            <div class="stat-label">不适用</div>
           </div>
         </div>
         <div class="pass-rate">
@@ -254,7 +254,8 @@ const getRadioText = (value) => {
     'pass': '合格',
     'fail': '不合格',
     'pending_rectification': '待整改',
-    'not_applicable': '未涉及',
+    'not_applicable': '不适用',
+    'na': '不适用',
   }
   return map[value] || value || '-'
 }

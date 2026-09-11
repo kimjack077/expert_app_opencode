@@ -43,7 +43,7 @@
             <div class="info-value">{{ formatDate(record.inspection_date) }}</div>
           </div>
         </div>
-        <div v-if="record.template?.is_quantified" class="info-row">
+        <div v-if="record.template?.is_quantified && hasQuantifiedItems(record.template)" class="info-row">
           <div class="info-badge" style="background: rgba(245, 158, 11, 0.1); color: #F59E0B;">
             <van-icon name="points" size="14" />
           </div>
@@ -112,6 +112,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast, ImagePreview } from 'vant'
 import { getRecord } from '../api/records'
+import { hasQuantifiedItems } from '../utils/display.js'
 import TreeItem from '../components/TreeItem.vue'
 
 const route = useRoute()
@@ -156,7 +157,8 @@ const getRadioText = (value) => {
     'pass': '合格',
     'fail': '不合格',
     'pending_rectification': '待整改',
-    'not_applicable': '未涉及',
+    'not_applicable': '不适用',
+    'na': '不适用',
   }
   return texts[value] || value
 }
@@ -232,7 +234,7 @@ const previewImage = (src, list) => {
 }
 
 const getItemScore = (item) => {
-  if (!record.value?.template?.is_quantified) return null
+  if (!record.value?.template?.is_quantified || !hasQuantifiedItems(record.value?.template)) return null
   if (item.score_value !== null && item.score_value !== undefined && item.score_value !== '') {
     return Number(item.score_value)
   }

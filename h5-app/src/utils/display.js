@@ -27,17 +27,46 @@ export function formatTaskDisplay(task = {}) {
   if (parts.length >= 3) {
     const dateHint = parts[parts.length - 1]
     const area = parts[parts.length - 2]
+    const project = parts.slice(0, -2).join(' · ')
     return {
-      primary: task.target_name || parts[0],
+      primary: project || parts[0] || cleaned,
       secondary: [area, dateHint].filter(Boolean).join(' · '),
       area,
       dateHint,
     }
   }
-  return {
-    primary: task.target_name || task.area_name || cleaned,
-    secondary: parts.length === 2 ? parts[1] : '',
+  if (parts.length === 2) {
+    return {
+      primary: parts[0],
+      secondary: parts[1],
+      area: parts[1],
+    }
   }
+  return {
+    primary: cleaned || task.target_name || task.area_name || '未命名任务',
+    secondary: '',
+  }
+}
+
+/**
+ * 模板是否真的配置了量化计分项。
+ * 用于兜住「定性模板被误标 is_quantified=true」的情况，避免对外显示「总分 0 分」。
+ */
+export function hasQuantifiedItems(template) {
+  const walk = (list) =>
+    (list || []).some((it) => {
+      if (Array.isArray(it?.children) && it.children.length > 0 && walk(it.children)) {
+        return true
+      }
+      if (it?.is_category) return false
+      const rt = it?.result_type || it?.check_type
+      const hasScoreMeta =
+        (it?.max_score !== null && it?.max_score !== undefined) ||
+        (it?.score_weight !== null && it?.score_weight !== undefined) ||
+        (it?.default_score !== null && it?.default_score !== undefined)
+      return rt === 'score' || hasScoreMeta
+    })
+  return walk(template?.items || [])
 }
 
 export function citationSourceLabel(citation = {}) {

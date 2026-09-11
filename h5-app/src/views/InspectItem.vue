@@ -292,7 +292,7 @@
             <van-radio-group v-model="formData.radio_value" direction="horizontal">
               <van-radio name="pass" shape="square">合格</van-radio>
               <van-radio name="fail" shape="square">不合格</van-radio>
-              <van-radio name="not_applicable" shape="square">未涉及</van-radio>
+              <van-radio name="not_applicable" shape="square">不适用</van-radio>
             </van-radio-group>
           </div>
         </div>
@@ -522,8 +522,7 @@ const hasKnowledgeBase = computed(() => {
 const defaultPassFailOptions = [
   { label: '合格', value: 'pass' },
   { label: '不合格', value: 'fail' },
-  { label: '待整改', value: 'pending_rectification' },
-  { label: '未涉及', value: 'not_applicable' },
+  { label: '不适用', value: 'not_applicable' },
 ]
 
 const normalizeResultOptions = (rawOptions, defaultOptions = defaultPassFailOptions) => {
@@ -554,7 +553,7 @@ const normalizeResultOptions = (rawOptions, defaultOptions = defaultPassFailOpti
     }
     if (opt && typeof opt === 'object') {
       const val = opt.value !== undefined ? opt.value : (opt.label || opt.name || '')
-      const lbl = opt.label || opt.name || (val === 'pass' ? '合格' : val === 'fail' ? '不合格' : (val === 'na' || val === 'not_applicable') ? '未涉及' : val)
+      const lbl = opt.label || opt.name || (val === 'pass' ? '合格' : val === 'fail' ? '不合格' : (val === 'na' || val === 'not_applicable') ? '不适用' : val)
       return {
         label: String(lbl),
         value: String(val),
@@ -624,7 +623,8 @@ const getResultLabel = (value) => {
     'pass': '合格',
     'fail': '不合格',
     'pending_rectification': '待整改',
-    'not_applicable': '未涉及'
+    'not_applicable': '不适用',
+    'na': '不适用'
   }
   return labelMap[value] || value
 }
@@ -907,8 +907,7 @@ const fetchItemData = async () => {
     const defaultOptions = [
       { label: '合格', value: 'pass' },
       { label: '不合格', value: 'fail' },
-      { label: '待整改', value: 'pending_rectification' },
-      { label: '未涉及', value: 'not_applicable' }
+      { label: '不适用', value: 'not_applicable' }
     ]
 
     itemData.value = {
@@ -929,6 +928,8 @@ const fetchItemData = async () => {
       problem_description: taskRec?.inspector_note || '',
       inspector_note: taskRec?.inspector_note || '',
       photos: [],
+      // 任务检查项记录 ID：用于照片上传后与条目建立关联
+      record_id: taskRec?.id || '',
     }
 
     formData.value = {
@@ -1012,6 +1013,9 @@ const handlePhotoUpload = async (file) => {
     uploadFormData.append('file', processedFile)
     if (itemData.value?.task_id) {
       uploadFormData.append('task_id', itemData.value.task_id)
+    }
+    if (itemData.value?.record_id) {
+      uploadFormData.append('record_id', itemData.value.record_id)
     }
 
     const res = await request.post('/media/upload', uploadFormData)

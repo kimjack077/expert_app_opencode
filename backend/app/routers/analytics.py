@@ -30,7 +30,8 @@ async def get_dashboard(
         total_tasks = (
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
-                    InspectionTask.assigned_to == current_user.id
+                    InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,
                 )
             )
         ).scalar() or 0
@@ -38,6 +39,7 @@ async def get_dashboard(
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
                     InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,
                     InspectionTask.status == "completed",
                 )
             )
@@ -46,6 +48,7 @@ async def get_dashboard(
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
                     InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,
                     InspectionTask.status == "in_progress",
                 )
             )
@@ -54,7 +57,17 @@ async def get_dashboard(
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
                     InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,
                     InspectionTask.status == "pending",
+                )
+            )
+        ).scalar() or 0
+        cancelled_tasks = (
+            await db.execute(
+                select(func.count(InspectionTask.id)).where(
+                    InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,
+                    InspectionTask.status == "cancelled",
                 )
             )
         ).scalar() or 0
@@ -96,13 +109,18 @@ async def get_dashboard(
             non_compliant_records = 0
     else:
         total_tasks = (
-            await db.execute(select(func.count(InspectionTask.id)))
+            await db.execute(
+                select(func.count(InspectionTask.id)).where(
+                    InspectionTask.is_deleted == False
+                )
+            )
         ).scalar() or 0
 
         completed_tasks = (
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
-                    InspectionTask.status == "completed"
+                    InspectionTask.is_deleted == False,
+                    InspectionTask.status == "completed",
                 )
             )
         ).scalar() or 0
@@ -110,7 +128,8 @@ async def get_dashboard(
         in_progress_tasks = (
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
-                    InspectionTask.status == "in_progress"
+                    InspectionTask.is_deleted == False,
+                    InspectionTask.status == "in_progress",
                 )
             )
         ).scalar() or 0
@@ -118,7 +137,17 @@ async def get_dashboard(
         pending_tasks = (
             await db.execute(
                 select(func.count(InspectionTask.id)).where(
-                    InspectionTask.status == "pending"
+                    InspectionTask.is_deleted == False,
+                    InspectionTask.status == "pending",
+                )
+            )
+        ).scalar() or 0
+
+        cancelled_tasks = (
+            await db.execute(
+                select(func.count(InspectionTask.id)).where(
+                    InspectionTask.is_deleted == False,
+                    InspectionTask.status == "cancelled",
                 )
             )
         ).scalar() or 0
@@ -151,6 +180,7 @@ async def get_dashboard(
                 "completed": completed_tasks,
                 "in_progress": in_progress_tasks,
                 "pending": pending_tasks,
+                "cancelled": cancelled_tasks,
                 "completion_rate": round(completed_tasks / total_tasks * 100, 2)
                 if total_tasks > 0
                 else 0,

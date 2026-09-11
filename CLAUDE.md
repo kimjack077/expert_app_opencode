@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Mobile App**: React 18 + TypeScript + antd-mobile + Vite (port 3001)
 - **Inspection App (Flutter)**: Flutter 3.x + Riverpod + Dio/Retrofit + GoRouter (in development)
 
-> A companion **`AGENTS.md`** at the repo root carries detailed per-language code-style conventions (import ordering, naming, schema/router patterns, Vant/Ant Design idioms) and the database table map. Consult it before writing backend or frontend code.
+> A companion **`AGENTS.md`** at the repo root is a short index of hard constraints plus pointers into five topic docs under `docs/agents/` — `backend.md` (router map, service map, cross-cutting conventions, Python style), `frontend.md` (three clients' structure and style), `data-model.md` (table map, soft-delete scope, the three-parallel-record-models debt, migration flow), `ai-agent.md` (shared agent runtime, tool loop, evidence pipeline, endpoints), `ops.md` (env vars, tests, deployment). Read the relevant topic doc before writing backend or frontend code.
 
 ## Development Commands
 

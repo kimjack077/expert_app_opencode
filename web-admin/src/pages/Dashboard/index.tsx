@@ -191,8 +191,10 @@ export default function Dashboard() {
     },
   ]
 
-  // KPI Metrics Calculation
-  const pendingCount = (stats?.tasks?.pending || 0) + (stats?.tasks?.in_progress || 0)
+  const cancelledTasks = stats?.tasks?.cancelled || 0
+  const inProgressTasks = stats?.tasks?.in_progress || 0
+  const pendingTasks = stats?.tasks?.pending || 0
+  const pendingCount = inProgressTasks + pendingTasks
   const totalTasks = stats?.tasks?.total || 0
   const completedTasks = stats?.tasks?.completed || 0
   const completionRate = stats?.tasks?.completion_rate || 0
@@ -320,7 +322,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="dashboard-kpi-footer">
-              <span>已完成 {completedTasks} / {totalTasks} 项</span>
+              <span>已完成 {completedTasks} · 待办/推进中 {pendingCount}{cancelledTasks > 0 ? ` · 已取消 ${cancelledTasks}` : ''} / 共 {totalTasks} 项</span>
               <span style={{ color: '#0d9488', fontWeight: 600 }}>项目库 →</span>
             </div>
           </div>

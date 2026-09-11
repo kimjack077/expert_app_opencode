@@ -31,6 +31,13 @@
             <span class="stat-value">{{ statusCounts.completed }}</span>
             <span class="stat-label">已完成</span>
           </div>
+          <template v-if="stats.cancelled > 0">
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value">{{ stats.cancelled }}</span>
+              <span class="stat-label">已取消</span>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -153,7 +160,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getTasks } from '../api/tasks.js'
+import { getTasks, getTaskStatistics } from '../api/tasks.js'
 import { formatTaskDisplay } from '../utils/display.js'
 import { CACHE_EVENT, listCachedEntries } from '@/utils/offlineCache.js'
 import BottomNav from '../components/BottomNav.vue'
@@ -164,6 +171,7 @@ const searchText = ref('')
 const activeFilter = ref('all')
 const tasks = ref([])
 const totalCount = ref(0)
+const stats = ref({ total: 0, pending: 0, in_progress: 0, completed: 0, cancelled: 0 })
 const loading = ref(false)
 const finished = ref(false)
 const refreshing = ref(false)
@@ -186,11 +194,12 @@ const filterTabs = [
   { label: '已完成', value: 'completed' },
 ]
 
+// 顶部状态统计统一走后端全量口径，避免用本地分页数组累加导致数字对不上
 const statusCounts = computed(() => {
   return {
-    pending: tasks.value.filter(t => t.status === 'pending').length,
-    in_progress: tasks.value.filter(t => t.status === 'in_progress').length,
-    completed: tasks.value.filter(t => t.status === 'completed').length,
+    pending: stats.value.pending,
+    in_progress: stats.value.in_progress,
+    completed: stats.value.completed,
   }
 })
 
@@ -250,15 +259,12 @@ const fetchTasks = async (isRefresh = false) => {
     })
 
     const items = res.data?.items || []
-    if (typeof res.data?.total === 'number') {
-      totalCount.value = res.data.total
-    } else if (isRefresh) {
-      totalCount.value = items.length
-    }
     if (isRefresh) {
       tasks.value = items
     } else {
-      tasks.value.push(...items)
+      const existingIds = new Set(tasks.value.map(t => String(t.id)))
+      const uniqueNewItems = items.filter(t => !existingIds.has(String(t.id)))
+      tasks.value.push(...uniqueNewItems)
     }
 
     if (items.length < pageSize) {
@@ -266,6 +272,23 @@ const fetchTasks = async (isRefresh = false) => {
     }
   } catch (error) {
     console.error('获取任务失败:', error)
+  }
+}
+
+const fetchStatistics = async () => {
+  try {
+    const res = await getTaskStatistics()
+    const d = res.data || {}
+    stats.value = {
+      total: d.total ?? 0,
+      pending: d.pending ?? 0,
+      in_progress: d.in_progress ?? 0,
+      completed: d.completed ?? 0,
+      cancelled: d.cancelled ?? 0,
+    }
+    totalCount.value = stats.value.total
+  } catch (error) {
+    console.error('获取任务统计失败:', error)
   }
 }
 
@@ -278,7 +301,7 @@ const onLoad = async () => {
 const onRefresh = async () => {
   page.value = 1
   finished.value = false
-  await fetchTasks(true)
+  await Promise.all([fetchTasks(true), fetchStatistics()])
   refreshing.value = false
 }
 
@@ -302,7 +325,8 @@ onMounted(() => {
   if (route.query.status && ['pending', 'in_progress', 'completed'].includes(route.query.status)) {
     activeFilter.value = route.query.status
   }
-  fetchTasks()
+  // van-list 会自动触发 onLoad，此处无需重复调用 fetchTasks
+  fetchStatistics()
   syncCachedTasks()
   window.addEventListener(CACHE_EVENT, syncCachedTasks)
 })

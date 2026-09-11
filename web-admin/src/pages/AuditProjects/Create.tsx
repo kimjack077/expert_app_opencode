@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Card, Form, Input, Select, DatePicker, InputNumber, Button, message, Space, Spin } from 'antd'
+import { Card, Form, Input, Select, DatePicker, InputNumber, Button, message, Space, Spin, Tooltip } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { auditProjectApi } from '@/services/auditProjectApi'
 import { enterpriseApi } from '@/services/api'
@@ -202,12 +203,19 @@ export default function CreateAuditProject() {
             </Form.Item>
 
             <Form.Item
-              label="审核人天数"
+              label={
+                <Space size={4}>
+                  <span>审核工作量（人天）</span>
+                  <Tooltip title="指全体审核员现场工作天数之和（例如：2 名审核员现场工作 3 天即为 6 人天）">
+                    <QuestionCircleOutlined style={{ color: '#8c8c8c', cursor: 'pointer' }} />
+                  </Tooltip>
+                </Space>
+              }
               name="audit_days"
               rules={[
-                { required: true, message: '请输入审核人天数' },
-                { type: 'number', min: 0.5, message: '审核人天数至少为0.5天' },
-                { type: 'number', max: 100, message: '审核人天数不能超过100天' },
+                { required: true, message: '请输入审核工作量（人天）' },
+                { type: 'number', min: 0.5, message: '审核工作量至少为0.5人天' },
+                { type: 'number', max: 100, message: '审核工作量不能超过100人天' },
               ]}
             >
               <InputNumber
@@ -217,7 +225,7 @@ export default function CreateAuditProject() {
                 precision={1}
                 style={{ width: '100%' }}
                 placeholder="如：3.0"
-                addonAfter="天"
+                addonAfter="人天"
               />
             </Form.Item>
 

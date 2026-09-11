@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   Card, Button, Input, Space, Tag, Spin, message,
   Progress, Upload, Drawer, Radio, InputNumber, Select, Alert, Modal,
-  Row, Col, Statistic, Divider
+  Row, Col, Statistic, Divider, Tooltip
 } from 'antd'
 import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -43,11 +43,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const [llmContent, setLlmContent] = useState<string | null>(null)
   const [drawerVisible, setDrawerVisible] = useState(false)
 
-  // 最终判定状态
   const [finalJudgment, setFinalJudgment] = useState({
     result: '',
     remarks: ''
   })
+  const [savingJudgment, setSavingJudgment] = useState(false)
   const [aiJudgmentLoading, setAiJudgmentLoading] = useState(false)
   const [aiJudgmentThinking, setAiJudgmentThinking] = useState(false)
   const [aiJudgmentThinkingContent, setAiJudgmentThinkingContent] = useState('')
@@ -151,7 +151,17 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     setItems(formItems)
     setFlatItems(formItems)
     if (task.remarks) {
-      setFinalJudgment((prev) => ({ ...prev, remarks: task.remarks }))
+      let savedResult = ''
+      let savedRemarks = task.remarks
+      const match = task.remarks.match(/最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)/i)
+      if (match) {
+        const val = match[1].toLowerCase()
+        if (val === 'pass' || val === '合格' || val === '符合') savedResult = 'pass'
+        else if (val === 'fail' || val === '不合格' || val === '不符合') savedResult = 'fail'
+        else if (val === 'partial_pass' || val === '基本合格') savedResult = 'partial_pass'
+        savedRemarks = task.remarks.replace(/^最终判定\s*[:：]\s*[^|]+(\||\s*)/i, '').trim()
+      }
+      setFinalJudgment({ result: savedResult, remarks: savedRemarks })
     }
   }
 
@@ -350,10 +360,12 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   // 保存最终判定
   const handleSaveFinalJudgment = async () => {
+    setSavingJudgment(true)
     try {
       if (isTaskMode && taskId) {
+        const verdictCn = finalJudgment.result === 'pass' ? '合格' : finalJudgment.result === 'fail' ? '不合格' : finalJudgment.result === 'partial_pass' ? '基本合格' : finalJudgment.result
         const remarkText = [
-          finalJudgment.result ? `最终判定:${finalJudgment.result}` : '',
+          verdictCn ? `最终判定:${verdictCn}` : '',
           finalJudgment.remarks || '',
         ]
           .filter(Boolean)
@@ -368,8 +380,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         remarks: finalJudgment.remarks,
       })
       message.success('最终判定已保存')
-    } catch (error) {
-      message.error('保存失败')
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || error?.message || '保存失败'
+      message.error(typeof msg === 'string' ? msg : '保存失败')
+    } finally {
+      setSavingJudgment(false)
     }
   }
 
@@ -555,7 +570,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
               <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>
             )}
             {notApplicableCount > 0 && (
-              <span style={{ color: '#999' }}>⚪ 未涉及：{notApplicableCount} 项</span>
+              <span style={{ color: '#999' }}>⚪ 不适用：{notApplicableCount} 项</span>
             )}
           </div>
           {finalJudgment.result && (
@@ -590,8 +605,17 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       onOk: async () => {
         try {
           if (isTaskMode && taskId) {
+            // 判定结论一律写中文，避免 pass/fail 等英文枚举落库并回显到备注里
+            const verdictCn =
+              finalJudgment.result === 'pass'
+                ? '合格'
+                : finalJudgment.result === 'fail'
+                  ? '不合格'
+                  : finalJudgment.result === 'partial_pass'
+                    ? '基本合格'
+                    : finalJudgment.result
             const remarkText = [
-              finalJudgment.result ? `最终判定:${finalJudgment.result}` : '',
+              verdictCn ? `最终判定:${verdictCn}` : '',
               finalJudgment.remarks || '',
             ]
               .filter(Boolean)
@@ -639,7 +663,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     try {
       const uploadOpts = isTaskMode
         ? { task_id: taskId || undefined, record_id: currentItem.id }
-        : { record_id: recordId || undefined }
+        : { record_id: currentItem.id || recordId || undefined }
       const res: any = await mediaApi.upload(file, uploadOpts)
       const photoUrl = res.data?.file_path
       if (photoUrl) {
@@ -661,8 +685,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       }
       message.success('上传成功')
       if (uploadInfo.onSuccess) uploadInfo.onSuccess({}, uploadInfo.file)
-    } catch (error) {
-      message.error('上传失败')
+    } catch (error: any) {
+      const msg = error?.response?.data?.detail || error?.response?.data?.message || error?.message || '上传失败'
+      message.error(typeof msg === 'string' ? msg : '上传失败')
       if (uploadInfo.onError) uploadInfo.onError(error)
     }
   }
@@ -705,7 +730,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         'pass': { color: 'success', text: '合格' },
         'fail': { color: 'error', text: '不合格' },
         'pending_rectification': { color: 'warning', text: '待整改' },
-        'not_applicable': { color: 'default', text: '未涉及' },
+        'not_applicable': { color: 'default', text: '不适用' },
+        'na': { color: 'default', text: '不适用' },
       }
       const info = valueMap[item.radio_value] || { color: 'default', text: item.radio_value }
       return <Tag color={info.color}>{info.text}</Tag>
@@ -768,22 +794,40 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         {/* 检查项快捷导航 */}
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {flatItems.map((item, idx) => (
-              <Button
-                key={item.id}
-                size="small"
-                type={idx === currentIndex ? 'primary' : 'default'}
-                onClick={() => setCurrentIndex(idx)}
-                style={{ marginBottom: 4 }}
-              >
-                {idx + 1}
-                {(() => {
-                  const hasResult = item.radio_value || item.numeric_value || item.text_value || item.score_value
-                  const hasRequiredAttachment = !item.attachment_required || (item.photos && item.photos.length > 0)
-                  return (hasResult && hasRequiredAttachment) ? ' ✓' : ''
-                })()}
-              </Button>
-            ))}
+            {flatItems.map((item, idx) => {
+              const hasResult = item.radio_value || item.numeric_value || item.text_value || item.score_value
+              const hasRequiredAttachment = !item.attachment_required || (item.photos && item.photos.length > 0)
+              const isDone = hasResult && hasRequiredAttachment
+              const isCur = idx === currentIndex
+              const val = String(item.radio_value || '').toLowerCase()
+              const isPass = val === 'pass' || val === 'compliant' || val === '合格'
+              const isFail = val === 'fail' || val === 'non_compliant' || val === '不合格'
+              const isNa = val === 'not_applicable' || val === 'na' || val === '不适用'
+
+              let btnStyle: React.CSSProperties = { marginBottom: 4 }
+              if (!isCur) {
+                if (isPass) {
+                  btnStyle = { ...btnStyle, borderColor: '#52c41a', color: '#389e0d', background: '#f6ffed' }
+                } else if (isFail) {
+                  btnStyle = { ...btnStyle, borderColor: '#ff4d4f', color: '#cf1322', background: '#fff1f0' }
+                } else if (isNa) {
+                  btnStyle = { ...btnStyle, borderColor: '#d9d9d9', color: '#8c8c8c', background: '#fafafa' }
+                }
+              }
+
+              return (
+                <Button
+                  key={item.id}
+                  size="small"
+                  type={isCur ? 'primary' : 'default'}
+                  onClick={() => setCurrentIndex(idx)}
+                  style={btnStyle}
+                >
+                  {idx + 1}
+                  {isDone ? (isPass ? ' ✓' : isFail ? ' ✕' : ' ·') : ''}
+                </Button>
+              )
+            })}
           </div>
         </Card>
 
@@ -836,22 +880,30 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
               {(currentItem.result_type === 'pass_fail' ||
                 currentItem.check_type === 'radio' ||
                 (!currentItem.result_type && !currentItem.check_type)) && (
-                <Radio.Group
-                  value={currentItem.radio_value}
-                  onChange={(e) => handleResultChange('radio_value', e.target.value)}
-                  buttonStyle="solid"
-                  size="large"
-                >
-                  {(currentItem.result_options?.options || currentItem.result_options || [
-                    { value: 'pass', label: '合格' },
-                    { value: 'fail', label: '不合格' },
-                    { value: 'not_applicable', label: '未涉及' },
-                  ]).map((opt: any) => (
-                    <Radio.Button key={opt.value || opt.label} value={opt.value}>
-                      {opt.label}
-                    </Radio.Button>
-                  ))}
-                </Radio.Group>
+                <Space>
+                  <Radio.Group
+                    value={currentItem.radio_value}
+                    onChange={(e) => handleResultChange('radio_value', e.target.value)}
+                    buttonStyle="solid"
+                    size="large"
+                  >
+                    {(currentItem.result_options?.options || currentItem.result_options || [
+                      { value: 'pass', label: '合格' },
+                      { value: 'fail', label: '不合格' },
+                      { value: 'not_applicable', label: '不适用' },
+                    ]).map((opt: any) => {
+                      const label = (opt.label === '未涉及' ? '不适用' : opt.label)
+                      return (
+                        <Radio.Button key={opt.value || opt.label} value={opt.value}>
+                          {label}
+                        </Radio.Button>
+                      )
+                    })}
+                  </Radio.Group>
+                  <Tooltip title="「不适用」表示被检查对象不涉及该条款要求，不计入不合格，不触发整改，不纳入合规率分母">
+                    <span style={{ fontSize: 12, color: '#8c8c8c', cursor: 'help', textDecoration: 'underline' }}>不适用说明</span>
+                  </Tooltip>
+                </Space>
               )}
 
               {(currentItem.result_type === 'score' || (currentItem.result_type === null && currentItem.check_type === 'score')) && (
@@ -1001,29 +1053,24 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontWeight: 500, marginBottom: 12 }}>检查结果汇总</div>
               <Row gutter={16}>
-                <Col span={4}>
+                <Col span={6}>
                   <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
-                    <Statistic title="合格" value={passCount} valueStyle={{ color: '#52c41a' }} />
+                    <Statistic title="合格项" value={passCount} valueStyle={{ color: '#52c41a' }} />
                   </Card>
                 </Col>
-                <Col span={4}>
+                <Col span={6}>
                   <Card size="small" style={{ background: '#fff2f0', borderColor: '#ffccc7' }}>
-                    <Statistic title="不合格" value={failCount} valueStyle={{ color: '#ff4d4f' }} />
+                    <Statistic title="不合格项" value={failCount} valueStyle={{ color: '#ff4d4f' }} />
                   </Card>
                 </Col>
-                <Col span={4}>
-                  <Card size="small" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
-                    <Statistic title="待整改" value={pendingRectificationCount} valueStyle={{ color: '#faad14' }} />
-                  </Card>
-                </Col>
-                <Col span={4}>
+                <Col span={6}>
                   <Card size="small" style={{ background: '#fafafa', borderColor: '#d9d9d9' }}>
-                    <Statistic title="未涉及" value={notApplicableCount} valueStyle={{ color: '#999' }} />
+                    <Statistic title="不适用项" value={notApplicableCount} valueStyle={{ color: '#8c8c8c' }} />
                   </Card>
                 </Col>
-                <Col span={4}>
+                <Col span={6}>
                   <Card size="small">
-                    <Statistic title="总计" value={flatItems.length} />
+                    <Statistic title="总检查项" value={flatItems.length} />
                   </Card>
                 </Col>
               </Row>
@@ -1156,14 +1203,16 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
             {/* 提交按钮 */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-              <Button onClick={handleSaveFinalJudgment}>保存判定</Button>
+              <Button loading={savingJudgment} onClick={handleSaveFinalJudgment}>
+                保存判定结论
+              </Button>
               <Button
                 type="primary"
                 icon={<SendOutlined />}
                 disabled={!canSubmit}
                 onClick={handleSubmit}
               >
-                {isCompleted ? '保存修改' : isTaskMode ? '完成检查任务' : '提交检查结果'}
+                {isCompleted ? '保存全部修改' : isTaskMode ? '完成检查任务' : '提交检查结果'}
               </Button>
             </div>
 

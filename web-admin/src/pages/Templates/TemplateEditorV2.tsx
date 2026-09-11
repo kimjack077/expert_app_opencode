@@ -734,14 +734,19 @@ export default function TemplateEditorV2({
                   </div>
 
                   <Row gutter={32}>
-                    <Col span={12}>
-                      <Form.Item name="title" label="节点名称" rules={[{ required: true, message: '请输入节点名称' }]}>
-                        <Input placeholder="输入节点名称" style={{ borderRadius: 6 }} size="large" />
+                    <Col span={10}>
+                      <Form.Item name="title" label="条目名称" rules={[{ required: true, message: '请输入条目名称' }]}>
+                        <Input placeholder="输入条目名称" style={{ borderRadius: 6 }} size="large" />
                       </Form.Item>
                     </Col>
-                    <Col span={6}>
-                      <Form.Item name="is_category" label="节点属性（分类或检查项）" valuePropName="checked" tooltip="如果是分类，则不能配置检查指标">
-                        <Switch checkedChildren="📂 分类目录" unCheckedChildren="📝 具体检查项" />
+                    <Col span={8}>
+                      <Form.Item
+                        name="is_category"
+                        label="条目属性：分类目录 / 检查项"
+                        valuePropName="checked"
+                        tooltip="【分类目录】仅作为层级容器和分组标题，现场审核时不作为考核项；【具体检查项】需录入检查结论、指标与证据佐证"
+                      >
+                        <Switch checkedChildren="📂 分类目录（分组）" unCheckedChildren="📝 检查项（需评定）" />
                       </Form.Item>
                     </Col>
                     <Col span={6}>
@@ -756,8 +761,8 @@ export default function TemplateEditorV2({
                     {({ getFieldValue }) => {
                       const isCategory = getFieldValue('is_category')
                       if (isCategory) return (
-                        <div style={{ padding: '40px 0', textAlign: 'center', color: '#8c8c8c', background: '#fafafa', borderRadius: 8 }}>
-                          分类节点仅作为目录管理，不包含具体检查参数
+                        <div style={{ padding: '36px 0', textAlign: 'center', color: '#64748b', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}>
+                          📂 <strong>当前条目设为分类目录</strong>：仅作为层级结构分组展示，现场审核时不作为检查项考核，请在其下方添加具体检查项
                         </div>
                       )
                       return (

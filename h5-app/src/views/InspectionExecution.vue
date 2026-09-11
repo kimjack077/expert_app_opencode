@@ -19,7 +19,7 @@
               <van-icon name="warning-o" size="12" />
               {{ riskLevelText }}
             </span>
-            <span v-if="record.template?.is_quantified" class="total-score-badge">总分: {{ totalScore }}</span>
+            <span v-if="showQuantified" class="total-score-badge">总分: {{ totalScore }}</span>
           </div>
           <div class="template-name">{{ record.template?.name }} ({{ record.template?.version }})</div>
           <div class="offline-row">
@@ -106,7 +106,7 @@
               </div>
               <div class="item-info">
                 <div class="item-title-row">
-                  <span class="item-title">{{ item.title }} <span v-if="record?.template?.is_quantified && getItemScore(item) !== null" class="item-score">({{ getItemScore(item) }}分)</span></span>
+                  <span class="item-title">{{ item.title }} <span v-if="showQuantified && getItemScore(item) !== null" class="item-score">({{ getItemScore(item) }}分)</span></span>
                   <span v-if="item.is_required !== false" class="item-required-tag">必填</span>
                   <span v-if="item.attachment_required" class="item-attachment-tag">
                     <van-icon name="photo-o" size="10" /> 附件
@@ -139,6 +139,12 @@
                     shape="square"
                   >{{ opt.label }}</van-radio>
                 </van-radio-group>
+                <div
+                  v-if="getItemResultOptions(item).some(o => o.value === 'not_applicable' || o.value === 'na')"
+                  class="na-tip"
+                >
+                  「不适用」= 该条款不涉及本次受审对象，不计入不合格、不触发整改、不纳入合规率
+                </div>
                 <div v-if="quickInputs[item.id].radio_value === 'fail'" class="fail-description">
                   <van-field
                     v-model="quickInputs[item.id].problem_description"
@@ -258,13 +264,13 @@
             </div>
             <div class="stat-item na">
               <div class="stat-value">{{ naCount }}</div>
-              <div class="stat-label">未涉及项</div>
+              <div class="stat-label">不适用项</div>
             </div>
             <div class="stat-item total">
               <div class="stat-value">{{ totalCheckItems }}</div>
               <div class="stat-label">总检查项</div>
             </div>
-            <div v-if="record?.template?.is_quantified" class="stat-item score">
+            <div v-if="showQuantified" class="stat-item score">
               <div class="stat-value" style="color:#F59E0B">{{ totalScore }}</div>
               <div class="stat-label">最终得分</div>
             </div>
@@ -414,6 +420,7 @@ import {
   getCachedEntry,
   isOnline,
 } from '@/utils/offlineCache.js'
+import { hasQuantifiedItems } from '@/utils/display.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -461,8 +468,7 @@ const defaultMultiOptions = [
 const defaultResultOptions = [
   { label: '合格', value: 'pass' },
   { label: '不合格', value: 'fail' },
-  { label: '待整改', value: 'pending_rectification' },
-  { label: '未涉及', value: 'not_applicable' }
+  { label: '不适用', value: 'not_applicable' }
 ]
 
 const riskLevelText = computed(() => {
@@ -497,11 +503,16 @@ const flattenItems = computed(() => {
   const result = []
   const flatten = (items, level = 0) => {
     items.forEach(item => {
+      const hasChildren = Array.isArray(item.children) && item.children.length > 0
+      // 兜底：只要节点下挂着子项，就一律按「分类目录」处理，
+      // 兼容历史脏数据（根节点 is_category 缺失/false），避免根节点被当成检查项、
+      // 其子项因父节点未展开而整体被隐藏。
       result.push({
         ...item,
         level,
+        is_category: item.is_category === true || hasChildren,
       })
-      if (item.children && item.children.length > 0) {
+      if (hasChildren) {
         flatten(item.children, level + 1)
       }
     })
@@ -510,6 +521,11 @@ const flattenItems = computed(() => {
   flatten(record.value.template.items)
   return result
 })
+
+// 仅当模板真的配置了量化计分项时才展示分数，兜住「定性模板被误标为量化」的场景
+const showQuantified = computed(
+  () => !!record.value?.template?.is_quantified && hasQuantifiedItems(record.value?.template)
+)
 
 const hasAIEnabledItems = computed(() => {
   return flattenItems.value.some(item => item.use_ai === true && !item.is_category)
@@ -567,7 +583,7 @@ const getItemScore = (item) => {
 }
 
 const totalScore = computed(() => {
-  if (!record.value?.template?.is_quantified) return null
+  if (!showQuantified.value) return null
   let total = 0
   for (const item of flattenItems.value) {
     if (item.is_category !== true && isItemCompleted(item)) {
@@ -607,7 +623,8 @@ const naCount = computed(() => {
     if (item.is_category !== true && isItemCompleted(item)) {
       const result = itemResults.value[item.id]
       const radioValue = result?.radio_value
-      if (radioValue === 'not_applicable') count++
+      // 数据库里「不适用」既可能是 not_applicable，也可能是历史值 na
+      if (radioValue === 'not_applicable' || radioValue === 'na') count++
     }
   }
   return count
@@ -1181,11 +1198,9 @@ const initQuickInputs = () => {
 }
 
 const initExpandedItems = () => {
-  flattenItems.value.forEach(item => {
-    if (item.is_category) {
-      expandedItems.value.push(item.id)
-    }
-  })
+  expandedItems.value = flattenItems.value
+    .filter(item => item.is_category)
+    .map(item => item.id)
 }
 
 const toggleCategory = (itemId) => {
@@ -1199,7 +1214,15 @@ const toggleCategory = (itemId) => {
 
 const isItemVisible = (item) => {
   if (!item.parent_id) return true
-  return expandedItems.value.includes(item.parent_id)
+  let currentParentId = item.parent_id
+  while (currentParentId) {
+    if (!expandedItems.value.includes(currentParentId)) {
+      return false
+    }
+    const parentNode = flattenItems.value.find(i => i.id === currentParentId)
+    currentParentId = parentNode?.parent_id
+  }
+  return true
 }
 
 const isItemCompleted = (item) => {
@@ -1458,7 +1481,7 @@ const showSubmitConfirm = async () => {
     `检查项目统计：`,
     `✅ 合格：${passNum} 项`,
     failNum > 0 ? `❌ 不合格：${failNum} 项` : null,
-    naNum > 0 ? `⚪ 未涉及：${naNum} 项` : null,
+    naNum > 0 ? `⚪ 不适用：${naNum} 项` : null,
     `━━━━━━━━━━━━`,
     `共计：${totalNum} 项`,
     '',
@@ -1608,7 +1631,16 @@ const completeInspection = async () => {
 const updateTaskStatusAndRemarks = async () => {
   const remarksParts = []
   if (finalJudgment.result) {
-    remarksParts.push(`最终判定: ${finalJudgment.result}`)
+    // 判定结论写中文，避免 pass/fail 落库并回显到备注
+    const verdictCn =
+      finalJudgment.result === 'pass'
+        ? '合格'
+        : finalJudgment.result === 'fail'
+          ? '不合格'
+          : finalJudgment.result === 'partial_pass'
+            ? '基本合格'
+            : finalJudgment.result
+    remarksParts.push(`最终判定: ${verdictCn}`)
   }
   if (finalJudgment.remarks) {
     remarksParts.push(finalJudgment.remarks)
@@ -1756,7 +1788,17 @@ watch(
 .inspection-execution-page {
   min-height: 100vh;
   background: var(--bg-light);
-  padding-bottom: 100px;
+  padding-bottom: 120px;
+  /* 明确开放纵向滚动，并启用移动端惯性滚动，避免内容超屏时滑不动 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.na-tip {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #94a3b8;
 }
 
 .page-header {

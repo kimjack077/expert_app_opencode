@@ -210,7 +210,8 @@ export default function AuditItemDetail() {
     const file = uploadInfo.file as File
     if (!recordId) return
     try {
-      const res: any = await mediaApi.upload(file, { record_id: recordId })
+      // 优先用检查记录项 ID，后端据此换算为任务检查项，保住照片与条目的关联
+      const res: any = await mediaApi.upload(file, { record_id: recordItemId || recordId })
       const photoUrl = res.data?.file_path
       if (photoUrl) {
         const updatedPhotos = [...(result.photos || []), photoUrl]

@@ -3,6 +3,8 @@ import { Modal, Button, Space, Tag, Divider, message, Spin } from 'antd'
 import { PrinterOutlined, ShareAltOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { recordApi } from '../../services/api'
+import { hasQuantifiedItems } from '../../utils/display'
+import { useAuthStore } from '@/stores/auth'
 
 interface Props {
     open: boolean
@@ -123,13 +125,16 @@ export default function InspectionReport({ open, record, onClose }: Props) {
     const handleDownloadPdf = async () => {
         setDownloading(true)
         try {
-            const token = localStorage.getItem('token')
+            const token = useAuthStore.getState().token || localStorage.getItem('token')
             const response = await fetch(`/api/records/${record.id}/report/pdf`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                 },
             })
-            if (!response.ok) throw new Error('下载失败')
+            if (!response.ok) {
+                const errJson = await response.json().catch(() => null)
+                throw new Error(errJson?.detail || errJson?.message || '下载失败')
+            }
             const blob = await response.blob()
             const url = window.URL.createObjectURL(blob)
             const a = document.createElement('a')
@@ -140,9 +145,9 @@ export default function InspectionReport({ open, record, onClose }: Props) {
             window.URL.revokeObjectURL(url)
             document.body.removeChild(a)
             message.success('PDF下载成功')
-        } catch (error) {
+        } catch (error: any) {
             console.error('下载PDF失败:', error)
-            message.error('下载PDF失败')
+            message.error(error.message || '下载PDF失败')
         } finally {
             setDownloading(false)
         }
@@ -178,7 +183,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                 <div className="report-cover" style={{ textAlign: 'center', paddingBottom: 24, borderBottom: '2px solid #222', marginBottom: 24 }}>
                     <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: 4, marginBottom: 8 }}>现场检查报告</h1>
                     <div style={{ fontSize: 14, color: '#555' }}>
-                        {record.enterprise_name || '未知企业'} &nbsp;·&nbsp; {inspectionDate}
+                        {record.enterprise_name || '未知企业'} · {inspectionDate}
                     </div>
                     <div style={{ marginTop: 12 }}>
                         {record.overall_result && (
@@ -266,7 +271,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                             </div>
                         ))}
                     </div>
-                    {record.template?.is_quantified && (
+                    {record.template?.is_quantified && hasQuantifiedItems(record.template) && (
                         <div style={{ textAlign: 'center', padding: '8px 16px', background: '#fef9c3', borderRadius: 8, marginBottom: 12 }}>
                             <span style={{ color: '#a16207', fontWeight: 700 }}>量化总分：{record.total_score ?? 0} 分</span>
                         </div>
@@ -278,7 +283,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                 <th style={{ background: '#1e40af', color: '#fff', border: '1px solid #93c5fd', padding: '7px 8px', textAlign: 'left' }}>序号</th>
                                 <th style={{ background: '#1e40af', color: '#fff', border: '1px solid #93c5fd', padding: '7px 8px', textAlign: 'left' }}>检查项名称</th>
                                 <th style={{ background: '#1e40af', color: '#fff', border: '1px solid #93c5fd', padding: '7px 8px' }}>检查结论</th>
-                                {record.template?.is_quantified && (
+                                {record.template?.is_quantified && hasQuantifiedItems(record.template) && (
                                     <th style={{ background: '#1e40af', color: '#fff', border: '1px solid #93c5fd', padding: '7px 8px' }}>得分</th>
                                 )}
                                 <th style={{ background: '#1e40af', color: '#fff', border: '1px solid #93c5fd', padding: '7px 8px' }}>问题描述</th>
@@ -309,7 +314,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                                 <span style={{ color: '#bbb' }}>—</span>
                                             )}
                                         </td>
-                                        {record.template?.is_quantified && (
+                                        {record.template?.is_quantified && hasQuantifiedItems(record.template) && (
                                             <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', textAlign: 'center' }}>
                                                 {item.score_value ?? '—'}
                                             </td>
@@ -418,13 +423,13 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                             <div key={sig.label}>
                                 <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 30 }}>{sig.label}：</div>
                                 <div style={{ borderBottom: '1px solid #374151', paddingBottom: 4, minWidth: 200, fontSize: 14, color: '#111' }}>
-                                    {sig.value || '&nbsp;'}
+                                    {sig.value || '————'}
                                 </div>
                             </div>
                         ))}
                     </div>
                     <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 32 }}>
-                        本报告由 易审通 (EasyAudit) 智能审核云平台自动生成 &nbsp;·&nbsp; 生成时间：{dayjs().format('YYYY-MM-DD HH:mm:ss')}
+                        本报告由 易审通 (EasyAudit) 智能审核云平台自动生成 · 生成时间：{dayjs().format('YYYY-MM-DD HH:mm:ss')}
                     </div>
                 </div>
             </div>
