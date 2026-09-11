@@ -117,6 +117,7 @@ export default function MainLayout() {
         theme="light"
         width={224}
         collapsedWidth={64}
+        className="main-layout-sider"
         style={{
           boxShadow: '2px 0 8px rgba(0, 0, 0, 0.04)',
           zIndex: 10,
@@ -165,36 +166,30 @@ export default function MainLayout() {
             )}
           </div>
         </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          defaultOpenKeys={['现场工作', '项目管理', '基础配置']}
-          items={menuItems}
-          onClick={({ key }) => {
-            if (typeof key === 'string' && key.startsWith('/')) navigate(key)
-          }}
-          style={{
-            borderRight: 0,
-            paddingTop: 8,
-            paddingBottom: 8,
-          }}
-        />
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: '16px 12px',
-          borderTop: '1px solid var(--border-color)',
-          background: 'var(--card-bg)',
-        }}>
+        <div className="sidebar-menu-wrapper">
+          <Menu
+            mode="inline"
+            selectedKeys={[location.pathname]}
+            defaultOpenKeys={['现场工作', '项目管理', '基础配置']}
+            items={menuItems}
+            onClick={({ key }) => {
+              if (typeof key === 'string' && key.startsWith('/')) navigate(key)
+            }}
+            style={{
+              borderRight: 0,
+              paddingTop: 8,
+              paddingBottom: 8,
+            }}
+          />
+        </div>
+        <div className="sidebar-footer">
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={toggleCollapsed}
             style={{
               width: '100%',
-              height: 40,
+              height: 36,
               display: 'flex',
               alignItems: 'center',
               justifyContent: collapsed ? 'center' : 'flex-start',
@@ -206,7 +201,7 @@ export default function MainLayout() {
           </Button>
         </div>
       </Sider>
-      <Layout>
+      <Layout className="main-layout-body">
         <Header className="header-container">
           {/* 左侧：折叠按钮 + 品牌 Slogan 与系统标识 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
