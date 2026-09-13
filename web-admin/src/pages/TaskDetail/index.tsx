@@ -52,7 +52,8 @@ export default function TaskDetail() {
     const allCategoryKeys: string[] = []
 
     const processItem = (item: any): any => {
-      const isCategory = !!item.is_category
+      const hasChildren = item.children && item.children.length > 0
+      const isCategory = !!item.is_category || hasChildren
       if (isCategory) {
         const catKey = `cat_${item.id}`
         allCategoryKeys.push(catKey)
@@ -102,17 +103,42 @@ export default function TaskDetail() {
     return { tree, allCategoryKeys }
   }
 
-  // 无模板树时的降级处理
+  // 无模板树时的降级处理（根据 parent_id 还原树形）
   const buildFallbackTree = (taskRecords: any[]) => {
-    return (taskRecords || []).map((r) => ({
+    const list = (taskRecords || []).map((r) => ({
       ...r,
       title:
         r?.check_item?.title ||
         r?.template_item?.title ||
         r?.item_title ||
         '未命名检查项',
+      parent_id: r?.template_item?.parent_id || r?.check_item?.parent_id || null,
       is_category: !!(r?.template_item?.is_category || r?.check_item?.is_category),
     }))
+
+    const idMap = new Map<string, any>()
+    list.forEach(item => idMap.set(String(item.template_item_id || item.id), { ...item, children: [] }))
+
+    const roots: any[] = []
+    list.forEach(item => {
+      const node = idMap.get(String(item.template_item_id || item.id))
+      if (item.parent_id && idMap.has(String(item.parent_id))) {
+        idMap.get(String(item.parent_id)).children.push(node)
+      } else {
+        roots.push(node)
+      }
+    })
+
+    const cleanChildren = (node: any) => {
+      if (node.children?.length > 0) {
+        node.is_category = true
+        node.children.forEach(cleanChildren)
+      } else {
+        delete node.children
+      }
+    }
+    roots.forEach(cleanChildren)
+    return roots
   }
 
   const fetchTaskDetail = async () => {

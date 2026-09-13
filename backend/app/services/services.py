@@ -13,6 +13,7 @@ from app.models.template import (
 )
 from app.models.audit import AuditLog
 from app.utils.security import get_password_hash
+from app.utils.category import is_category_node, load_parent_ids
 
 
 class AuditService:
@@ -117,12 +118,24 @@ class TaskService:
 
     @staticmethod
     async def _create_records_from_template(db: AsyncSession, task: InspectionTask):
+        """按模板为任务派发填报记录。
+
+        与 routers/tasks.py 的 create_task 保持同一口径：只派发真正的叶子检查项，
+        分类目录（存在有效子节点的父节点）不生成空记录，避免源头污染。
+        """
+        parent_ids = await load_parent_ids(db, template_id=task.template_id)
         result = await db.execute(
             select(TemplateItem)
-            .where(TemplateItem.template_id == task.template_id)
+            .where(
+                TemplateItem.template_id == task.template_id,
+                TemplateItem.is_deleted == False,  # noqa: E712
+            )
             .order_by(TemplateItem.sort_order)
         )
-        items = result.scalars().all()
+        items = [
+            i for i in result.scalars().all()
+            if not is_category_node(i, parent_ids)
+        ]
 
         for item in items:
             record = TaskItemRecord(

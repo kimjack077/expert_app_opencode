@@ -3,7 +3,7 @@ from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, or_, func, Integer
+from sqlalchemy import select, update, delete, or_, func, Integer, case
 from sqlalchemy.orm import selectinload
 
 # RELOADED_MARKER_V3
@@ -21,6 +21,11 @@ from app.schemas import (
     TemplateItemResponse,
 )
 from app.utils.security import get_current_user, get_current_admin_user
+from app.utils.category import (
+    CATEGORY_FIELD_OVERRIDES,
+    normalize_as_category,
+    parent_id_subquery,
+)
 from app.services import AuditService
 
 router = APIRouter()
@@ -102,13 +107,23 @@ async def get_templates(
 
     template_ids = [t.id for t in templates]
     
+    # 统计口径统一（老杨 2026-09-11 确认）：
+    #   total_items = 有效条目数（不含软删除）
+    #   categories  = 分类目录数（显式标记 is_category，或存在有效子节点的父节点）
+    #   check_items = 真正的叶子检查项数，分类目录不计入
+    # 三者满足 total_items = categories + check_items，杜绝"6 vs 8"式对不上账。
+    is_cat_expr = or_(
+        TemplateItem.is_category.is_(True),
+        TemplateItem.id.in_(parent_id_subquery()),
+    )
     items_count_query = select(
         TemplateItem.template_id,
         func.count(TemplateItem.id).label('total_items'),
-        func.sum(func.cast(TemplateItem.is_category == True, Integer)).label('categories'),
-        func.sum(func.cast(TemplateItem.is_category != True, Integer)).label('check_items')
+        func.sum(case((is_cat_expr, 1), else_=0)).label('categories'),
+        func.sum(case((is_cat_expr, 0), else_=1)).label('check_items'),
     ).where(
-        TemplateItem.template_id.in_(template_ids)
+        TemplateItem.template_id.in_(template_ids),
+        TemplateItem.is_deleted == False,  # noqa: E712
     ).group_by(TemplateItem.template_id)
     
     items_result = await db.execute(items_count_query)
@@ -247,29 +262,31 @@ async def get_template(
         for item in items:
             item_parent_id = str(item.parent_id) if item.parent_id else None
             if item_parent_id == parent_id:
+                children = build_tree(items, str(item.id))
+                is_cat = bool(item.is_category) or len(children) > 0
                 node = {
                     "id": str(item.id),
                     "parent_id": item_parent_id,
                     "title": item.title,
                     "description": item.description,
-                    "check_method": item.check_method,
-                    "legal_basis": item.legal_basis,
-                    "standard_ref": item.standard_ref,
-                    "result_type": item.result_type,
-                    "result_options": item.result_options,
-                    "min_value": float(item.min_value) if item.min_value else None,
-                    "max_value": float(item.max_value) if item.max_value else None,
-                    "unit": item.unit,
-                    "is_required": item.is_required,
-                    "use_ai": item.use_ai,
+                    "check_method": None if is_cat else item.check_method,
+                    "legal_basis": None if is_cat else item.legal_basis,
+                    "standard_ref": None if is_cat else item.standard_ref,
+                    "result_type": None if is_cat else item.result_type,
+                    "result_options": None if is_cat else item.result_options,
+                    "min_value": None if is_cat else (float(item.min_value) if item.min_value else None),
+                    "max_value": None if is_cat else (float(item.max_value) if item.max_value else None),
+                    "unit": None if is_cat else item.unit,
+                    "is_required": False if is_cat else item.is_required,
+                    "use_ai": False if is_cat else item.use_ai,
                     "risk_level": item.risk_level,
-                    "is_category": item.is_category,
-                    "score_weight": float(item.score_weight) if item.score_weight else None,
-                    "default_score": float(item.default_score) if item.default_score else None,
-                    "allow_attachment": item.allow_attachment,
-                    "attachment_required": item.attachment_required,
-                    "ai_prompt_template": item.ai_prompt_template,
-                    "children": build_tree(items, str(item.id)),
+                    "is_category": is_cat,
+                    "score_weight": None if is_cat else (float(item.score_weight) if item.score_weight else None),
+                    "default_score": None if is_cat else (float(item.default_score) if item.default_score else None),
+                    "allow_attachment": False if is_cat else item.allow_attachment,
+                    "attachment_required": False if is_cat else item.attachment_required,
+                    "ai_prompt_template": None if is_cat else item.ai_prompt_template,
+                    "children": children,
                 }
                 tree.append(node)
         return tree
@@ -493,6 +510,19 @@ async def copy_template(
                 if item_to_update:
                     item_to_update.parent_id = UUID(new_parent_id)
 
+    # 统一规范化：复制后若某节点成为父节点，必须升级为分类目录
+    # （源模板若存在"有子项但未标分类"的脏数据，直接复制不会把它洗干净）
+    copied_parent_ids = {
+        item.parent_id for item in source_items if item.parent_id is not None
+    }
+    for old_parent_id in copied_parent_ids:
+        new_parent_id = id_mapping.get(str(old_parent_id))
+        if not new_parent_id:
+            continue
+        copied_parent = await db.get(TemplateItem, new_parent_id)
+        if copied_parent:
+            normalize_as_category(copied_parent)
+
     await db.commit()
     await db.refresh(new_template)
 
@@ -535,16 +565,18 @@ async def get_template_items(
         tree = []
         for item in item_list:
             if (item.parent_id and str(item.parent_id) == parent_id) or (not item.parent_id and not parent_id):
+                children = build_tree(item_list, str(item.id))
+                is_cat = bool(item.is_category) or len(children) > 0
                 tree.append({
                     "id": str(item.id),
                     "title": item.title,
-                    "check_method": item.check_method,
-                    "result_type": item.result_type,
-                    "is_required": item.is_required,
-                    "is_category": item.is_category,
+                    "check_method": None if is_cat else item.check_method,
+                    "result_type": None if is_cat else item.result_type,
+                    "is_required": False if is_cat else item.is_required,
+                    "is_category": is_cat,
                     "sort_order": item.sort_order,
                     "parent_id": str(item.parent_id) if item.parent_id else None,
-                    "children": build_tree(item_list, str(item.id)),
+                    "children": children,
                 })
         return tree
 
@@ -560,9 +592,10 @@ async def create_item(
 ):
     """在模板中添加检查项目
 
-    权限规则：
-    - 管理员：可以在所有模板中添加项目
-    - 专家：只能在自己创建的模板中添加项目
+    权限与业务规则：
+    - 管理员可以在所有模板中添加项目，专家只能在自己创建的模板中添加项目
+    - 若指定了 parent_id，其父节点自动升级为分类目录（is_category=True），且清空检查项属性
+    - 若新增节点本身为分类目录，禁止录入检查项内容
     """
     template = await db.get(InspectionTemplate, template_id)
     if not template:
@@ -572,32 +605,41 @@ async def create_item(
     if not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限修改此模板")
 
+    is_category = bool(item_data.is_category)
+
     item = TemplateItem(
         template_id=template_id,
         parent_id=item_data.parent_id,
         title=item_data.title,
         description=item_data.description,
-        check_method=item_data.check_method,
-        legal_basis=item_data.legal_basis,
-        standard_ref=item_data.standard_ref,
-        result_type=item_data.result_type or "pass_fail",
-        result_options=item_data.result_options,
-        min_value=item_data.min_value,
-        max_value=item_data.max_value,
-        unit=item_data.unit,
-        is_required=item_data.is_required if item_data.is_required is not None else True,
-        use_ai=item_data.use_ai if item_data.use_ai is not None else False,
+        check_method=None if is_category else item_data.check_method,
+        legal_basis=None if is_category else item_data.legal_basis,
+        standard_ref=None if is_category else item_data.standard_ref,
+        result_type=None if is_category else (item_data.result_type or "pass_fail"),
+        result_options=None if is_category else item_data.result_options,
+        min_value=None if is_category else item_data.min_value,
+        max_value=None if is_category else item_data.max_value,
+        unit=None if is_category else item_data.unit,
+        is_required=False if is_category else (item_data.is_required if item_data.is_required is not None else True),
+        use_ai=False if is_category else (item_data.use_ai if item_data.use_ai is not None else False),
         risk_level=item_data.risk_level or "medium",
         sort_order=item_data.sort_order or 0,
-        is_category=item_data.is_category if item_data.is_category is not None else False,
-        score_weight=item_data.score_weight,
-        default_score=item_data.default_score,
-        allow_attachment=item_data.allow_attachment if item_data.allow_attachment is not None else False,
-        attachment_required=item_data.attachment_required if item_data.attachment_required is not None else False,
-        ai_prompt_template=item_data.ai_prompt_template,
+        is_category=is_category,
+        score_weight=None if is_category else item_data.score_weight,
+        default_score=None if is_category else item_data.default_score,
+        allow_attachment=False if is_category else (item_data.allow_attachment if item_data.allow_attachment is not None else False),
+        attachment_required=False if is_category else (item_data.attachment_required if item_data.attachment_required is not None else False),
+        ai_prompt_template=None if is_category else item_data.ai_prompt_template,
         created_by=current_user.id,
     )
     db.add(item)
+
+    # 若添加了子节点，自动将父节点规范升级为分类目录，并清空其检查项属性
+    if item_data.parent_id:
+        parent_item = await db.get(TemplateItem, item_data.parent_id)
+        if parent_item:
+            normalize_as_category(parent_item)
+
     await db.commit()
     await db.refresh(item)
 
@@ -613,9 +655,8 @@ async def update_item(
 ):
     """更新检查项目
 
-    权限规则：
-    - 管理员：可以更新所有检查项目
-    - 专家：只能更新自己创建的模板中的项目
+    业务规则：
+    - 只要该节点下存在有效子项，一律强制为分类目录（is_category=True），禁止录入检查项内容
     """
     item = await db.get(TemplateItem, item_id)
     if not item:
@@ -626,7 +667,22 @@ async def update_item(
     if template and not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限修改此模板的项目")
 
+    # 检查该节点是否拥有子节点
+    children_count_res = await db.execute(
+        select(func.count(TemplateItem.id)).where(
+            TemplateItem.parent_id == item.id,
+            TemplateItem.is_deleted == False,  # noqa: E712
+        )
+    )
+    has_children = (children_count_res.scalar() or 0) > 0
+
     update_data = item_data.model_dump(exclude_unset=True)
+
+    # 只要有子节点，或者主动设置为分类目录，强制规范化为纯净目录。
+    # 字段清单统一取自 app/utils/category，避免各处清单漂移。
+    if has_children or update_data.get("is_category") is True:
+        update_data.update(CATEGORY_FIELD_OVERRIDES)
+
     for field, value in update_data.items():
         setattr(item, field, value)
 

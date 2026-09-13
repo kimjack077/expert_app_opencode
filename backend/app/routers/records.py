@@ -25,6 +25,7 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
+from app.utils.category import is_category_node, load_parent_ids
 from app.services import AuditService
 from app.services.llm_service import llm_service
 
@@ -235,13 +236,19 @@ async def create_record(
     if existing_draft:
         return make_response(data={"id": str(existing_draft.id), "is_draft": True})
 
-    # 获取模板所有检查项以生成快照
+    # 获取模板所有检查项以生成快照（排除软删除项，保证快照与当前模板一致）
     all_items_result = await db.execute(
         select(TemplateItem)
-        .where(TemplateItem.template_id == record_data.template_id)
+        .where(
+            TemplateItem.template_id == record_data.template_id,
+            TemplateItem.is_deleted == False,  # noqa: E712
+        )
         .order_by(TemplateItem.sort_order)
     )
     all_template_items = all_items_result.scalars().all()
+
+    # 分类目录集合：显式标记 或 存在有效子节点（统一走 app/utils/category）
+    parent_ids = await load_parent_ids(db, template_id=record_data.template_id)
 
     # 构建模板快照 JSON
     template_snapshot = {
@@ -266,7 +273,7 @@ async def create_record(
                 "max_value": str(ti.max_value) if ti.max_value is not None else None,
                 "unit": ti.unit,
                 "risk_level": ti.risk_level,
-                "is_category": ti.is_category,
+                "is_category": bool(ti.is_category) or ti.id in parent_ids,
                 "sort_order": ti.sort_order,
                 "score_weight": str(ti.score_weight)
                 if ti.score_weight is not None
@@ -300,9 +307,9 @@ async def create_record(
     db.add(record)
     await db.flush()  # flush以获取 record.id
 
-    # 创建检查记录项，只针对非分类节点，同时写入行级冗余字段
+    # 创建检查记录项，只针对真正的叶子检查项（分类目录一律不生成空记录）
     for item in all_template_items:
-        if not item.is_category:
+        if not is_category_node(item, parent_ids):
             record_item = InspectionRecordItem(
                 record_id=record.id,
                 template_item_id=item.id,
@@ -534,6 +541,7 @@ async def get_record(
                     else getattr(template_item, "use_ai", False)
                 )
 
+                children = build_tree(items, str(template_item.id))
                 node = {
                     "id": str(record_item.id) if record_item else str(template_item.id),
                     "template_item_id": str(template_item.id),
@@ -580,8 +588,10 @@ async def get_record(
                     else None,
                     "ai_suggestion": record_item.ai_suggestion if record_item else None,
                     "photos": record_item.photos or [] if record_item else [],
-                    "is_category": template_item.is_category,
-                    "children": build_tree(items, str(template_item.id)),
+                    # 动态纠偏：只要挂了子节点就一律按分类目录返回，
+                    # 兼容历史脏数据，保证前端不会把根节点当检查项渲染。
+                    "is_category": bool(template_item.is_category) or len(children) > 0,
+                    "children": children,
                 }
                 tree.append(node)
         return tree
@@ -591,6 +601,7 @@ async def get_record(
         for item in items:
             item_parent_id = str(item.parent_id) if item.parent_id else None
             if item_parent_id == parent_id:
+                children = build_template_tree(items, str(item.id))
                 node = {
                     "id": str(item.id),
                     "parent_id": item_parent_id,
@@ -620,8 +631,8 @@ async def get_record(
                     "use_ai": getattr(item, "use_ai", False),
                     "is_required": item.is_required,
                     "risk_level": item.risk_level,
-                    "is_category": item.is_category,
-                    "children": build_template_tree(items, str(item.id)),
+                    "is_category": bool(item.is_category) or len(children) > 0,
+                    "children": children,
                 }
                 tree.append(node)
         return tree

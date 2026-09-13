@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Button, Form, Input, Select, Tree, message, Space, Tag, InputNumber, Switch, Empty, Tooltip, Row, Col, Dropdown, Divider } from 'antd'
+import { Button, Form, Input, Select, Tree, message, Space, Tag, InputNumber, Switch, Empty, Tooltip, Row, Col, Dropdown, Divider, Alert } from 'antd'
 import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, FolderOutlined, FileTextOutlined, ExpandOutlined, CompressOutlined, RobotOutlined, HolderOutlined, SaveOutlined } from '@ant-design/icons'
 import { templateApi } from '@/services/api'
 import AiExtractModal from './AiExtractModal'
@@ -161,23 +161,25 @@ export default function TemplateEditorV2({
     if (selectedKeys.length > 0) {
       const node = info.node as unknown as TreeNodeData
       setSelectedNode(node)
+      const hasChildren = !!(node.children && node.children.length > 0)
+      const isCategory = !!node.is_category || hasChildren
       editForm.setFieldsValue({
         title: node.title,
-        is_category: node.is_category,
-        result_type: node.result_type || 'pass_fail',
-        risk_level: node.risk_level || 'medium',
-        description: node.description,
-        check_method: node.check_method,
-        legal_basis: node.legal_basis,
-        standard_ref: node.standard_ref,
+        is_category: isCategory,
+        result_type: isCategory ? undefined : (node.result_type || 'pass_fail'),
+        risk_level: isCategory ? undefined : (node.risk_level || 'medium'),
+        description: isCategory ? undefined : node.description,
+        check_method: isCategory ? undefined : node.check_method,
+        legal_basis: isCategory ? undefined : node.legal_basis,
+        standard_ref: isCategory ? undefined : node.standard_ref,
         min_value: node.min_value,
         max_value: node.max_value,
         unit: node.unit,
-        use_ai: node.use_ai,
+        use_ai: isCategory ? false : node.use_ai,
         score_weight: node.score_weight,
         default_score: node.default_score,
-        attachment_required: node.attachment_required ?? false,
-        ai_prompt_template: node.ai_prompt_template,
+        attachment_required: isCategory ? false : (node.attachment_required ?? false),
+        ai_prompt_template: isCategory ? undefined : node.ai_prompt_template,
       })
     }
   }
@@ -263,24 +265,26 @@ export default function TemplateEditorV2({
     if (!selectedNode) return
     try {
       setLoading(true)
+      const hasChildren = !!(selectedNode.children && selectedNode.children.length > 0)
+      const isCategory = hasChildren || !!values.is_category
       const payload = {
         title: values.title,
-        is_category: values.is_category,
-        result_type: values.is_category ? undefined : values.result_type,
-        description: values.is_category ? undefined : values.description,
-        check_method: values.is_category ? undefined : values.check_method,
-        legal_basis: values.is_category ? undefined : values.legal_basis,
-        standard_ref: values.is_category ? undefined : values.standard_ref,
-        risk_level: values.is_category ? undefined : values.risk_level,
-        min_value: !values.is_category && values.result_type === 'numeric' ? values.min_value : undefined,
-        max_value: !values.is_category && values.result_type === 'numeric' ? values.max_value : undefined,
-        unit: !values.is_category && values.result_type === 'numeric' ? values.unit : undefined,
-        use_ai: values.use_ai,
-        score_weight: !values.is_category ? values.score_weight : undefined,
-        default_score: !values.is_category ? values.default_score : undefined,
-        allow_attachment: true,
-        attachment_required: !values.is_category ? (values.attachment_required ?? false) : undefined,
-        ai_prompt_template: !values.is_category ? values.ai_prompt_template : undefined,
+        is_category: isCategory,
+        result_type: isCategory ? undefined : values.result_type,
+        description: isCategory ? undefined : values.description,
+        check_method: isCategory ? undefined : values.check_method,
+        legal_basis: isCategory ? undefined : values.legal_basis,
+        standard_ref: isCategory ? undefined : values.standard_ref,
+        risk_level: isCategory ? undefined : values.risk_level,
+        min_value: !isCategory && values.result_type === 'numeric' ? values.min_value : undefined,
+        max_value: !isCategory && values.result_type === 'numeric' ? values.max_value : undefined,
+        unit: !isCategory && values.result_type === 'numeric' ? values.unit : undefined,
+        use_ai: isCategory ? false : values.use_ai,
+        score_weight: !isCategory ? values.score_weight : undefined,
+        default_score: !isCategory ? values.default_score : undefined,
+        allow_attachment: !isCategory,
+        attachment_required: !isCategory ? (values.attachment_required ?? false) : undefined,
+        ai_prompt_template: !isCategory ? values.ai_prompt_template : undefined,
       }
       await templateApi.updateItem(selectedNode.id, payload)
       message.success('保存成功')
@@ -733,6 +737,15 @@ export default function TemplateEditorV2({
                     <span style={{ fontSize: 15, fontWeight: 600, color: '#1f2937' }}>基本信息</span>
                   </div>
 
+                  {selectedNode?.children && selectedNode.children.length > 0 && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="当前节点包含下级子项，系统已将其规范为「分类目录」，仅作为层级分组容器，不可录入打分、判定等检查项内容。"
+                      style={{ marginBottom: 16, borderRadius: 6 }}
+                    />
+                  )}
+
                   <Row gutter={32}>
                     <Col span={10}>
                       <Form.Item name="title" label="条目名称" rules={[{ required: true, message: '请输入条目名称' }]}>
@@ -744,14 +757,29 @@ export default function TemplateEditorV2({
                         name="is_category"
                         label="条目属性：分类目录 / 检查项"
                         valuePropName="checked"
-                        tooltip="【分类目录】仅作为层级容器和分组标题，现场审核时不作为考核项；【具体检查项】需录入检查结论、指标与证据佐证"
+                        tooltip={selectedNode?.children && selectedNode.children.length > 0 ? "当前节点包含下级子项，已被系统锁定为分类目录" : "【分类目录】仅作为层级容器和分组标题，现场审核时不作为考核项；【具体检查项】需录入检查结论、指标与证据佐证"}
                       >
-                        <Switch checkedChildren="📂 分类目录（分组）" unCheckedChildren="📝 检查项（需评定）" />
+                        <Switch
+                          checkedChildren="📂 分类目录（分组）"
+                          unCheckedChildren="📝 检查项（需评定）"
+                          disabled={!!(selectedNode?.children && selectedNode.children.length > 0)}
+                        />
                       </Form.Item>
                     </Col>
                     <Col span={6}>
-                      <Form.Item name="use_ai" label="是否允许AI智能判断" valuePropName="checked">
-                        <Switch checkedChildren="🤖 已开启" unCheckedChildren="关闭" />
+                      <Form.Item
+                        noStyle
+                        shouldUpdate={(prev, current) => prev.is_category !== current.is_category}
+                      >
+                        {({ getFieldValue }) => {
+                          const isCat = getFieldValue('is_category') || !!(selectedNode?.children && selectedNode.children.length > 0)
+                          if (isCat) return null
+                          return (
+                            <Form.Item name="use_ai" label="是否允许AI智能判断" valuePropName="checked">
+                              <Switch checkedChildren="🤖 已开启" unCheckedChildren="关闭" />
+                            </Form.Item>
+                          )
+                        }}
                       </Form.Item>
                     </Col>
                   </Row>

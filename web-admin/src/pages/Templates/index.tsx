@@ -276,24 +276,27 @@ export default function Templates() {
     try {
       if (!editingNode) return
 
+      const hasChildren = !!(editingNode.children && editingNode.children.length > 0)
+      const isCat = hasChildren || !!values.is_category
+
       const payload = {
         title: values.title,
-        is_category: values.is_category,
-        result_type: values.is_category ? undefined : values.result_type,
-        description: values.is_category ? undefined : values.description,
-        check_method: values.is_category ? undefined : values.check_method,
-        legal_basis: values.is_category ? undefined : values.legal_basis,
-        standard_ref: values.is_category ? undefined : values.standard_ref,
-        risk_level: values.is_category ? undefined : values.risk_level,
-        min_value: !values.is_category && values.result_type === 'numeric' ? values.min_value : undefined,
-        max_value: !values.is_category && values.result_type === 'numeric' ? values.max_value : undefined,
-        unit: !values.is_category && values.result_type === 'numeric' ? values.unit : undefined,
-        use_ai: !values.is_category ? values.use_ai : undefined,
-        score_weight: !values.is_category ? values.score_weight : undefined,
-        default_score: !values.is_category ? values.default_score : undefined,
-        allow_attachment: true,
-        attachment_required: !values.is_category ? (values.attachment_required ?? false) : undefined,
-        ai_prompt_template: !values.is_category ? values.ai_prompt_template : undefined,
+        is_category: isCat,
+        result_type: isCat ? undefined : values.result_type,
+        description: isCat ? undefined : values.description,
+        check_method: isCat ? undefined : values.check_method,
+        legal_basis: isCat ? undefined : values.legal_basis,
+        standard_ref: isCat ? undefined : values.standard_ref,
+        risk_level: isCat ? undefined : values.risk_level,
+        min_value: !isCat && values.result_type === 'numeric' ? values.min_value : undefined,
+        max_value: !isCat && values.result_type === 'numeric' ? values.max_value : undefined,
+        unit: !isCat && values.result_type === 'numeric' ? values.unit : undefined,
+        use_ai: isCat ? false : values.use_ai,
+        score_weight: !isCat ? values.score_weight : undefined,
+        default_score: !isCat ? values.default_score : undefined,
+        allow_attachment: !isCat,
+        attachment_required: !isCat ? (values.attachment_required ?? false) : undefined,
+        ai_prompt_template: !isCat ? values.ai_prompt_template : undefined,
       }
 
       await templateApi.updateItem(editingNode.id, payload)
@@ -322,23 +325,25 @@ export default function Templates() {
   // 开始编辑节点
   const startEditNode = (node: TreeNodeData) => {
     setEditingNode(node)
+    const hasChildren = !!(node.children && node.children.length > 0)
+    const isCat = hasChildren || !!node.is_category
     editNodeForm.setFieldsValue({
       title: node.title,
-      is_category: node.is_category,
-      result_type: node.result_type || 'pass_fail',
-      risk_level: node.risk_level || 'medium',
-      description: node.description,
-      check_method: node.check_method,
-      legal_basis: node.legal_basis,
-      standard_ref: node.standard_ref,
+      is_category: isCat,
+      result_type: isCat ? undefined : (node.result_type || 'pass_fail'),
+      risk_level: isCat ? undefined : (node.risk_level || 'medium'),
+      description: isCat ? undefined : node.description,
+      check_method: isCat ? undefined : node.check_method,
+      legal_basis: isCat ? undefined : node.legal_basis,
+      standard_ref: isCat ? undefined : node.standard_ref,
       min_value: node.min_value,
       max_value: node.max_value,
       unit: node.unit,
-      use_ai: node.use_ai,
+      use_ai: isCat ? false : node.use_ai,
       score_weight: node.score_weight,
       default_score: node.default_score,
-      attachment_required: node.attachment_required ?? false,
-      ai_prompt_template: node.ai_prompt_template,
+      attachment_required: isCat ? false : (node.attachment_required ?? false),
+      ai_prompt_template: isCat ? undefined : node.ai_prompt_template,
     })
   }
 
@@ -346,6 +351,7 @@ export default function Templates() {
   const renderTreeNodeTitle = (nodeData: TreeNodeData) => {
     const isEditing = editingNode?.id === nodeData.id
     const isAdding = addingNodeId === nodeData.id
+    const nodeHasChildren = !!(nodeData.children && nodeData.children.length > 0)
 
     // 编辑状态 - 横向布局
     if (isEditing) {
@@ -365,22 +371,45 @@ export default function Templates() {
               </Col>
               <Col span={4}>
                 <Form.Item name="is_category" label="节点类型" valuePropName="checked" style={{ marginBottom: 12 }}>
-                  <Switch checkedChildren="分类" unCheckedChildren="检查" style={{ width: '100%' }} />
+                  <Switch
+                    checkedChildren="分类"
+                    unCheckedChildren="检查"
+                    style={{ width: '100%' }}
+                    disabled={nodeHasChildren}
+                  />
                 </Form.Item>
               </Col>
-              <Col span={5}>
-                <Form.Item name="result_type" label="结论类型" rules={[{ required: true }]} style={{ marginBottom: 12 }}>
-                  <Radio.Group options={RESULT_TYPES} optionType="button" buttonStyle="solid" size="small" />
-                </Form.Item>
-              </Col>
-              <Col span={4}>
-                <Form.Item name="risk_level" label="风险等级" style={{ marginBottom: 12 }}>
-                  <Select options={RISK_LEVELS} size="small" />
-                </Form.Item>
-              </Col>
-              <Col span={5}>
-                <Form.Item name="standard_ref" label="标准依据" style={{ marginBottom: 12 }}>
-                  <Input placeholder="标准依据" />
+              <Col span={14}>
+                <Form.Item noStyle shouldUpdate={(prev, current) => prev.is_category !== current.is_category}>
+                  {({ getFieldValue }) => {
+                    const isCat = getFieldValue('is_category') || nodeHasChildren
+                    if (isCat) {
+                      return (
+                        <div style={{ paddingTop: 28, color: '#0369a1', fontSize: 13 }}>
+                          📂 <strong>分类目录</strong>（不可录入结论，仅作为下级检查项的聚合分组）
+                        </div>
+                      )
+                    }
+                    return (
+                      <Row gutter={16}>
+                        <Col span={10}>
+                          <Form.Item name="result_type" label="结论类型" rules={[{ required: true }]} style={{ marginBottom: 12 }}>
+                            <Radio.Group options={RESULT_TYPES} optionType="button" buttonStyle="solid" size="small" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={7}>
+                          <Form.Item name="risk_level" label="风险等级" style={{ marginBottom: 12 }}>
+                            <Select options={RISK_LEVELS} size="small" />
+                          </Form.Item>
+                        </Col>
+                        <Col span={7}>
+                          <Form.Item name="standard_ref" label="标准依据" style={{ marginBottom: 12 }}>
+                            <Input placeholder="标准依据" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    )
+                  }}
                 </Form.Item>
               </Col>
             </Row>

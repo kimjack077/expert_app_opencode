@@ -25,6 +25,7 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import RECORD_VIEW_ALL_ROLES
+from app.utils.category import is_category_node, load_parent_ids
 from app.services import AuditService
 from app.services.formal_audit_sync_service import (
     can_access_linked_task,
@@ -147,14 +148,25 @@ async def create_task(
     await db.refresh(task)
 
     if task_data.template_id:
+        # 分类目录（存在有效子节点的父节点）集合，统一走 app/utils/category
+        parent_ids = await load_parent_ids(db, template_id=task_data.template_id)
+
         items_result = await db.execute(
             select(TemplateItem)
-            .where(TemplateItem.template_id == task_data.template_id)
+            .where(
+                TemplateItem.template_id == task_data.template_id,
+                TemplateItem.is_deleted == False,  # noqa: E712
+                TemplateItem.is_category.is_not(True),
+            )
             .order_by(TemplateItem.sort_order)
         )
-        items = items_result.scalars().all()
+        # 严格只为真正的叶子检查项创建填报记录，杜绝分类目录生成空记录
+        leaf_items = [
+            i for i in items_result.scalars().all()
+            if not is_category_node(i, parent_ids)
+        ]
 
-        for item in items:
+        for item in leaf_items:
             record = InspectionRecord(
                 task_id=task.id,
                 template_item_id=item.id,
@@ -452,17 +464,24 @@ async def get_task_records(
 
     # 任务已关联模板但没有可用检查项时，按模板自动补齐（兼容历史脏数据）
     has_linked_items = any(r.template_item_id for r in records)
+    template_parent_ids = set()
+    if task.template_id:
+        template_parent_ids = await load_parent_ids(db, template_id=task.template_id)
+
     if task.template_id and not has_linked_items:
         items_result = await db.execute(
             select(TemplateItem)
             .where(
                 TemplateItem.template_id == task.template_id,
                 TemplateItem.is_deleted == False,  # noqa: E712
-                TemplateItem.is_category != True,  # noqa: E712
+                TemplateItem.is_category.is_not(True),
             )
             .order_by(TemplateItem.sort_order)
         )
-        template_items = items_result.scalars().all()
+        template_items = [
+            i for i in items_result.scalars().all()
+            if not is_category_node(i, template_parent_ids)
+        ]
         if template_items:
             # 清理无模板项关联的空记录，避免干扰
             for empty_rec in records:
@@ -486,6 +505,17 @@ async def get_task_records(
 
     payload = []
     for r in records:
+        ti = r.template_item
+        if ti is not None:
+            # 分类目录一律不参与检查项统计与展示：
+            # 不论历史上是否被误填过结果，都不能作为检查项返回，
+            # 否则条目总数会与模板叶子口径对不上（P0-02 / P0-03）。
+            if is_category_node(ti, template_parent_ids):
+                continue
+            # 模板条目已被软删除且本记录未填写 → 孤儿空记录，一并剔除
+            if ti.is_deleted and not r.result:
+                continue
+
         item = InspectionRecordResponse.model_validate(r).model_dump()
         if r.template_item is not None:
             check_item = {
@@ -692,11 +722,21 @@ async def get_task_summary(
     def _is_na(result: Optional[str]) -> bool:
         return result in {"not_applicable", "na", "n/a", "不适用"}
 
-    # 排除分类节点：仅统计挂了模板检查项且非分类的记录；无关联时仍计入兼容
+    # 排除分类节点：只要节点下挂着有效子项（或显式标记分类），一律不计入统计；
+    # 模板条目已删除且未填写的孤儿记录同样剔除。统一走 app/utils/category。
+    parent_ids = (
+        await load_parent_ids(db, template_id=task.template_id)
+        if task.template_id
+        else set()
+    )
     countable = []
     for r in records:
-        if r.template_item is not None and getattr(r.template_item, "is_category", False):
-            continue
+        ti = r.template_item
+        if ti is not None:
+            if is_category_node(ti, parent_ids):
+                continue
+            if ti.is_deleted and not r.result:
+                continue
         countable.append(r)
 
     total = len(countable)
@@ -743,12 +783,21 @@ async def generate_task_final_judgment_stream(
     )
     task_items = result.scalars().all()
 
+    # 分类目录不参与最终判定统计（含"有子节点但未标分类"的脏数据兜底）
+    parent_ids = (
+        await load_parent_ids(db, template_id=task.template_id)
+        if task.template_id
+        else set()
+    )
+
     items_data = []
     for item in task_items:
         template_item = item.template_item
-        # 分类节点不参与最终判定统计
-        if template_item is not None and getattr(template_item, "is_category", False):
-            continue
+        if template_item is not None:
+            if is_category_node(template_item, parent_ids):
+                continue
+            if template_item.is_deleted and not item.result:
+                continue
         title = (
             template_item.title
             if template_item and template_item.title

@@ -27,6 +27,7 @@ from app.models.task import InspectionTask
 from app.models.template import TemplateItem
 from app.models.user import User
 from app.routers.auth import get_current_user
+from app.utils.category import is_category_node, load_parent_ids
 from app.schemas.project_agent import (
     ArtifactGenerateRequest,
     AuditSessionCreateRequest,
@@ -726,7 +727,13 @@ async def _candidates(db: AsyncSession, project_id: UUID, session: AiAuditSessio
             )
             for clause in context.get("clauses", [])
         ]
-    items = (await db.execute(stmt.order_by(TemplateItem.sort_order))).scalars().all()
+    # 分类目录（存在有效子节点的父节点）不参与条款候选，统一走 app/utils/category
+    parent_ids = await load_parent_ids(db)
+    items = [
+        i
+        for i in (await db.execute(stmt.order_by(TemplateItem.sort_order))).scalars().all()
+        if not is_category_node(i, parent_ids)
+    ]
     candidates: list[EvidenceCandidate] = []
     for item in items:
         clause_no = (item.clause_no or "").strip()
@@ -1176,7 +1183,12 @@ async def _session_quality(session: AiAuditSession, db: AsyncSession | None = No
                 TemplateItem.is_category.is_not(True),
                 TemplateItem.is_deleted == False
             ).order_by(TemplateItem.sort_order)
-            template_items = (await db.execute(stmt)).scalars().all()
+            _parent_ids = await load_parent_ids(db, template_id=UUID(template_id))
+            template_items = [
+                i
+                for i in (await db.execute(stmt)).scalars().all()
+                if not is_category_node(i, _parent_ids)
+            ]
             total_items_count = len(template_items)
 
             # 收集所有已确认记录覆盖的 template_item_id

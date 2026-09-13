@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, Table, Button, Tag, Space, message, Modal, Drawer, Popconfirm, Alert, Collapse, Form, Input, Select, DatePicker, Row, Col, Badge } from 'antd'
-import { EyeOutlined, DeleteOutlined, CheckCircleOutlined, FileTextOutlined, FilePdfOutlined, SearchOutlined, ReloadOutlined, FilterOutlined } from '@ant-design/icons'
+import { EyeOutlined, DeleteOutlined, CheckCircleOutlined, FileTextOutlined, FilePdfOutlined, SearchOutlined, ReloadOutlined, FilterOutlined, FolderFilled, UpOutlined, DownOutlined } from '@ant-design/icons'
 import { recordApi, templateApi } from '@/services/api'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
@@ -141,10 +141,13 @@ export default function Records() {
       // 扁平化检查项
       const flattenItems = (items: any[], result: any[] = []): any[] => {
         for (const item of items) {
-          if (!item.is_category) {
+          const hasChildren = !!(item.children && item.children.length > 0)
+          // 只要有子节点就一律按分类目录处理，与后端树接口及其它页面口径保持一致
+          const isCategory = !!item.is_category || hasChildren
+          if (!isCategory) {
             result.push(item)
           }
-          if (item.children && item.children.length > 0) {
+          if (hasChildren) {
             flattenItems(item.children, result)
           }
         }
@@ -748,31 +751,76 @@ export default function Records() {
   )
 }
 
-// TreeItem 组件 - 递归显示树形结构
-function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQuantified?: boolean }) {
-  const [isExpanded, setIsExpanded] = useState(false)
+// TreeItem 组件 - 递归显示树形层级结构，支持大类醒目识别与展开折叠
+function TreeItem({
+  item,
+  index,
+  isQuantified,
+  parentIndex = '',
+}: {
+  item: any
+  index: number
+  isQuantified?: boolean
+  parentIndex?: string
+}) {
   const hasChildren = item.children && item.children.length > 0
-  const isCategory = item.is_category
+  const isCategory = !!item.is_category || hasChildren
 
-  // 获取检查结论
+  // 分类目录默认展开子项，叶子项默认收起详情
+  const [isCategoryExpanded, setIsCategoryExpanded] = useState(true)
+  const [isDetailExpanded, setIsDetailExpanded] = useState(false)
+
+  const currentIndex = parentIndex ? `${parentIndex}.${index + 1}` : `${index + 1}`
+
+  // 递归统计该分类下的叶子数与已评定数
+  const categoryStats = (() => {
+    if (!isCategory) return null
+    let total = 0
+    let completed = 0
+    const count = (node: any) => {
+      const nodeHasChild = node.children && node.children.length > 0
+      if (node.is_category || nodeHasChild) {
+        ;(node.children || []).forEach(count)
+      } else {
+        total++
+        if (
+          node.radio_value ||
+          (node.score_value !== null && node.score_value !== undefined && node.score_value !== '') ||
+          node.text_value ||
+          (node.numeric_value !== null && node.numeric_value !== undefined && node.numeric_value !== '') ||
+          node.result
+        ) {
+          completed++
+        }
+      }
+    }
+    ;(item.children || []).forEach(count)
+    return { total, completed }
+  })()
+
+  // 获取检查结论（严格杜绝分类节点显示未填写）
   const getResultDisplay = () => {
     if (isCategory) return null
 
     // 单选/通过不通过
-    if (item.radio_value) {
-      const color = item.radio_value === 'pass' ? 'success' : item.radio_value === 'fail' ? 'error' : 'default'
-      const text = item.radio_value === 'pass' ? '合格' : item.radio_value === 'fail' ? '不合格' : '不适用'
+    if (item.radio_value || item.result) {
+      const val = item.radio_value || item.result
+      const isPass = val === 'pass' || val === 'compliant' || val === 'qualified'
+      const isFail = val === 'fail' || val === 'non_compliant' || val === 'unqualified'
+      const isNa = val === 'na' || val === 'not_applicable' || val === '不适用'
+      const color = isPass ? 'success' : isFail ? 'error' : 'default'
+      const text = isPass ? '合格' : isFail ? '不合格' : isNa ? '不适用' : val
       return <Tag color={color}>{text}</Tag>
     }
 
     // 打分
-    if (item.score_value !== null && item.score_value !== undefined) {
+    if (item.score_value !== null && item.score_value !== undefined && item.score_value !== '') {
       const passed = item.pass_score && Number(item.score_value) >= Number(item.pass_score)
       return <Tag color={passed ? 'success' : 'warning'}>{item.score_value}分</Tag>
     }
 
     // 数值
-    if (item.numeric_value !== null && item.numeric_value !== undefined) {
+    if (item.numeric_value !== null && item.numeric_value !== undefined && item.numeric_value !== '') {
       const range = (item.min_value !== null || item.max_value !== null)
         ? ` (${item.min_value || '-'}~${item.max_value || '-'})`
         : ''
@@ -798,47 +846,117 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
     if (item.score_value !== null && item.score_value !== undefined && item.score_value !== '') {
       return Number(item.score_value)
     }
-    const radio = item.radio_value
-    if (radio === 'pass') {
+    const radio = item.radio_value || item.result
+    if (radio === 'pass' || radio === 'compliant') {
       return Number(item.score_weight || item.default_score || 0)
-    } else if (radio === 'fail') {
+    } else if (radio === 'fail' || radio === 'non_compliant') {
       return 0
-    } else if (radio === 'na') {
+    } else if (radio === 'na' || radio === 'not_applicable') {
       return Number(item.default_score || 0)
     }
     return null
   }
   const computedScore = getItemScore()
 
+  // 分类节点样式与交互
+  if (isCategory) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <div
+          onClick={() => setIsCategoryExpanded(!isCategoryExpanded)}
+          style={{
+            padding: '12px 16px',
+            background: '#f0f7ff',
+            borderRadius: 8,
+            border: '1px solid #bae0ff',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+        >
+          <FolderFilled style={{ color: '#1677ff', fontSize: 18 }} />
+          <span style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: '#0958d9',
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap'
+          }}>
+            <span>{currentIndex} {item.title}</span>
+            <Tag color="blue" style={{ borderRadius: 4, fontWeight: 500, margin: 0 }}>
+              大类分类
+            </Tag>
+            {item.description && (
+              <span style={{ fontSize: 13, color: '#64748b', fontWeight: 'normal' }}>
+                ({item.description})
+              </span>
+            )}
+          </span>
+          {categoryStats && (
+            <Tag
+              style={{
+                borderRadius: 12,
+                background: '#e2e8f0',
+                borderColor: 'transparent',
+                color: '#334155',
+                fontWeight: 600,
+                padding: '2px 10px',
+              }}
+            >
+              共 {categoryStats.total} 项 {categoryStats.completed > 0 ? `(${categoryStats.completed}已评)` : ''}
+            </Tag>
+          )}
+          <span style={{ color: '#1677ff', fontSize: 12, marginLeft: 4 }}>
+            {isCategoryExpanded ? <UpOutlined /> : <DownOutlined />}
+          </span>
+        </div>
+
+        {/* 递归展示子项 */}
+        {hasChildren && isCategoryExpanded && (
+          <div style={{
+            paddingLeft: 18,
+            borderLeft: '2px solid #bae0ff',
+            marginLeft: 14,
+            marginTop: 8,
+          }}>
+            {item.children.map((child: any, cIdx: number) => (
+              <TreeItem
+                key={child.id || cIdx}
+                item={child}
+                index={cIdx}
+                isQuantified={isQuantified}
+                parentIndex={currentIndex}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // 检查项节点样式与交互
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div style={{ marginBottom: 8 }}>
       <div
         className="record-tree-item"
-        onClick={() => { if (!isCategory) setIsExpanded(!isExpanded) }}
+        onClick={() => setIsDetailExpanded(!isDetailExpanded)}
         style={{
-          padding: '12px 16px',
-          background: isCategory ? '#f8fafc' : 'white',
-          borderRadius: isExpanded && !isCategory ? '8px 8px 0 0' : 8,
-          border: isCategory ? '1px solid #e2e8f0' : '1px solid #cbd5e1',
-          borderBottom: isExpanded && !isCategory ? 'none' : undefined,
-          boxShadow: isCategory ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.02)',
+          padding: '10px 14px',
+          background: 'white',
+          borderRadius: isDetailExpanded ? '8px 8px 0 0' : 8,
+          border: '1px solid #e2e8f0',
+          borderBottom: isDetailExpanded ? 'none' : undefined,
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
+          gap: 10,
+          cursor: 'pointer',
           transition: 'all 0.2s',
-          cursor: isCategory ? 'default' : 'pointer',
-        }}
-        onMouseEnter={(e) => {
-          if (!isCategory) {
-            e.currentTarget.style.borderColor = '#cbd5e1'
-            e.currentTarget.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isCategory) {
-            e.currentTarget.style.borderColor = '#f1f5f9'
-            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.02)'
-          }
         }}
       >
         <span
@@ -846,60 +964,59 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 24,
-            height: 24,
-            background: isCategory ? '#e2e8f0' : 'var(--primary-color)',
-            color: isCategory ? '#64748b' : 'white',
-            borderRadius: '6px',
+            minWidth: 32,
+            height: 22,
+            padding: '0 6px',
+            background: '#f1f5f9',
+            color: '#475569',
+            borderRadius: '4px',
             fontSize: 12,
-            fontWeight: 700,
+            fontWeight: 600,
             flexShrink: 0,
           }}
         >
-          {index + 1}
+          {currentIndex}
         </span>
         <span
           style={{
             flex: 1,
-            fontSize: isCategory ? 15 : 14,
-            fontWeight: isCategory ? 600 : 500,
-            color: isCategory ? '#334155' : '#1e293b',
+            fontSize: 14,
+            fontWeight: 500,
+            color: '#1e293b',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
         >
           {item.title}
-          {computedScore !== null && !isCategory && (
+          {computedScore !== null && (
             <span style={{ color: '#d46b08', marginLeft: 8, fontSize: 13, fontWeight: 'normal' }}>
               ({computedScore}分)
             </span>
           )}
         </span>
         {getResultDisplay()}
-        {!isCategory && (
-          <div style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>
-            {isExpanded ? '▲' : '▼'}
-          </div>
-        )}
+        <div style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>
+          {isDetailExpanded ? '▲' : '▼'}
+        </div>
       </div>
 
       {/* 展开的详情内容 */}
-      {!isCategory && isExpanded && (
+      {isDetailExpanded && (
         <div style={{
-          padding: '16px',
+          padding: '14px 16px',
           background: '#f8fafc',
-          border: '1px solid #cbd5e1',
+          border: '1px solid #e2e8f0',
           borderTop: 'none',
           borderRadius: '0 0 8px 8px',
           fontSize: '13px',
           color: '#475569',
           display: 'flex',
           flexDirection: 'column',
-          gap: '12px',
+          gap: '10px',
         }}>
           {/* 检查项基本信息 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>检查项说明</div>
             {item.description && <div style={{ display: 'flex', gap: 8 }}><b style={{ color: '#1e293b', flexShrink: 0 }}>检查要求：</b><span>{item.description}</span></div>}
             {item.check_method && <div style={{ display: 'flex', gap: 8 }}><b style={{ color: '#1e293b', flexShrink: 0 }}>检查方法：</b><span>{item.check_method}</span></div>}
@@ -907,10 +1024,10 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
             {item.ai_prompt_template && <div style={{ display: 'flex', gap: 8 }}><b style={{ color: '#1e293b', flexShrink: 0 }}>知识库：</b><span>{item.ai_prompt_template}</span></div>}
           </div>
 
-          <div style={{ height: 1, background: '#e2e8f0', margin: '4px 0' }}></div>
+          <div style={{ height: 1, background: '#e2e8f0', margin: '2px 0' }}></div>
 
           {/* 检查结论信息 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>检查结论与说明</div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -941,13 +1058,13 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
 
             {item.ai_suggestion && item.ai_suggestion !== '0' && (
               <div style={{
-                marginTop: 8,
+                marginTop: 6,
                 background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.05) 0%, rgba(129, 140, 248, 0.05) 100%)',
                 border: '1px solid rgba(79, 70, 229, 0.2)',
                 borderRadius: 8,
-                padding: 12,
+                padding: 10,
               }}>
-                <div style={{ color: '#4f46e5', fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ color: '#4f46e5', fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                   💡 AI 智能裁定与建议
                 </div>
                 <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#334155' }}>
@@ -958,7 +1075,7 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
 
             {/* 照片列表 (附件) */}
             {item.photos && item.photos.length > 0 && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
                 {item.photos.map((url: string, idx: number) => {
                   const normalizedUrl = (!url || url.startsWith('/') || url.startsWith('http')) ? url : '/' + url
                   return (
@@ -974,20 +1091,6 @@ function TreeItem({ item, index, isQuantified }: { item: any; index: number; isQ
               </div>
             )}
           </div>
-        </div>
-      )}
-
-      {/* 递归渲染子节点 */}
-      {hasChildren && (
-        <div
-          style={{
-            marginLeft: 20,
-            marginTop: 4,
-          }}
-        >
-          {item.children.map((child: any, childIndex: number) => (
-            <TreeItem key={child.id} item={child} index={childIndex} isQuantified={isQuantified} />
-          ))}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import React, { useRef, useState, Fragment } from 'react'
 import { Modal, Button, Space, Tag, Divider, message, Spin } from 'antd'
 import { PrinterOutlined, ShareAltOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -32,10 +32,17 @@ function getRadioLabel(val: string) {
     return map[val] || val
 }
 
-function flattenItems(items: any[], result: any[] = []): any[] {
+function flattenItems(items: any[], result: any[] = [], currentCategory = ''): any[] {
     for (const item of items) {
-        if (!item.is_category) result.push(item)
-        if (item.children?.length) flattenItems(item.children, result)
+        const hasChildren = item.children && item.children.length > 0
+        const isCat = !!item.is_category || hasChildren
+        const catName = isCat ? item.title : currentCategory
+        if (!isCat) {
+            result.push({ ...item, categoryName: catName })
+        }
+        if (hasChildren) {
+            flattenItems(item.children, result, catName)
+        }
     }
     return result
 }
@@ -297,32 +304,56 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                 if (radioVal === 'pass') { badgeBg = '#dcfce7'; badgeColor = '#16a34a' }
                                 if (radioVal === 'fail') { badgeBg = '#fee2e2'; badgeColor = '#dc2626' }
                                 if (radioVal === 'na' || radioVal === 'not_applicable') { badgeBg = '#f3f4f6'; badgeColor = '#6b7280' }
+
+                                const prevItem = idx > 0 ? allCheckItems[idx - 1] : null
+                                const showCategoryHeader = item.categoryName && (!prevItem || prevItem.categoryName !== item.categoryName)
+                                const colCount = record.template?.is_quantified && hasQuantifiedItems(record.template) ? 5 : 4
+
                                 return (
-                                    <tr key={item.id} style={{ background: isOdd ? '#f8faff' : '#fff' }}>
-                                        <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', fontWeight: 600, width: 40 }}>{idx + 1}</td>
-                                        <td style={{ border: '1px solid #dde3ed', padding: '6px 8px' }}>{item.title}</td>
-                                        <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', textAlign: 'center' }}>
-                                            {radioVal ? (
-                                                <span style={{ background: badgeBg, color: badgeColor, padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
-                                                    {getRadioLabel(radioVal)}
-                                                </span>
-                                            ) : item.numeric_value !== undefined && item.numeric_value !== null ? (
-                                                <span>{item.numeric_value} {item.unit || ''}</span>
-                                            ) : item.text_value ? (
-                                                <span style={{ color: '#555' }}>已描述</span>
-                                            ) : (
-                                                <span style={{ color: '#bbb' }}>—</span>
-                                            )}
-                                        </td>
-                                        {record.template?.is_quantified && hasQuantifiedItems(record.template) && (
-                                            <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', textAlign: 'center' }}>
-                                                {item.score_value ?? '—'}
-                                            </td>
+                                    <Fragment key={item.id}>
+                                        {showCategoryHeader && (
+                                            <tr style={{ background: '#f0f7ff' }}>
+                                                <td
+                                                    colSpan={colCount}
+                                                    style={{
+                                                        border: '1px solid #bfdbfe',
+                                                        padding: '7px 10px',
+                                                        fontWeight: 700,
+                                                        color: '#1d4ed8',
+                                                        fontSize: 13,
+                                                        letterSpacing: '0.5px',
+                                                    }}
+                                                >
+                                                    📂 分类：{item.categoryName}
+                                                </td>
+                                            </tr>
                                         )}
-                                        <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', color: '#555', fontSize: 11 }}>
-                                            {item.problem_description || '—'}
-                                        </td>
-                                    </tr>
+                                        <tr style={{ background: isOdd ? '#f8faff' : '#fff' }}>
+                                            <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', fontWeight: 600, width: 40 }}>{idx + 1}</td>
+                                            <td style={{ border: '1px solid #dde3ed', padding: '6px 8px' }}>{item.title}</td>
+                                            <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', textAlign: 'center' }}>
+                                                {radioVal ? (
+                                                    <span style={{ background: badgeBg, color: badgeColor, padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+                                                        {getRadioLabel(radioVal)}
+                                                    </span>
+                                                ) : item.numeric_value !== undefined && item.numeric_value !== null ? (
+                                                    <span>{item.numeric_value} {item.unit || ''}</span>
+                                                ) : item.text_value ? (
+                                                    <span style={{ color: '#555' }}>已描述</span>
+                                                ) : (
+                                                    <span style={{ color: '#bbb' }}>—</span>
+                                                )}
+                                            </td>
+                                            {record.template?.is_quantified && hasQuantifiedItems(record.template) && (
+                                                <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', textAlign: 'center' }}>
+                                                    {item.score_value ?? '—'}
+                                                </td>
+                                            )}
+                                            <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', color: '#555', fontSize: 11 }}>
+                                                {item.problem_description || '—'}
+                                            </td>
+                                        </tr>
+                                    </Fragment>
                                 )
                             })}
                         </tbody>

@@ -171,6 +171,10 @@ class ReportService:
                         'problem_description': getattr(item, 'problem_description', None),
                         'rectification_suggestion': getattr(item, 'rectification_suggestion', None),
                     }
+            # 只要有子节点就一律按分类目录处理（与接口层 / 前端口径保持一致），
+            # 避免历史脏快照里的根节点被当成检查项列进报告。
+            if children:
+                is_category = True
             if not is_category:
                 result.append(item)
             if children:

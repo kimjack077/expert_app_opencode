@@ -20,6 +20,7 @@ from app.services.project_access_service import (
     project_visibility_condition,
 )
 from app.utils.response import utc_now_iso
+from app.utils.category import is_category_node, load_parent_ids
 from app.services.project_artifact_service import project_artifact_service
 from app.services.report_generator import generate_audit_report_word, generate_audit_report_pdf
 from app.models.audit_project import (
@@ -318,6 +319,7 @@ async def get_my_audit_tasks(
 
         template_ids = {item.template_id for item in plan_items if item.template_id}
         if template_ids:
+            parent_ids = await load_parent_ids(db, template_ids=template_ids)
             template_items = (
                 await db.execute(
                     select(TemplateItem).where(
@@ -328,6 +330,9 @@ async def get_my_audit_tasks(
                 )
             ).scalars().all()
             for template_item in template_items:
+                # 检查项数量 = 真正的叶子检查项数，分类目录不计入
+                if is_category_node(template_item, parent_ids):
+                    continue
                 template_item_counts[template_item.template_id] = (
                     template_item_counts.get(template_item.template_id, 0) + 1
                 )
@@ -602,6 +607,9 @@ async def create_plan_item(
     await db.flush()
     
     if plan_item.template_id:
+        # 分类目录集合统一走 app/utils/category
+        parent_ids = await load_parent_ids(db, template_id=plan_item.template_id)
+
         items_result = await db.execute(
             select(TemplateItem)
             .where(
@@ -611,9 +619,12 @@ async def create_plan_item(
             )
             .order_by(TemplateItem.sort_order)
         )
-        items = items_result.scalars().all()
+        leaf_items = [
+            i for i in items_result.scalars().all()
+            if not is_category_node(i, parent_ids)
+        ]
 
-        for item in items:
+        for item in leaf_items:
             record = TaskItemRecord(
                 task_id=inspection_task.id,
                 template_item_id=item.id,

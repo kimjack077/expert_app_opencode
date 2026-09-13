@@ -13,6 +13,7 @@ from app.models.user import User
 from app.models.template import InspectionTemplate, TemplateItem
 from app.schemas import ApiResponse
 from app.utils.security import get_current_admin_user
+from app.utils.category import normalize_as_category
 from app.utils.document_parser import document_parser
 from app.services.ai_extract_service import ai_extract_service
 from app.services import AuditService
@@ -176,6 +177,7 @@ async def apply_extracted_items(
 
     created_items = []
     errors = []
+    new_objects: List[TemplateItem] = []
 
     # 先处理分类节点，再处理检查项（保证parent_id能正确关联）
     sorted_items = sorted(items, key=lambda x: (
@@ -228,6 +230,7 @@ async def apply_extracted_items(
             )
             db.add(new_item)
             await db.flush()
+            new_objects.append(new_item)
             
             title_to_id[new_item.title] = str(new_item.id)
             created_items.append({
@@ -241,6 +244,21 @@ async def apply_extracted_items(
                 "title": item_data.get("title", "未知项目"),
                 "error": str(e),
             })
+
+    # 统一规范化（与 templates.py 同一规则）：只要某节点下挂了子项，
+    # 就强制升级为分类目录并清空检查项属性。
+    # LLM 抽取结果不受控，这一步是防止"有子项但未标分类"的脏数据入库的最后一道闸。
+    parent_ids = {obj.parent_id for obj in new_objects if obj.parent_id is not None}
+    if parent_ids:
+        for obj in new_objects:
+            if obj.id in parent_ids:
+                normalize_as_category(obj)
+        # 本次新增的子项若挂到了历史条目下，该历史条目同样需要升级
+        hist_res = await db.execute(
+            select(TemplateItem).where(TemplateItem.id.in_(parent_ids))
+        )
+        for obj in hist_res.scalars().all():
+            normalize_as_category(obj)
 
     await db.commit()
 
