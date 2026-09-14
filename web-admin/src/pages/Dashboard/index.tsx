@@ -413,8 +413,7 @@ export default function Dashboard() {
               <span style={{ fontSize: 11, color: '#94a3b8' }}>
                 最近 14 日走势
               </span>
-            }
-            bordered={false}
+            } variant="borderless"
             loading={!trends}
           >
             {trends && (
@@ -546,8 +545,7 @@ export default function Dashboard() {
                 全部任务 <ArrowRightOutlined />
               </Button>
             }
-            loading={loading}
-            bordered={false}
+            loading={loading} variant="borderless"
           >
             <Table
               dataSource={recentTasks}
@@ -573,8 +571,7 @@ export default function Dashboard() {
                 <AppstoreOutlined style={{ color: 'var(--primary-color)' }} />
                 <span>常用工作流</span>
               </div>
-            }
-            bordered={false}
+            } variant="borderless"
           >
             <div className="dashboard-quick-grid">
               <div
@@ -644,8 +641,7 @@ export default function Dashboard() {
               <span style={{ fontSize: 11, color: '#64748b' }}>
                 已纳管 {stats?.enterprises?.total || (highRisk + mediumRisk + lowRisk)} 家
               </span>
-            }
-            bordered={false}
+            } variant="borderless"
           >
             <div className="dashboard-risk-meter">
               <div className="dashboard-risk-row">
@@ -713,8 +709,7 @@ export default function Dashboard() {
                   <CheckCircleOutlined style={{ color: '#16a34a' }} />
                   <span>现场检查项体检</span>
                 </div>
-              }
-              bordered={false}
+              } variant="borderless"
             >
               <div style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>

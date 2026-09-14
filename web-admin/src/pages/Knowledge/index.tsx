@@ -33,7 +33,6 @@ import { knowledgeApi } from '@/services/api'
 import dayjs from 'dayjs'
 
 const { TextArea } = Input
-const { TabPane } = Tabs
 
 interface Document {
   id: string
@@ -451,8 +450,14 @@ export default function Knowledge() {
 
   return (
     <div>
-      <Tabs defaultActiveKey="documents">
-        <TabPane tab="政策法规" key="documents">
+      <Tabs
+        defaultActiveKey="documents"
+        items={[
+          {
+            key: 'documents',
+            label: '政策法规',
+            children: (
+              <>
           <Card
             title="政策法规管理"
             extra={
@@ -505,9 +510,14 @@ export default function Knowledge() {
               pagination={{ pageSize: 10 }}
             />
           </Card>
-        </TabPane>
-
-        <TabPane tab="审查细则" key="guidelines">
+              </>
+            ),
+          },
+          {
+            key: 'guidelines',
+            label: '审查细则',
+            children: (
+              <>
           <Card
             title="审查细则管理"
             extra={
@@ -523,8 +533,11 @@ export default function Knowledge() {
               pagination={{ pageSize: 10 }}
             />
           </Card>
-        </TabPane>
-      </Tabs>
+              </>
+            ),
+          },
+        ]}
+      />
 
       {/* 新增/编辑文档 Modal */}
       <Modal
@@ -598,7 +611,7 @@ export default function Knowledge() {
         onCancel={handleCloseUploadModal}
         footer={null}
         width={760}
-        destroyOnClose={false}
+        destroyOnHidden={false}
         maskClosable={false}
       >
         <Steps

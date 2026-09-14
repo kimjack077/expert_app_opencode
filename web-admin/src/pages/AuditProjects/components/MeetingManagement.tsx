@@ -85,6 +85,19 @@ export default function MeetingManagement({ projectId }: Props) {
     fetchData()
   }, [projectId])
 
+  // BUG-25：智审 Agent 确认写入会议记录后，广播全局事件；面板监听并刷新，
+  // 避免用户需要手动刷新页面才能看到新会议。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ serverAction?: string }>).detail || {}
+      if (String(detail.serverAction || '') === 'create_meeting_record') {
+        fetchData()
+      }
+    }
+    window.addEventListener('efis:action-confirmed', handler)
+    return () => window.removeEventListener('efis:action-confirmed', handler)
+  }, [projectId])
+
   const showCreate = () => {
     setEditing(undefined)
     form.resetFields()

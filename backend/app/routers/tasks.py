@@ -77,14 +77,35 @@ async def get_tasks(
         await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
     ).scalar() or 0
 
-    return make_response(
-        data={
-            "items": [
-                InspectionTaskResponse.model_validate(t).model_dump() for t in tasks
-            ],
-            "total": total,
-        }
-    )
+    # BUG-05：批量回填审核计划项关联字段（此前列表接口 plan_item_id/audit_project_id 恒为 null，
+    # 与详情接口口径不一致），保证 Web / H5 任务卡片能展示所属项目与区域。
+    from app.models.audit_project import AuditPlanItem
+
+    plan_map: dict = {}
+    task_ids = [t.id for t in tasks]
+    if task_ids:
+        plan_rows = await db.execute(
+            select(AuditPlanItem).where(
+                AuditPlanItem.inspection_task_id.in_(task_ids),
+                AuditPlanItem.is_deleted == False,  # noqa: E712
+            )
+        )
+        for pi in plan_rows.scalars().all():
+            if pi.inspection_task_id:
+                plan_map.setdefault(str(pi.inspection_task_id), pi)
+
+    items = []
+    for t in tasks:
+        data = InspectionTaskResponse.model_validate(t).model_dump()
+        pi = plan_map.get(str(t.id))
+        if pi:
+            data["audit_project_id"] = pi.project_id
+            data["plan_item_id"] = pi.id
+            data["area_name"] = pi.area_name
+            data["clauses"] = pi.clauses
+        items.append(data)
+
+    return make_response(data={"items": items, "total": total})
 
 
 @router.get("/statistics", response_model=ApiResponse)
@@ -376,6 +397,31 @@ async def complete_task(
     ):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="任务已完成，不能重复提交")
+
+    # BUG-11：完成前校验必填检查项覆盖率必须 100%，杜绝"空任务直接完成"
+    records_res = await db.execute(
+        select(TaskItemRecord)
+        .options(selectinload(TaskItemRecord.template_item))
+        .where(TaskItemRecord.task_id == task.id)
+    )
+    missing: list[str] = []
+    for rec in records_res.scalars().all():
+        tpl_item = getattr(rec, "template_item", None)
+        if not tpl_item or not bool(tpl_item.is_required):
+            continue
+        filled = bool(rec.result or rec.result_value or rec.result_text)
+        if not filled:
+            missing.append(getattr(tpl_item, "title", "") or str(rec.template_item_id))
+    if missing:
+        preview = "、".join(missing[:3])
+        suffix = f" 等 {len(missing)} 项" if len(missing) > 3 else ""
+        raise HTTPException(
+            status_code=409,
+            detail=f"存在未填报的必填检查项，无法完成任务：{preview}{suffix}",
+        )
+
     try:
         task_uuid = UUID(task_id)
         plan_item = await get_linked_plan_item(db, task_uuid)
@@ -618,6 +664,10 @@ async def create_or_update_record(
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
+    # BUG-11：已完成的任务填报记录为只读，防止事后篡改
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
+
     if record_data.template_item_id:
         result = await db.execute(
             select(InspectionRecord).where(
@@ -678,6 +728,10 @@ async def update_record(
         raise HTTPException(status_code=404, detail="Parent task not found")
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
+
+    # BUG-11：已完成的填报记录为只读，防止事后篡改
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
 
     update_data = record_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():

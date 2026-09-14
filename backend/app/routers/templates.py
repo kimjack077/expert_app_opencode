@@ -551,8 +551,21 @@ async def get_template_items(
     if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
+    # 权限检查：与 get_template 口径一致——存在基于该模板的关联任务时允许只读，
+    # 否则派发给审核专家的现场任务无法渲染检查项（BUG-01）。
     if not can_access_template(current_user, template):
-        raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+        from app.models.task import InspectionTask
+
+        filters = [
+            InspectionTask.template_id == template.id,
+            InspectionTask.is_deleted == False,  # noqa: E712
+        ]
+        if current_user.role == "expert":
+            filters.append(InspectionTask.assigned_to == current_user.id)
+        related = await db.execute(select(InspectionTask.id).where(*filters).limit(1))
+        has_related_task = related.scalar_one_or_none() is not None
+        if not has_related_task:
+            raise HTTPException(status_code=403, detail="您没有权限访问此模板")
 
     query = select(TemplateItem).where(
         TemplateItem.template_id == template_id,
@@ -607,6 +620,13 @@ async def create_item(
 
     is_category = bool(item_data.is_category)
 
+    # BUG-20：父节点必须真实存在且属于同一模板，否则给出明确的 404 而非落库后的外键冲突 409
+    parent_item = None
+    if item_data.parent_id:
+        parent_item = await db.get(TemplateItem, item_data.parent_id)
+        if not parent_item or str(parent_item.template_id) != str(template_id):
+            raise HTTPException(status_code=404, detail="父节点不存在或不属于当前模板")
+
     item = TemplateItem(
         template_id=template_id,
         parent_id=item_data.parent_id,
@@ -635,10 +655,8 @@ async def create_item(
     db.add(item)
 
     # 若添加了子节点，自动将父节点规范升级为分类目录，并清空其检查项属性
-    if item_data.parent_id:
-        parent_item = await db.get(TemplateItem, item_data.parent_id)
-        if parent_item:
-            normalize_as_category(parent_item)
+    if parent_item:
+        normalize_as_category(parent_item)
 
     await db.commit()
     await db.refresh(item)

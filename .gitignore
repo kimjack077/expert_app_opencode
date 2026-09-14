@@ -127,3 +127,9 @@ backend/backend.err
 
 # Screenshots walkthrough notes
 screenshots/walkthrough.md
+
+# Scratch and test files
+tests_e2e_20260914/
+fast_deploy.py
+w_login.yaml
+

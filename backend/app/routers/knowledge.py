@@ -70,6 +70,10 @@ async def get_documents(
             "issue_date": d.issue_date.isoformat() if d.issue_date else None,
             "effective_date": d.effective_date.isoformat() if d.effective_date else None,
             "status": d.status,
+            # BUG-06：Markdown 结构化标识——列表此前漏返回该字段，
+            # 导致前端 <Markdown> 徽标恒不显示（恒展示「纯文本」）
+            "markdown_path": d.markdown_path,
+            "is_markdown": bool(d.markdown_path),
         } for d in documents]
     )
 

@@ -263,8 +263,7 @@ export default function MyAuditTasks() {
 
       {/* 统计卡片 */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
-        <Card
-          bordered={false}
+        <Card variant="borderless"
           style={{ flex: 1, background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.1) 0%, rgba(100, 116, 139, 0.05) 100%)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -288,8 +287,7 @@ export default function MyAuditTasks() {
           </div>
         </Card>
 
-        <Card
-          bordered={false}
+        <Card variant="borderless"
           style={{ flex: 1, background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -313,8 +311,7 @@ export default function MyAuditTasks() {
           </div>
         </Card>
 
-        <Card
-          bordered={false}
+        <Card variant="borderless"
           style={{ flex: 1, background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -338,8 +335,7 @@ export default function MyAuditTasks() {
           </div>
         </Card>
 
-        <Card
-          bordered={false}
+        <Card variant="borderless"
           style={{ flex: 1, background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -365,7 +361,7 @@ export default function MyAuditTasks() {
       </div>
 
       {/* 筛选区 */}
-      <Card bordered={false} style={{ marginBottom: 16 }}>
+      <Card variant="borderless" style={{ marginBottom: 16 }}>
         <Space size="middle">
           <Input.Search
             placeholder="搜索项目名称、企业名称、审核区域..."
@@ -390,7 +386,7 @@ export default function MyAuditTasks() {
       </Card>
 
       {/* 任务列表 */}
-      <Card bordered={false}>
+      <Card variant="borderless">
         <Table
           columns={columns}
           dataSource={filteredTasks}

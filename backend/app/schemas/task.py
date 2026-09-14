@@ -1,7 +1,10 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from uuid import UUID
+
+# 检查结论枚举：三选一 + 历史兼容别名（not_applicable），其余值一律拒绝
+CheckResult = Literal["pass", "fail", "na", "not_applicable"]
 
 
 class InspectionTaskBase(BaseModel):
@@ -53,7 +56,7 @@ class InspectionTaskResponse(InspectionTaskBase):
 
 class InspectionRecordBase(BaseModel):
     template_item_id: Optional[UUID] = None
-    result: Optional[str] = None
+    result: Optional[CheckResult] = None
     result_value: Optional[str] = None
     result_text: Optional[str] = None
     inspector_note: Optional[str] = None
@@ -64,7 +67,7 @@ class InspectionRecordCreate(InspectionRecordBase):
 
 
 class InspectionRecordUpdate(BaseModel):
-    result: Optional[str] = None
+    result: Optional[CheckResult] = None
     result_value: Optional[str] = None
     result_text: Optional[str] = None
     inspector_note: Optional[str] = None
@@ -78,6 +81,8 @@ class InspectionRecordResponse(InspectionRecordBase):
     recorded_by: Optional[UUID]
     recorded_at: datetime
     updated_at: datetime
+    # 响应层放宽为 str：兼容历史脏数据，避免序列化 500
+    result: Optional[str] = None
 
     class Config:
         from_attributes = True

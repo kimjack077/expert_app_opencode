@@ -186,7 +186,7 @@ const Users: React.FC = () => {
                 open={modalVisible}
                 onOk={handleSubmit}
                 onCancel={() => setModalVisible(false)}
-                destroyOnClose
+                destroyOnHidden
                 zIndex={1000}
                 maskClosable={false}
                 width={700}

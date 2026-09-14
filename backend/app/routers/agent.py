@@ -160,6 +160,11 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # BUG-21：空消息前置拦截——原实现会把空串直接发给主模型（400 user content required），
+    # 触发一次无谓的降级切换与日志噪声。
+    if not (request.message or "").strip():
+        raise HTTPException(status_code=422, detail="消息内容不能为空")
+
     context = request.context.model_dump() if request.context else {}
     await _authorize_chat_context(context, current_user, db)
 

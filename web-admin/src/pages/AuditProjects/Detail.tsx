@@ -533,7 +533,7 @@ export default function AuditProjectDetail() {
           </Button>,
         ].filter(Boolean)}
         width={850}
-        destroyOnClose
+        destroyOnHidden
       >
         <div
           style={{

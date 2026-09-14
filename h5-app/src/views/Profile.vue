@@ -183,7 +183,8 @@ const fetchUser = async () => {
 const fetchStats = async () => {
   try {
     const res = await getTasks({ page: 1, page_size: 100 })
-    const tasks = res.items || []
+    // 统一响应体为 { code, message, data: { items } }；此前少解一层 data 导致统计恒为 0（BUG-27）
+    const tasks = res.data?.items || []
     stats.value = {
       pending: tasks.filter(t => t.status === 'pending').length,
       inProgress: tasks.filter(t => t.status === 'in_progress').length,

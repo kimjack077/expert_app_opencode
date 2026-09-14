@@ -1,8 +1,11 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
+
+# 检查结论枚举（与 schemas/task.py 的 CheckResult 保持一致）
+CheckResult = Literal["pass", "fail", "na", "not_applicable"]
 
 
 class InspectionRecordBase(BaseModel):
@@ -72,7 +75,7 @@ class InspectionRecordItemBase(BaseModel):
     use_ai: Optional[bool] = Field(False, description="是否使用AI")
     ai_prompt_template: Optional[str] = Field(None, description="AI提示词模板")
     # 通用结果字段（保留兼容）
-    result: Optional[str] = Field(None, description="检查结果：pass/fail")
+    result: Optional[CheckResult] = Field(None, description="检查结果：pass/fail/na")
     result_value: Optional[str] = Field(None, max_length=50, description="数值结果")
     result_text: Optional[str] = Field(None, description="文字结论")
     # 新增：按检查类型存储结果
@@ -98,7 +101,7 @@ class InspectionRecordItemCreate(InspectionRecordItemBase):
 
 
 class InspectionRecordItemUpdate(BaseModel):
-    result: Optional[str] = None
+    result: Optional[CheckResult] = None
     result_value: Optional[str] = None
     result_text: Optional[str] = None
     score_value: Optional[str] = None
@@ -120,6 +123,8 @@ class InspectionRecordItemResponse(InspectionRecordItemBase):
     record_id: UUID
     recorded_at: datetime
     updated_at: datetime
+    # 响应层放宽为 str：兼容历史脏数据（空串等），避免序列化 500
+    result: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -242,7 +242,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
         <Col span={16}>
           <Row gutter={[16, 16]}>
             <Col span={8}>
-              <Card size="small" bordered={false} style={{ background: 'var(--bg-color)' }}>
+              <Card size="small" variant="borderless" style={{ background: 'var(--bg-color)' }}>
                 <Statistic
                   title="历史检查次数"
                   value={profile.statistics.total_inspections}
@@ -251,7 +251,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
               </Card>
             </Col>
             <Col span={8}>
-              <Card size="small" bordered={false} style={{ background: 'rgba(16, 185, 129, 0.1)' }}>
+              <Card size="small" variant="borderless" style={{ background: 'rgba(16, 185, 129, 0.1)' }}>
                 <Statistic
                   title="合格次数"
                   value={profile.statistics.pass_count}
@@ -261,7 +261,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
               </Card>
             </Col>
             <Col span={8}>
-              <Card size="small" bordered={false} style={{ background: 'rgba(239, 68, 68, 0.1)' }}>
+              <Card size="small" variant="borderless" style={{ background: 'rgba(239, 68, 68, 0.1)' }}>
                 <Statistic
                   title="不合格次数"
                   value={profile.statistics.fail_count}
@@ -271,7 +271,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
               </Card>
             </Col>
             <Col span={12}>
-              <Card size="small" bordered={false} style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
+              <Card size="small" variant="borderless" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
                 <Statistic
                   title="待整改项"
                   value={profile.statistics.pending_rectifications}
@@ -281,7 +281,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
               </Card>
             </Col>
             <Col span={12}>
-              <Card size="small" bordered={false} style={{ background: 'var(--bg-color)' }}>
+              <Card size="small" variant="borderless" style={{ background: 'var(--bg-color)' }}>
                 <Statistic
                   title="不符合项总数"
                   value={profile.statistics.nc_count}

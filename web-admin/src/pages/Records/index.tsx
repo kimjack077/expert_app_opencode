@@ -8,7 +8,6 @@ import InspectionReport from './InspectionReport'
 import { hasQuantifiedItems } from '@/utils/display'
 
 const { RangePicker } = DatePicker
-const { Panel } = Collapse
 
 export default function Records() {
   const navigate = useNavigate()
@@ -503,19 +502,20 @@ export default function Records() {
           onChange={(keys) => setActiveFilterKeys(keys as string[])}
           ghost
           expandIconPosition="end"
-        >
-          <Panel
-            header={
-              <Space>
-                <FilterOutlined />
-                <span>高级筛选</span>
-                {activeFilterCount > 0 && (
-                  <Badge count={activeFilterCount} style={{ backgroundColor: '#1890ff' }} />
-                )}
-              </Space>
-            }
-            key="filter"
-          >
+          items={[
+            {
+              key: 'filter',
+              label: (
+                <Space>
+                  <FilterOutlined />
+                  <span>高级筛选</span>
+                  {activeFilterCount > 0 && (
+                    <Badge count={activeFilterCount} style={{ backgroundColor: '#1890ff' }} />
+                  )}
+                </Space>
+              ),
+              children: (
+                <>
             <Form layout="vertical">
               <Row gutter={16}>
                 <Col span={6}>
@@ -595,8 +595,11 @@ export default function Records() {
                 </Col>
               </Row>
             </Form>
-          </Panel>
-        </Collapse>
+                </>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       <Card>

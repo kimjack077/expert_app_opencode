@@ -141,7 +141,14 @@ class ReportService:
         }
         return radio_map.get(value, value)
 
-    def _flatten_items(self, items: List[Any]) -> List[Any]:
+    def _flatten_items(self, items: List[Any], current_category: str = '') -> List[Any]:
+        """递归扁平化模板树，只保留叶子检查项，并注入所属分类名。
+
+        - 只要有子节点即一律按分类目录处理（与接口层 / 前端口径保持一致），
+          避免历史脏快照里的根节点被当成检查项列进报告；
+        - 为每个叶子项注入 `category_name`（最近一级分类目录标题），
+          供 PDF 表格分组、/report 接口输出与第三方集成使用（BUG-29）。
+        """
         result = []
         for item in items:
             # 兼容字典和 SQLAlchemy 对象
@@ -152,33 +159,33 @@ class ReportService:
                 is_category = getattr(item, 'is_category', False)
                 children = getattr(item, 'children', None)
                 # 将 SQLAlchemy 对象转换为字典
-                if not isinstance(item, dict):
-                    item = {
-                        'id': str(getattr(item, 'id', '')),
-                        'parent_id': str(getattr(item, 'parent_id', '')) if getattr(item, 'parent_id', None) else None,
-                        'title': getattr(item, 'title', '') or '',
-                        'description': getattr(item, 'description', None),
-                        'check_method': getattr(item, 'check_method', None),
-                        'legal_basis': getattr(item, 'legal_basis', None),
-                        'standard_ref': getattr(item, 'standard_ref', None),
-                        'check_type': getattr(item, 'check_type', None),
-                        'result_type': getattr(item, 'result_type', None),
-                        'result_options': getattr(item, 'result_options', None),
-                        'risk_level': getattr(item, 'risk_level', 'medium'),
-                        'is_category': is_category,
-                        'sort_order': getattr(item, 'sort_order', 0),
-                        'radio_value': getattr(item, 'radio_value', None),
-                        'problem_description': getattr(item, 'problem_description', None),
-                        'rectification_suggestion': getattr(item, 'rectification_suggestion', None),
-                    }
-            # 只要有子节点就一律按分类目录处理（与接口层 / 前端口径保持一致），
-            # 避免历史脏快照里的根节点被当成检查项列进报告。
+                item = {
+                    'id': str(getattr(item, 'id', '')),
+                    'parent_id': str(getattr(item, 'parent_id', '')) if getattr(item, 'parent_id', None) else None,
+                    'title': getattr(item, 'title', '') or '',
+                    'description': getattr(item, 'description', None),
+                    'check_method': getattr(item, 'check_method', None),
+                    'legal_basis': getattr(item, 'legal_basis', None),
+                    'standard_ref': getattr(item, 'standard_ref', None),
+                    'check_type': getattr(item, 'check_type', None),
+                    'result_type': getattr(item, 'result_type', None),
+                    'result_options': getattr(item, 'result_options', None),
+                    'risk_level': getattr(item, 'risk_level', 'medium'),
+                    'is_category': is_category,
+                    'sort_order': getattr(item, 'sort_order', 0),
+                    'radio_value': getattr(item, 'radio_value', None),
+                    'problem_description': getattr(item, 'problem_description', None),
+                    'rectification_suggestion': getattr(item, 'rectification_suggestion', None),
+                }
             if children:
                 is_category = True
+
+            title = item.get('title', '') or ''
             if not is_category:
+                item['category_name'] = current_category
                 result.append(item)
             if children:
-                result.extend(self._flatten_items(children))
+                result.extend(self._flatten_items(children, title or current_category))
         return result
 
     def _build_cover_page(self, record: InspectionRecord, report_number: str) -> List:
@@ -232,13 +239,17 @@ class ReportService:
         all_items = self._flatten_items(template_items)
         pass_count = sum(1 for item in all_items if item.get('radio_value') == 'pass')
         fail_count = sum(1 for item in all_items if item.get('radio_value') == 'fail')
-        na_count = sum(1 for item in all_items if item.get('radio_value') == 'na')
+        na_count = sum(1 for item in all_items if item.get('radio_value') in ('na', 'not_applicable'))
         total = len(all_items)
-        pass_rate = round(pass_count / total * 100, 1) if total > 0 else 0
+        filled_count = pass_count + fail_count + na_count
+        # BUG-04：与报告数据口径一致——占比分母为「已填报项」（排除不适用与未填写）
+        rated_count = pass_count + fail_count
+        pass_rate = round(pass_count / rated_count * 100, 1) if rated_count > 0 else 0
+        fail_rate = round(fail_count / rated_count * 100, 1) if rated_count > 0 else 0
         overview_text = f"""
-        本次检查共 {total} 项，结果如下：
-        合格项：{pass_count} 项（{pass_rate}%）
-        不合格项：{fail_count} 项（{round(fail_count/total*100, 1) if total > 0 else 0}%）
+        本次检查共 {total} 项，其中已填报 {filled_count} 项，未填写 {total - filled_count} 项，结果如下：
+        合格项：{pass_count} 项（占已填报 {pass_rate}%）
+        不合格项：{fail_count} 项（占已填报 {fail_rate}%）
         不适用项：{na_count} 项
         """
         elements.append(Paragraph(overview_text.replace('\n', '<br/>'), self.styles['CustomBodyText']))
@@ -283,18 +294,33 @@ class ReportService:
         elements.append(Paragraph("三、检查内容及结果", self.styles['SectionTitle']))
         all_items = self._flatten_items(template_items)
         table_data = [['序号', '检查项目', '检查结果', '备注']]
-        for idx, item in enumerate(all_items, 1):
+        # BUG-29：按分类目录分组展示（与 Web 端报告预览一致），分类行合并 4 列
+        category_rows: List[int] = []
+        fail_rows: List[int] = []
+        last_category = None
+        item_index = 0
+        for item in all_items:
+            category = item.get('category_name') or ''
+            if category and category != last_category:
+                category_rows.append(len(table_data))
+                table_data.append([f"📂 分类：{category}", '', '', ''])
+                last_category = category
+            item_index += 1
+            row_idx = len(table_data)
             result = self._get_radio_text(item.get('radio_value'))
             note = item.get('problem_description', '')[:30] if item.get('radio_value') == 'fail' else ''
             table_data.append([
-                str(idx),
+                str(item_index),
                 item.get('title', '-')[:25],
                 result,
                 note[:20] if note else '-',
             ])
+            if item.get('radio_value') == 'fail':
+                fail_rows.append(row_idx)
+
         col_widths = [12*mm, 60*mm, 25*mm, 43*mm]
         table = Table(table_data, colWidths=col_widths)
-        table.setStyle(TableStyle([
+        style_cmds = [
             ('FONTNAME', (0, 0), (-1, -1), self.font_name),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
@@ -306,13 +332,20 @@ class ReportService:
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
             ('TOPPADDING', (0, 0), (-1, -1), 5),
-        ]))
-        fail_rows = [i+1 for i, item in enumerate(all_items) if item.get('radio_value') == 'fail']
+        ]
+        for row in category_rows:
+            style_cmds.extend([
+                ('SPAN', (0, row), (-1, row)),
+                ('BACKGROUND', (0, row), (-1, row), colors.HexColor('#eff6ff')),
+                ('TEXTCOLOR', (0, row), (-1, row), colors.HexColor('#1d4ed8')),
+                ('ALIGN', (0, row), (-1, row), 'LEFT'),
+            ])
         for row in fail_rows:
-            table.setStyle(TableStyle([
+            style_cmds.extend([
                 ('TEXTCOLOR', (2, row), (2, row), colors.HexColor('#dc2626')),
                 ('BACKGROUND', (0, row), (-1, row), colors.HexColor('#fef2f2')),
-            ]))
+            ])
+        table.setStyle(TableStyle(style_cmds))
         elements.append(table)
         elements.append(Spacer(1, 5*mm))
         return elements
@@ -468,9 +501,11 @@ class ReportService:
             item_id = str(item.get('id', '') or '')
             if item_id and item_id in record_items_map:
                 ri_data = record_items_map[item_id]
-                # 用实际结果覆盖模板定义中的空值
-                if ri_data.get('radio_value'):
-                    item['radio_value'] = ri_data['radio_value']
+                # BUG-03：result 与 radio_value 字段归一——写入侧可能只填了 result，
+                # 报告侧必须同等对待，否则统计与 PDF 全部丢失判定。
+                effective_result = ri_data.get('radio_value') or ri_data.get('result')
+                if effective_result:
+                    item['radio_value'] = effective_result
                 if ri_data.get('problem_description'):
                     item['problem_description'] = ri_data['problem_description']
                 if ri_data.get('rectification_suggestion'):
@@ -486,6 +521,11 @@ class ReportService:
         fail_count = sum(1 for item in all_items if item.get('radio_value') == 'fail')
         na_count = sum(1 for item in all_items if item.get('radio_value') in ('na', 'not_applicable'))
         total = len(all_items)
+        filled_count = pass_count + fail_count + na_count
+        # BUG-04：合规率 = 已填报合格项 / 已填报项（分子分母均排除「不适用」与「未填写」），
+        # 与工作台 /api/analytics/dashboard 口径保持一致。
+        rated_count = pass_count + fail_count
+        pass_rate = round(pass_count / rated_count * 100, 1) if rated_count > 0 else 0
         fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
         return {
             'report_number': self._generate_report_number(record),
@@ -514,7 +554,9 @@ class ReportService:
                 'pass': pass_count,
                 'fail': fail_count,
                 'na': na_count,
-                'pass_rate': round(pass_count / total * 100, 1) if total > 0 else 0,
+                'filled': filled_count,
+                'unfilled': total - filled_count,
+                'pass_rate': pass_rate,
             },
             'items': all_items,
             'fail_items': fail_items,

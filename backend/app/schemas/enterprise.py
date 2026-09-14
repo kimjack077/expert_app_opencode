@@ -1,28 +1,31 @@
 from datetime import datetime, date
-from typing import Optional, List
-from pydantic import BaseModel
+from typing import Literal, Optional, List
+from pydantic import BaseModel, Field
 from uuid import UUID
+
+# 风险等级（与前端 Enterprises 表单选项一致）：A级低风险 / B级一般 / C级较高 / D级高风险
+RiskLevel = Literal["A", "B", "C", "D"]
 
 
 class EnterpriseBase(BaseModel):
-    name: str
-    credit_code: Optional[str] = None
-    org_code: Optional[str] = None
-    address: Optional[str] = None
-    legal_person: Optional[str] = None
-    contact_person: Optional[str] = None
-    contact_phone: Optional[str] = None
-    enterprise_type: Optional[str] = None
-    economic_type: Optional[str] = None
-    risk_level: Optional[str] = "B"
-    status: Optional[str] = "active"
+    name: str = Field(..., min_length=1, max_length=200)
+    credit_code: Optional[str] = Field(None, max_length=50)
+    org_code: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = Field(None, max_length=500)
+    legal_person: Optional[str] = Field(None, max_length=50)
+    contact_person: Optional[str] = Field(None, max_length=50)
+    contact_phone: Optional[str] = Field(None, max_length=20)
+    enterprise_type: Optional[str] = Field(None, max_length=50)
+    economic_type: Optional[str] = Field(None, max_length=50)
+    risk_level: Optional[RiskLevel] = "B"
+    status: Optional[Literal["active", "suspended", "revoked"]] = "active"
     longitude: Optional[float] = None
     latitude: Optional[float] = None
     district: Optional[str] = None
     street: Optional[str] = None
-    employee_count: Optional[int] = None
-    annual_output: Optional[float] = None
-    annual_tax: Optional[float] = None
+    employee_count: Optional[int] = Field(None, ge=0)
+    annual_output: Optional[float] = Field(None, ge=0)
+    annual_tax: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
 
 
@@ -31,24 +34,24 @@ class EnterpriseCreate(EnterpriseBase):
 
 
 class EnterpriseUpdate(BaseModel):
-    name: Optional[str] = None
-    credit_code: Optional[str] = None
-    org_code: Optional[str] = None
-    address: Optional[str] = None
-    legal_person: Optional[str] = None
-    contact_person: Optional[str] = None
-    contact_phone: Optional[str] = None
-    enterprise_type: Optional[str] = None
-    economic_type: Optional[str] = None
-    risk_level: Optional[str] = None
-    status: Optional[str] = None
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    credit_code: Optional[str] = Field(None, max_length=50)
+    org_code: Optional[str] = Field(None, max_length=50)
+    address: Optional[str] = Field(None, max_length=500)
+    legal_person: Optional[str] = Field(None, max_length=50)
+    contact_person: Optional[str] = Field(None, max_length=50)
+    contact_phone: Optional[str] = Field(None, max_length=20)
+    enterprise_type: Optional[str] = Field(None, max_length=50)
+    economic_type: Optional[str] = Field(None, max_length=50)
+    risk_level: Optional[RiskLevel] = None
+    status: Optional[Literal["active", "suspended", "revoked"]] = None
     longitude: Optional[float] = None
     latitude: Optional[float] = None
     district: Optional[str] = None
     street: Optional[str] = None
-    employee_count: Optional[int] = None
-    annual_output: Optional[float] = None
-    annual_tax: Optional[float] = None
+    employee_count: Optional[int] = Field(None, ge=0)
+    annual_output: Optional[float] = Field(None, ge=0)
+    annual_tax: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
 
 
@@ -56,6 +59,10 @@ class EnterpriseResponse(EnterpriseBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    # 响应层放宽为 str：兼容历史脏数据（非法等级/状态值），避免序列化 500；
+    # 严格枚举校验仅作用于 Create/Update 入参。
+    risk_level: Optional[str] = None
+    status: Optional[str] = None
 
     class Config:
         from_attributes = True

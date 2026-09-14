@@ -566,7 +566,7 @@ export default function AuditStatistics() {
         <Row gutter={[16, 16]}>
           {overviewCards.map((card, index) => (
             <Col xs={24} sm={12} lg={6} key={index}>
-              <Card className="stat-card" bordered={false} style={{ background: card.bgColor }}>
+              <Card className="stat-card" variant="borderless" style={{ background: card.bgColor }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                   <div>
                     <div style={{
@@ -613,8 +613,7 @@ export default function AuditStatistics() {
                   <BarChartOutlined style={{ color: 'var(--primary-color)' }} />
                   <span>项目趋势</span>
                 </div>
-              }
-              bordered={false}
+              } variant="borderless"
             >
               {renderTrendChart(projectTrend)}
             </Card>
@@ -626,8 +625,7 @@ export default function AuditStatistics() {
                   <ProjectOutlined style={{ color: 'var(--primary-color)' }} />
                   <span>项目状态分布</span>
                 </div>
-              }
-              bordered={false}
+              } variant="borderless"
             >
               {renderBarChart(projectDistribution, {
                 '策划中': '#8B5CF6',
@@ -655,8 +653,7 @@ export default function AuditStatistics() {
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={8}>
               <Card
-                title="严重程度分布"
-                bordered={false}
+                title="严重程度分布" variant="borderless"
                 size="small"
               >
                 {renderBarChart(ncDistribution, ncSeverityColors)}
@@ -664,8 +661,7 @@ export default function AuditStatistics() {
             </Col>
             <Col xs={24} lg={8}>
               <Card
-                title="按体系分布"
-                bordered={false}
+                title="按体系分布" variant="borderless"
                 size="small"
               >
                 {renderBarChart(ncBySystem, systemColors)}
@@ -673,8 +669,7 @@ export default function AuditStatistics() {
             </Col>
             <Col xs={24} lg={8}>
               <Card
-                title="条款TOP 10"
-                bordered={false}
+                title="条款TOP 10" variant="borderless"
                 size="small"
               >
                 {ncByClause.length === 0 ? (
@@ -715,8 +710,7 @@ export default function AuditStatistics() {
                   <BarChartOutlined style={{ color: 'var(--error-color)' }} />
                   <span>不符合项趋势</span>
                 </div>
-              }
-              bordered={false}
+              } variant="borderless"
             >
               {renderNCTrendChart(ncTrend)}
             </Card>
@@ -739,8 +733,7 @@ export default function AuditStatistics() {
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={14}>
               <Card
-                title="工作量统计"
-                bordered={false}
+                title="工作量统计" variant="borderless"
               >
                 <Table
                   dataSource={auditorWorkload}
@@ -768,8 +761,7 @@ export default function AuditStatistics() {
                       ]}
                     />
                   </div>
-                }
-                bordered={false}
+                } variant="borderless"
               >
                 <Table
                   dataSource={auditorRanking}

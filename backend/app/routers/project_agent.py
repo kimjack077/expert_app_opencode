@@ -311,12 +311,23 @@ async def _run_artifact_generation(job_id: UUID) -> None:
             job.progress = 100
             await db.commit()
         except Exception as exc:
-            await db.rollback()
-            job = await db.get(ProjectArtifact, job_id)
-            if job:
-                job.status = "failed"
-                job.error_message = str(exc)[:2000]
-                await db.commit()
+            # BUG-17：原实现在当前会话（可能已因连接超时不可用）上写失败原因，
+            # 一旦 rollback/commit 再抛异常，error_message 会保持为空，
+            # 前端只能看到「文件缺失」而无法定位原因。这里改用独立会话兜底写入。
+            error_text = f"{type(exc).__name__}: {exc}"[:2000]
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            try:
+                async with AsyncSessionLocal() as fail_db:
+                    job = await fail_db.get(ProjectArtifact, job_id)
+                    if job:
+                        job.status = "failed"
+                        job.error_message = error_text
+                        await fail_db.commit()
+            except Exception as inner:  # noqa: BLE001
+                print(f"[Artifact] 写入失败原因时再次出错 job={job_id}: {inner}")
 
 
 @router.get("/{project_id}/documents")

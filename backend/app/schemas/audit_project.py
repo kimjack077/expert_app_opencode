@@ -4,49 +4,70 @@ Audit Project Related Schemas
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# 审核类型：初审 / 监督审核 / 再认证 / 扩大范围
+AuditType = Literal["initial", "surveillance", "recertification", "expansion"]
+# 认证体系代码（与前端 AuditProjects/Create.tsx 选项一致）
+CertificationSystem = Literal["Q", "E", "S", "En"]
+
+
+def _validate_dates(start: Optional[datetime], end: Optional[datetime]) -> None:
+    if start and end and end < start:
+        raise ValueError("计划结束时间不能早于计划开始时间")
 
 
 # ==================== AuditProject Schemas ====================
 
 class AuditProjectBase(BaseModel):
     """审核项目基础 Schema"""
-    title: str = Field(..., description="项目名称")
+    title: str = Field(..., min_length=1, max_length=300, description="项目名称")
     enterprise_id: UUID = Field(..., description="受审核企业 ID")
-    audit_type: str = Field(..., description="审核类型：initial/surveillance/recertification/expansion")
-    certification_systems: List[str] = Field(default=[], description="认证体系列表：Q/E/S/En")
+    audit_type: AuditType = Field(..., description="审核类型：initial/surveillance/recertification/expansion")
+    certification_systems: List[CertificationSystem] = Field(default=[], description="认证体系列表：Q/E/S/En")
     audit_criteria: List[str] = Field(default=[], description="审核准则列表")
     audit_scope: Optional[dict] = Field(None, description="审核范围")
     scheduled_start: Optional[datetime] = Field(None, description="计划开始时间")
     scheduled_end: Optional[datetime] = Field(None, description="计划结束时间")
-    audit_days: Optional[Decimal] = Field(None, description="审核人天数")
+    # 审核工作量（人天）：全体审核员现场工作天数之和，必须为正数且有合理上限
+    audit_days: Optional[Decimal] = Field(None, gt=0, le=365, description="审核工作量（人天）")
     team_leader_id: Optional[UUID] = Field(None, description="审核组长 ID")
     remarks: Optional[str] = Field(None, description="备注")
 
 
 class AuditProjectCreate(AuditProjectBase):
     """创建审核项目"""
-    pass
+
+    @model_validator(mode="after")
+    def _check_schedule(self):
+        # 排期交叉校验只作用于入参；Response 继承时不执行，避免历史脏数据导致序列化 500
+        _validate_dates(self.scheduled_start, self.scheduled_end)
+        return self
 
 
 class AuditProjectUpdate(BaseModel):
     """更新审核项目"""
-    title: Optional[str] = None
-    audit_type: Optional[str] = None
-    certification_systems: Optional[List[str]] = None
+    title: Optional[str] = Field(None, min_length=1, max_length=300)
+    audit_type: Optional[AuditType] = None
+    certification_systems: Optional[List[CertificationSystem]] = None
     audit_criteria: Optional[List[str]] = None
     audit_scope: Optional[dict] = None
     scheduled_start: Optional[datetime] = None
     scheduled_end: Optional[datetime] = None
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
-    audit_days: Optional[Decimal] = None
+    audit_days: Optional[Decimal] = Field(None, gt=0, le=365)
     team_leader_id: Optional[UUID] = None
     status: Optional[str] = None
     remarks: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_schedule(self):
+        _validate_dates(self.scheduled_start, self.scheduled_end)
+        return self
 
 
 class AuditProjectResponse(AuditProjectBase):
@@ -59,6 +80,10 @@ class AuditProjectResponse(AuditProjectBase):
     created_by: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    # 响应层放宽：兼容历史脏数据，避免序列化 500；严格校验仅作用于 Create/Update 入参。
+    audit_type: Optional[str] = None
+    certification_systems: Optional[List[str]] = None
+    audit_days: Optional[Decimal] = None
 
     class Config:
         from_attributes = True
@@ -66,10 +91,14 @@ class AuditProjectResponse(AuditProjectBase):
 
 # ==================== AuditTeamMember Schemas ====================
 
+# 审核组角色枚举（与前端及业务约定一致），其余值一律拒绝
+TeamMemberRole = Literal["leader", "member", "trainee", "observer", "expert"]
+
+
 class AuditTeamMemberBase(BaseModel):
     """审核组成员基础 Schema"""
     member_id: UUID = Field(..., description="审核员 ID")
-    role: str = Field(default="member", description="角色：leader/member/trainee/observer/expert")
+    role: TeamMemberRole = Field(default="member", description="角色：leader/member/trainee/observer/expert")
     responsible_systems: List[str] = Field(default=[], description="负责的认证体系")
     qualification_codes: List[str] = Field(default=[], description="专业代码列表")
     registration_no: Optional[str] = Field(None, description="注册审核员编号")
@@ -90,7 +119,7 @@ class AuditTeamMemberCreate(AuditTeamMemberBase):
 
 class AuditTeamMemberUpdate(BaseModel):
     """更新审核组成员"""
-    role: Optional[str] = None
+    role: Optional[TeamMemberRole] = None
     responsible_systems: Optional[List[str]] = None
     qualification_codes: Optional[List[str]] = None
     assigned_areas: Optional[List[str]] = None
@@ -107,6 +136,8 @@ class AuditTeamMemberResponse(AuditTeamMemberBase):
     member_username: Optional[str] = Field(None, description="审核员用户名")
     created_at: datetime
     updated_at: datetime
+    # 响应层放宽为 str：兼容历史脏数据（如非法角色值），避免序列化 500
+    role: str = "member"
 
     class Config:
         from_attributes = True

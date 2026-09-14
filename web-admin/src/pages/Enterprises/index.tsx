@@ -5,7 +5,6 @@ import { enterpriseApi } from '@/services/api'
 import dayjs from 'dayjs'
 
 const { TextArea } = Input
-const { TabPane } = Tabs
 
 interface Enterprise {
   id: string
@@ -235,7 +234,7 @@ export default function Enterprises() {
         </Button>
       </div>
 
-      <Card bordered={false}>
+      <Card variant="borderless">
         <div className="search-bar">
           <Input
             placeholder="搜索企业名称"
@@ -480,60 +479,76 @@ export default function Enterprises() {
         centered
       >
         {currentEnterprise && (
-          <Tabs defaultActiveKey="basic" style={{ marginTop: 16 }}>
-            <TabPane tab="基本信息" key="basic">
-              <Descriptions bordered column={2} size="middle">
-                <Descriptions.Item label="企业名称">{currentEnterprise.name}</Descriptions.Item>
-                <Descriptions.Item label="统一社会信用代码">{currentEnterprise.credit_code}</Descriptions.Item>
-                <Descriptions.Item label="组织机构代码">{currentEnterprise.org_code}</Descriptions.Item>
-                <Descriptions.Item label="法定代表人">{currentEnterprise.legal_person}</Descriptions.Item>
-                <Descriptions.Item label="联系人">{currentEnterprise.contact_person}</Descriptions.Item>
-                <Descriptions.Item label="联系电话">{currentEnterprise.contact_phone}</Descriptions.Item>
-                <Descriptions.Item label="企业地址" span={2}>{currentEnterprise.address}</Descriptions.Item>
-                <Descriptions.Item label="所属区域">{currentEnterprise.district}</Descriptions.Item>
-                <Descriptions.Item label="街道">{currentEnterprise.street}</Descriptions.Item>
-                <Descriptions.Item label="企业类型">{currentEnterprise.enterprise_type}</Descriptions.Item>
-                <Descriptions.Item label="经济类型">{currentEnterprise.economic_type}</Descriptions.Item>
-                <Descriptions.Item label="风险等级">{getRiskTag(currentEnterprise.risk_level)}</Descriptions.Item>
-                <Descriptions.Item label="状态">{getStatusTag(currentEnterprise.status)}</Descriptions.Item>
-                <Descriptions.Item label="员工人数">{currentEnterprise.employee_count}</Descriptions.Item>
-                <Descriptions.Item label="年产值">{currentEnterprise.annual_output} 万元</Descriptions.Item>
-                <Descriptions.Item label="经度">{currentEnterprise.longitude}</Descriptions.Item>
-                <Descriptions.Item label="纬度">{currentEnterprise.latitude}</Descriptions.Item>
-                <Descriptions.Item label="备注" span={2}>{currentEnterprise.remarks}</Descriptions.Item>
-              </Descriptions>
-            </TabPane>
-            <TabPane tab="资质信息" key="qualifications">
-              <Table
-                dataSource={currentEnterprise.qualifications || []}
-                rowKey="id"
-                size="middle"
-                pagination={false}
-                locale={{ emptyText: '暂无资质信息' }}
-              >
-                <Table.Column title="资质类型" dataIndex="qual_type" />
-                <Table.Column title="证书编号" dataIndex="cert_no" />
-                <Table.Column title="产品名称" dataIndex="product_name" />
-                <Table.Column title="有效期至" dataIndex="valid_until" render={(v) => v ? dayjs(v).format('YYYY-MM-DD') : '-'} />
-                <Table.Column title="状态" dataIndex="status" render={(s) => s === 'valid' ? <Tag color="success">有效</Tag> : <Tag color="error">失效</Tag>} />
-              </Table>
-            </TabPane>
-            <TabPane tab="产品信息" key="products">
-              <Table
-                dataSource={currentEnterprise.products || []}
-                rowKey="id"
-                size="middle"
-                pagination={false}
-                locale={{ emptyText: '暂无产品信息' }}
-              >
-                <Table.Column title="产品名称" dataIndex="name" />
-                <Table.Column title="产品类别" dataIndex="category" />
-                <Table.Column title="规格型号" dataIndex="specification" />
-                <Table.Column title="年产量" dataIndex="annual_output" />
-                <Table.Column title="获证状态" dataIndex="cert_status" />
-              </Table>
-            </TabPane>
-          </Tabs>
+          <Tabs
+            defaultActiveKey="basic"
+            style={{ marginTop: 16 }}
+            items={[
+              {
+                key: 'basic',
+                label: '基本信息',
+                children: (
+                  <Descriptions bordered column={2} size="middle">
+                    <Descriptions.Item label="企业名称">{currentEnterprise.name}</Descriptions.Item>
+                    <Descriptions.Item label="统一社会信用代码">{currentEnterprise.credit_code}</Descriptions.Item>
+                    <Descriptions.Item label="组织机构代码">{currentEnterprise.org_code}</Descriptions.Item>
+                    <Descriptions.Item label="法定代表人">{currentEnterprise.legal_person}</Descriptions.Item>
+                    <Descriptions.Item label="联系人">{currentEnterprise.contact_person}</Descriptions.Item>
+                    <Descriptions.Item label="联系电话">{currentEnterprise.contact_phone}</Descriptions.Item>
+                    <Descriptions.Item label="企业地址" span={2}>{currentEnterprise.address}</Descriptions.Item>
+                    <Descriptions.Item label="所属区域">{currentEnterprise.district}</Descriptions.Item>
+                    <Descriptions.Item label="街道">{currentEnterprise.street}</Descriptions.Item>
+                    <Descriptions.Item label="企业类型">{currentEnterprise.enterprise_type}</Descriptions.Item>
+                    <Descriptions.Item label="经济类型">{currentEnterprise.economic_type}</Descriptions.Item>
+                    <Descriptions.Item label="风险等级">{getRiskTag(currentEnterprise.risk_level)}</Descriptions.Item>
+                    <Descriptions.Item label="状态">{getStatusTag(currentEnterprise.status)}</Descriptions.Item>
+                    <Descriptions.Item label="员工人数">{currentEnterprise.employee_count}</Descriptions.Item>
+                    <Descriptions.Item label="年产值">{currentEnterprise.annual_output} 万元</Descriptions.Item>
+                    <Descriptions.Item label="经度">{currentEnterprise.longitude}</Descriptions.Item>
+                    <Descriptions.Item label="纬度">{currentEnterprise.latitude}</Descriptions.Item>
+                    <Descriptions.Item label="备注" span={2}>{currentEnterprise.remarks}</Descriptions.Item>
+                  </Descriptions>
+                ),
+              },
+              {
+                key: 'qualifications',
+                label: '资质信息',
+                children: (
+                  <Table
+                    dataSource={currentEnterprise.qualifications || []}
+                    rowKey="id"
+                    size="middle"
+                    pagination={false}
+                    locale={{ emptyText: '暂无资质信息' }}
+                  >
+                    <Table.Column title="资质类型" dataIndex="qual_type" />
+                    <Table.Column title="证书编号" dataIndex="cert_no" />
+                    <Table.Column title="产品名称" dataIndex="product_name" />
+                    <Table.Column title="有效期至" dataIndex="valid_until" render={(v) => v ? dayjs(v).format('YYYY-MM-DD') : '-'} />
+                    <Table.Column title="状态" dataIndex="status" render={(s) => s === 'valid' ? <Tag color="success">有效</Tag> : <Tag color="error">失效</Tag>} />
+                  </Table>
+                ),
+              },
+              {
+                key: 'products',
+                label: '产品信息',
+                children: (
+                  <Table
+                    dataSource={currentEnterprise.products || []}
+                    rowKey="id"
+                    size="middle"
+                    pagination={false}
+                    locale={{ emptyText: '暂无产品信息' }}
+                  >
+                    <Table.Column title="产品名称" dataIndex="name" />
+                    <Table.Column title="产品类别" dataIndex="category" />
+                    <Table.Column title="规格型号" dataIndex="specification" />
+                    <Table.Column title="年产量" dataIndex="annual_output" />
+                    <Table.Column title="获证状态" dataIndex="cert_status" />
+                  </Table>
+                ),
+              },
+            ]}
+          />
         )}
       </Modal>
     </div>

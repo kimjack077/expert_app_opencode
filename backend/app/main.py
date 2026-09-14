@@ -162,6 +162,8 @@ _SQLSTATE_STATUS = {
     "23505": (409, "数据冲突，该记录已存在"),      # unique_violation
     "23502": (400, "缺少必填字段"),                # not_null_violation
     "22P02": (404, "资源不存在"),                  # invalid_text_representation(非法 UUID 等)
+    "22000": (404, "资源不存在"),                  # data_exception(asyncpg 对非法 UUID 字面量抛 DataError)
+    "22001": (400, "字段内容超长"),                # string_data_right_truncation(超长字段兜底)
 }
 
 

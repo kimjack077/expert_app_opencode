@@ -82,6 +82,8 @@ async def ensure_project_access(
             AuditTeamMember.member_id == user.id,
         )
     )
-    if member_result.scalar_one_or_none() is None:
+    # 用 first() 而非 scalar_one_or_none()：历史数据可能存在同一成员的重复行，
+    # 后者会抛 MultipleResultsFound 导致接口 500（BUG-07）。
+    if member_result.scalars().first() is None:
         raise HTTPException(status_code=403, detail="无权访问此审核项目")
     return project

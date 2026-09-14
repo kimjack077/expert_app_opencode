@@ -65,7 +65,8 @@
           :color="progressColor"
         />
         <div class="progress-hint">
-          <span v-if="completedCount === 0">请开始填写检查项</span>
+          <span v-if="totalCheckItems === 0">检查项加载中，请稍候…</span>
+          <span v-else-if="completedCount === 0">请开始填写检查项</span>
           <span v-else-if="requiredCompletedCount < requiredCheckItems">必填项还有 {{ requiredCheckItems - requiredCompletedCount }} 项未完成</span>
           <span v-else class="complete">必填项已全完成，请在下方填写最终判定</span>
         </div>
@@ -366,7 +367,10 @@
         {{ submitButtonText }}
       </van-button>
       <div class="submit-hint" v-if="!canSubmit">
-        <span v-if="completedCount < totalCheckItems">
+        <span v-if="totalCheckItems === 0">
+          检查项加载中，请稍候…
+        </span>
+        <span v-else-if="completedCount < totalCheckItems">
           需完成全部 {{ totalCheckItems }} 项检查，当前已完成 {{ completedCount }} 项
         </span>
         <span v-else-if="!finalJudgment.result">

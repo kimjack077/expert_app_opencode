@@ -465,6 +465,19 @@ async def add_team_member(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    # 去重：同一成员在未删除记录中只能加入一次（BUG-14）
+    dup = await db.execute(
+        select(AuditTeamMember.id)
+        .where(
+            AuditTeamMember.project_id == project_id,
+            AuditTeamMember.member_id == member.member_id,
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+        )
+        .limit(1)
+    )
+    if dup.scalars().first() is not None:
+        raise HTTPException(status_code=409, detail="该成员已在审核组中，请勿重复添加")
+
     db_member = AuditTeamMember(
         project_id=project_id,
         **member.model_dump(exclude={"project_id", "registration_no", "registration_level"}),
@@ -1035,6 +1048,23 @@ async def create_meeting(
 ):
     """创建沟通会议记录"""
     await ensure_project_access(db, project_id, current_user, require_manage=True)
+
+    # 首/末次会议在同一项目内唯一（BUG-26）；阶段沟通/内部会议允许多次
+    if meeting.meeting_type in ("opening", "closing"):
+        dup = await db.execute(
+            select(CommunicationMeeting.id)
+            .where(
+                CommunicationMeeting.project_id == project_id,
+                CommunicationMeeting.meeting_type == meeting.meeting_type,
+            )
+            .limit(1)
+        )
+        if dup.scalars().first() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="该项目已存在同类型会议记录，请编辑已有记录或选择其他会议类型",
+            )
+
     db_meeting = CommunicationMeeting(
         project_id=project_id,
         created_by=current_user.id,

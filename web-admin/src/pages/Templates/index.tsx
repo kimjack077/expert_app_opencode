@@ -1072,8 +1072,7 @@ export default function Templates() {
               <Tag color="processing" style={{ borderRadius: 6 }}>{treeData.length} 个顶级项目</Tag>
             </div>
           }
-          style={{ flex: 1, overflow: 'auto' }}
-          bordered={false}
+          style={{ flex: 1, overflow: 'auto' }} variant="borderless"
         >
           {/* 添加顶级项目表单 */}
           {addingNodeId === 'root' && (
@@ -1248,7 +1247,7 @@ export default function Templates() {
         </Button>
       </div>
 
-      <Card bordered={false}>
+      <Card variant="borderless">
         <Table
           columns={columns}
           dataSource={templates}

@@ -1,7 +1,10 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from uuid import UUID
+
+# 系统内置角色（与 app/utils/roles.py 保持一致），禁止写入其他值
+UserRole = Literal["super_admin", "admin", "expert", "auditor"]
 
 
 class Token(BaseModel):
@@ -25,7 +28,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6)
-    role: str = "expert"
+    role: UserRole = "expert"
     org_id: Optional[UUID] = None
     industry_id: Optional[UUID] = None
     is_active: bool = True
@@ -40,7 +43,7 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     full_name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
     org_id: Optional[UUID] = None

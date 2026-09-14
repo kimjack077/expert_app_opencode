@@ -478,6 +478,13 @@ export default function AgentSidebar({ context }: Props) {
         actionConfirm: item.actionConfirm ? { ...item.actionConfirm, status: 'confirmed', data: { ...item.actionConfirm.data, ...(modifiedData || {}) } } : undefined,
       }))
       message.success(serverMessage || '操作已确认并写入系统')
+      // BUG-25：Agent 确认写入后，宿主页面（如项目详情的会议/计划/团队面板）无感知，
+      // 需手动刷新才能看到新数据。这里广播确认事件，由各面板监听并自行刷新。
+      window.dispatchEvent(
+        new CustomEvent('efis:action-confirmed', {
+          detail: { serverAction: action.serverAction, actionType: action.type },
+        }),
+      )
     } catch (error) {
       updateAssistant(messageId, (item) => ({
         ...item,

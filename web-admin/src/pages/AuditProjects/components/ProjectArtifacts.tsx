@@ -399,11 +399,27 @@ export default function ProjectArtifacts({ projectId }: Props) {
       dataIndex: 'status',
       width: 110,
       render: (value: string | undefined, artifact) => {
-        const isMissing = artifact.artifact_type !== 'generation_job' && artifact.available === false
+        // BUG-17：生成失败（status=failed）优先展示失败状态与原因，
+        // 避免与「文件缺失」（历史文件不在当前环境）混淆。
+        const isFailed = value === 'failed'
+        const isMissing = !isFailed && artifact.artifact_type !== 'generation_job' && artifact.available === false
         const config = isMissing
           ? statusConfig.missing
           : statusConfig[value || 'pending'] || { text: value || '待生成', color: 'default' }
-        return <Tag color={config.color}>{config.text}</Tag>
+        return (
+          <Space direction="vertical" size={0}>
+            <Tag color={config.color}>{config.text}</Tag>
+            {isFailed && artifact.error_message ? (
+              <Typography.Text
+                type="danger"
+                style={{ fontSize: 12, maxWidth: 150 }}
+                ellipsis={{ tooltip: artifact.error_message }}
+              >
+                {artifact.error_message}
+              </Typography.Text>
+            ) : null}
+          </Space>
+        )
       },
     },
     {

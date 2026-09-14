@@ -668,8 +668,7 @@ export default function AuditRecordEdit() {
 
       {/* 检查进度与统计概览卡片 */}
       {template && (
-        <Card
-          bordered={false}
+        <Card variant="borderless"
           bodyStyle={{ padding: '14px 20px' }}
           style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
         >
@@ -713,8 +712,7 @@ export default function AuditRecordEdit() {
                 </Space>
                 <Tag color="blue" style={{ borderRadius: 4 }}>现场审核记录</Tag>
               </div>
-            }
-            bordered={false}
+            } variant="borderless"
             bodyStyle={{ padding: readOnly ? '12px 16px' : '16px 20px' }}
             style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
@@ -845,8 +843,7 @@ export default function AuditRecordEdit() {
                     </Button>
                   )}
                 </div>
-              }
-              bordered={false}
+              } variant="borderless"
               bodyStyle={{ padding: 0 }}
               style={{ marginBottom: 16, borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
             >
@@ -871,8 +868,7 @@ export default function AuditRecordEdit() {
                 <CheckCircleOutlined style={{ color: '#16a34a' }} />
                 <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>审核结论</span>
               </Space>
-            }
-            bordered={false}
+            } variant="borderless"
             bodyStyle={{ padding: '16px 20px' }}
             style={{ borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
@@ -961,8 +957,7 @@ export default function AuditRecordEdit() {
                 <span style={{ fontSize: 14, fontWeight: 600 }}>项目信息</span>
               </Space>
             }
-            size="small"
-            bordered={false}
+            size="small" variant="borderless"
             style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
             <Descriptions column={1} size="small" labelStyle={{ color: '#64748b', fontSize: 12 }} contentStyle={{ color: '#0f172a', fontSize: 12 }}>
@@ -976,8 +971,7 @@ export default function AuditRecordEdit() {
           {planItem && (
             <Card
               title="审核计划"
-              size="small"
-              bordered={false}
+              size="small" variant="borderless"
               style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
             >
               <Descriptions column={1} size="small" labelStyle={{ color: '#64748b', fontSize: 12 }} contentStyle={{ color: '#0f172a', fontSize: 12 }}>
@@ -993,8 +987,7 @@ export default function AuditRecordEdit() {
           {!readOnly && (
             <Card
               title="操作提示"
-              size="small"
-              bordered={false}
+              size="small" variant="borderless"
               style={{ borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
             >
               <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.8 }}>

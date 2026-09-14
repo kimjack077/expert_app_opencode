@@ -7,7 +7,9 @@ engine = create_async_engine(
     echo=settings.DEBUG,
     pool_size=20,
     max_overflow=30,
-    pool_recycle=3600,
+    # BUG-17：远程库空闲连接可能在 1 小时内被中间链路断开；30 分钟主动回收 + 使用前探活，
+    # 降低 ConnectionDoesNotExistError / asyncpg TimeoutError 的出现概率。
+    pool_recycle=1800,
     pool_pre_ping=True,
     pool_timeout=30,
     connect_args={

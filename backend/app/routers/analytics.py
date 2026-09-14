@@ -26,149 +26,61 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # BUG-30：原实现拆成 8~11 条串行 COUNT 查询，叠加远程库 RTT 后接口耗时 7~20s。
+    # 改为 GROUP BY 聚合，把任务状态与填报结果各压缩为 1 条查询（语义完全一致）。
     if current_user.role == "expert":
-        total_tasks = (
+        task_rows = (
             await db.execute(
-                select(func.count(InspectionTask.id)).where(
+                select(InspectionTask.status, func.count(InspectionTask.id))
+                .where(
                     InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.is_deleted == False,
+                    InspectionTask.is_deleted == False,  # noqa: E712
                 )
+                .group_by(InspectionTask.status)
             )
-        ).scalar() or 0
-        completed_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "completed",
-                )
-            )
-        ).scalar() or 0
-        in_progress_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "in_progress",
-                )
-            )
-        ).scalar() or 0
-        pending_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "pending",
-                )
-            )
-        ).scalar() or 0
-        cancelled_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "cancelled",
-                )
-            )
-        ).scalar() or 0
+        ).all()
+        task_counts = {s: c for s, c in task_rows}
+        total_tasks = sum(task_counts.values())
+        completed_tasks = task_counts.get("completed", 0)
+        in_progress_tasks = task_counts.get("in_progress", 0)
+        pending_tasks = task_counts.get("pending", 0)
+        cancelled_tasks = task_counts.get("cancelled", 0)
 
-        user_tasks = await db.execute(
-            select(InspectionTask.id).where(
-                InspectionTask.assigned_to == current_user.id
+        record_rows = (
+            await db.execute(
+                select(TaskItemRecord.result, func.count(TaskItemRecord.id))
+                .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
+                .where(InspectionTask.assigned_to == current_user.id)
+                .group_by(TaskItemRecord.result)
             )
-        )
-        task_ids = user_tasks.scalars().all()
-
-        if len(task_ids) > 0:
-            total_records = (
-                await db.execute(
-                    select(func.count(TaskItemRecord.id)).where(
-                        TaskItemRecord.task_id.in_(task_ids)
-                    )
-                )
-            ).scalar() or 0
-            compliant_records = (
-                await db.execute(
-                    select(func.count(TaskItemRecord.id)).where(
-                        TaskItemRecord.task_id.in_(task_ids),
-                        TaskItemRecord.result == "pass",
-                    )
-                )
-            ).scalar() or 0
-            non_compliant_records = (
-                await db.execute(
-                    select(func.count(TaskItemRecord.id)).where(
-                        TaskItemRecord.task_id.in_(task_ids),
-                        TaskItemRecord.result == "fail",
-                    )
-                )
-            ).scalar() or 0
-        else:
-            total_records = 0
-            compliant_records = 0
-            non_compliant_records = 0
+        ).all()
+        total_records = sum(c for _, c in record_rows)
+        compliant_records = sum(c for r, c in record_rows if r == "pass")
+        non_compliant_records = sum(c for r, c in record_rows if r == "fail")
     else:
-        total_tasks = (
+        task_rows = (
             await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.is_deleted == False
-                )
+                select(InspectionTask.status, func.count(InspectionTask.id))
+                .where(InspectionTask.is_deleted == False)  # noqa: E712
+                .group_by(InspectionTask.status)
             )
-        ).scalar() or 0
+        ).all()
+        task_counts = {s: c for s, c in task_rows}
+        total_tasks = sum(task_counts.values())
+        completed_tasks = task_counts.get("completed", 0)
+        in_progress_tasks = task_counts.get("in_progress", 0)
+        pending_tasks = task_counts.get("pending", 0)
+        cancelled_tasks = task_counts.get("cancelled", 0)
 
-        completed_tasks = (
+        record_rows = (
             await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "completed",
-                )
+                select(TaskItemRecord.result, func.count(TaskItemRecord.id))
+                .group_by(TaskItemRecord.result)
             )
-        ).scalar() or 0
-
-        in_progress_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "in_progress",
-                )
-            )
-        ).scalar() or 0
-
-        pending_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "pending",
-                )
-            )
-        ).scalar() or 0
-
-        cancelled_tasks = (
-            await db.execute(
-                select(func.count(InspectionTask.id)).where(
-                    InspectionTask.is_deleted == False,
-                    InspectionTask.status == "cancelled",
-                )
-            )
-        ).scalar() or 0
-
-        total_records = (
-            await db.execute(select(func.count(TaskItemRecord.id)))
-        ).scalar() or 0
-        compliant_records = (
-            await db.execute(
-                select(func.count(TaskItemRecord.id)).where(
-                    TaskItemRecord.result == "pass"
-                )
-            )
-        ).scalar() or 0
-        non_compliant_records = (
-            await db.execute(
-                select(func.count(TaskItemRecord.id)).where(
-                    TaskItemRecord.result == "fail"
-                )
-            )
-        ).scalar() or 0
+        ).all()
+        total_records = sum(c for _, c in record_rows)
+        compliant_records = sum(c for r, c in record_rows if r == "pass")
+        non_compliant_records = sum(c for r, c in record_rows if r == "fail")
 
     total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
     total_enterprises = (await db.execute(select(func.count(Enterprise.id)))).scalar() or 0
@@ -303,102 +215,105 @@ async def get_trends(
     else:
         end = datetime.now(timezone.utc) + timedelta(days=1)
     
+    # BUG-30：原实现逐日循环内执行 2~3 条查询（30 天 = 60+ 次串行往返，实测 ~60s）。
+    # 改为「任务按日 GROUP BY」+「记录按日 GROUP BY」两条聚合查询，再在内存填充日期序列，
+    # 语义与原实现严格一致（记录仍限定为「任务创建当天填报」）。
+    if current_user.role == "expert":
+        task_rows = (
+            await db.execute(
+                select(
+                    func.date(InspectionTask.created_at).label("d"),
+                    func.count(InspectionTask.id),
+                )
+                .where(
+                    InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.created_at >= start,
+                    InspectionTask.created_at < end,
+                )
+                .group_by(func.date(InspectionTask.created_at))
+            )
+        ).all()
+        rec_rows = (
+            await db.execute(
+                select(
+                    func.date(TaskItemRecord.recorded_at).label("d"),
+                    TaskItemRecord.result,
+                    func.count(TaskItemRecord.id),
+                )
+                .select_from(TaskItemRecord)
+                .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
+                .where(
+                    InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.created_at >= start,
+                    InspectionTask.created_at < end,
+                    TaskItemRecord.result.in_(["pass", "fail"]),
+                    func.date(TaskItemRecord.recorded_at)
+                    == func.date(InspectionTask.created_at),
+                )
+                .group_by(func.date(TaskItemRecord.recorded_at), TaskItemRecord.result)
+            )
+        ).all()
+    else:
+        task_rows = (
+            await db.execute(
+                select(
+                    func.date(InspectionTask.created_at).label("d"),
+                    func.count(InspectionTask.id),
+                )
+                .where(
+                    InspectionTask.created_at >= start,
+                    InspectionTask.created_at < end,
+                )
+                .group_by(func.date(InspectionTask.created_at))
+            )
+        ).all()
+        rec_rows = (
+            await db.execute(
+                select(
+                    func.date(TaskItemRecord.recorded_at).label("d"),
+                    TaskItemRecord.result,
+                    func.count(TaskItemRecord.id),
+                )
+                .where(
+                    TaskItemRecord.result.in_(["pass", "fail"]),
+                    TaskItemRecord.recorded_at >= start,
+                    TaskItemRecord.recorded_at < end,
+                )
+                .group_by(func.date(TaskItemRecord.recorded_at), TaskItemRecord.result)
+            )
+        ).all()
+
+    def _day_key(value) -> str:
+        return value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else str(value)
+
+    task_map = {_day_key(d): c for d, c in task_rows}
+    pass_map: dict = {}
+    fail_map: dict = {}
+    for d, result, cnt in rec_rows:
+        key = _day_key(d)
+        if result == "pass":
+            pass_map[key] = cnt
+        elif result == "fail":
+            fail_map[key] = cnt
+
     inspection_trend = []
     compliance_trend = []
-    
     current = start
     while current < end:
-        next_day = current + timedelta(days=1)
-        
-        if current_user.role == "expert":
-            task_count = (
-                await db.execute(
-                    select(func.count(InspectionTask.id)).where(
-                        InspectionTask.assigned_to == current_user.id,
-                        InspectionTask.created_at >= current,
-                        InspectionTask.created_at < next_day,
-                    )
-                )
-            ).scalar() or 0
-            
-            record_query = await db.execute(
-                select(InspectionTask.id).where(
-                    InspectionTask.assigned_to == current_user.id,
-                    InspectionTask.created_at >= current,
-                    InspectionTask.created_at < next_day,
-                )
-            )
-            task_ids = record_query.scalars().all()
-            
-            if task_ids:
-                compliant = (
-                    await db.execute(
-                        select(func.count(TaskItemRecord.id)).where(
-                            TaskItemRecord.task_id.in_(task_ids),
-                            TaskItemRecord.result == "pass",
-                            TaskItemRecord.recorded_at >= current,
-                            TaskItemRecord.recorded_at < next_day,
-                        )
-                    )
-                ).scalar() or 0
-                non_compliant = (
-                    await db.execute(
-                        select(func.count(TaskItemRecord.id)).where(
-                            TaskItemRecord.task_id.in_(task_ids),
-                            TaskItemRecord.result == "fail",
-                            TaskItemRecord.recorded_at >= current,
-                            TaskItemRecord.recorded_at < next_day,
-                        )
-                    )
-                ).scalar() or 0
-            else:
-                compliant = 0
-                non_compliant = 0
-        else:
-            task_count = (
-                await db.execute(
-                    select(func.count(InspectionTask.id)).where(
-                        InspectionTask.created_at >= current,
-                        InspectionTask.created_at < next_day,
-                    )
-                )
-            ).scalar() or 0
-            
-            compliant = (
-                await db.execute(
-                    select(func.count(TaskItemRecord.id)).where(
-                        TaskItemRecord.result == "pass",
-                        TaskItemRecord.recorded_at >= current,
-                        TaskItemRecord.recorded_at < next_day,
-                    )
-                )
-            ).scalar() or 0
-            non_compliant = (
-                await db.execute(
-                    select(func.count(TaskItemRecord.id)).where(
-                        TaskItemRecord.result == "fail",
-                        TaskItemRecord.recorded_at >= current,
-                        TaskItemRecord.recorded_at < next_day,
-                    )
-                )
-            ).scalar() or 0
-        
+        key = current.strftime("%Y-%m-%d")
+        compliant = pass_map.get(key, 0)
+        non_compliant = fail_map.get(key, 0)
         total_items = compliant + non_compliant
         compliance_rate = round(compliant / total_items * 100, 2) if total_items > 0 else 0
-        
-        inspection_trend.append({
-            "date": current.strftime("%Y-%m-%d"),
-            "count": task_count,
-        })
-        
+
+        inspection_trend.append({"date": key, "count": task_map.get(key, 0)})
         compliance_trend.append({
-            "date": current.strftime("%Y-%m-%d"),
+            "date": key,
             "rate": compliance_rate,
             "compliant": compliant,
             "non_compliant": non_compliant,
         })
-        
-        current = next_day
+        current += timedelta(days=1)
     
     return make_response(
         data={

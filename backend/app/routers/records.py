@@ -789,6 +789,10 @@ async def submit_record(
     ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    # BUG-12：已提交记录不允许重复提交
+    if record.status == "submitted":
+        raise HTTPException(status_code=409, detail="该检查记录已提交，请勿重复提交")
+
     record.status = "submitted"
     record.inspection_date = datetime.now(timezone.utc)
     await db.commit()
@@ -842,6 +846,10 @@ async def create_or_update_record_item(
         record.inspector_id
     ) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
+
+    # BUG-12：已提交记录为只读，禁止再修改检查条目
+    if record.status == "submitted":
+        raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
 
     # 查找是否已存在（优先按 id 查找，其次按 template_item_id 查找）
     record_item = None
