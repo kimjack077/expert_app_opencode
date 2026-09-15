@@ -359,7 +359,8 @@ const fetchTask = async () => {
     const res = await getTask(taskId)
     console.log('任务详情响应:', res)
     if (res.code === 200) {
-      task.value = res.data
+      // BUG-32：后端现返回 assigned_to_name（指派人姓名），映射到展示字段
+      task.value = { ...res.data, assignee: res.data.assigned_to_name || res.data.assignee || '' }
     } else {
       showToast({ type: 'fail', message: res.message || '获取任务失败' })
     }

@@ -250,6 +250,12 @@ async def get_task(
         data["area_name"] = plan_item.area_name
         data["clauses"] = plan_item.clauses
 
+    # BUG-32：补充指派对象姓名，避免 H5 详情页误显示"未分配"
+    if task.assigned_to:
+        assignee = await db.get(User, task.assigned_to)
+        if assignee and not assignee.is_deleted:
+            data["assigned_to_name"] = assignee.full_name or assignee.username
+
     return make_response(data=data)
 
 
@@ -266,16 +272,20 @@ async def update_task(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # 专家用户只能更新分配给自己的任务状态
+    # 专家用户只能更新分配给自己的任务状态与备注
     if current_user.role == "expert":
         if not await can_access_linked_task(db, task, current_user):
             raise HTTPException(status_code=403, detail="Not authorized to update this task")
-        # 专家用户只能更新状态
+        # BUG-31：remarks 此前被静默丢弃，导致 H5 提交流程
+        # （updateTask 写"最终判定: xx"备注 → POST /complete）必然 409。
+        # 专家仅允许更新 remarks，其余字段仍不可改。
+        if task_data.remarks is not None:
+            task.remarks = task_data.remarks
         if task_data.status:
             # 与 POST /{task_id}/complete 同一口径：没有最终判定结论不允许置为已完成
             if task_data.status == "completed" and not re.search(
                 r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
-                (task_data.remarks or task.remarks or ""),
+                task.remarks or "",
                 re.IGNORECASE,
             ):
                 raise HTTPException(

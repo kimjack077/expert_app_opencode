@@ -380,8 +380,12 @@ class AuditReportBase(BaseModel):
 
 
 class AuditReportCreate(AuditReportBase):
-    """创建审核报告"""
-    project_id: UUID = Field(..., description="所属审核项目 ID")
+    """创建审核报告
+
+    project_id 可选：以 URL 路径中的 project_id 为准（BUG-36）。
+    传入时若与路径不一致将返回 422。
+    """
+    project_id: Optional[UUID] = Field(None, description="所属审核项目 ID（可选，默认取路径参数）")
 
 
 class AuditReportUpdate(BaseModel):
@@ -436,8 +440,12 @@ class CommunicationMeetingBase(BaseModel):
 
 
 class CommunicationMeetingCreate(CommunicationMeetingBase):
-    """创建沟通会议"""
-    project_id: UUID = Field(..., description="所属审核项目 ID")
+    """创建沟通会议
+
+    project_id 可选：以 URL 路径中的 project_id 为准（BUG-36）。
+    传入时若与路径不一致将返回 422。
+    """
+    project_id: Optional[UUID] = Field(None, description="所属审核项目 ID（可选，默认取路径参数）")
 
 
 class CommunicationMeetingUpdate(BaseModel):

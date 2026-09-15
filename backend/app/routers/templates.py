@@ -661,7 +661,32 @@ async def create_item(
     await db.commit()
     await db.refresh(item)
 
-    return make_response(data={"id": str(item.id), "title": item.title})
+    # BUG-37：回传完整字段（此前只回 {id,title}，调用方无法确认落库结果）
+    return make_response(data=_item_payload(item))
+
+
+def _item_payload(item: TemplateItem) -> dict:
+    """模板项的完整扁平序列化（创建/更新响应共用）"""
+    return {
+        "id": str(item.id),
+        "template_id": str(item.template_id),
+        "parent_id": str(item.parent_id) if item.parent_id else None,
+        "title": item.title,
+        "description": item.description,
+        "check_method": item.check_method,
+        "legal_basis": item.legal_basis,
+        "standard_ref": item.standard_ref,
+        "result_type": item.result_type,
+        "check_type": item.check_type,
+        "is_required": item.is_required,
+        "is_category": bool(item.is_category),
+        "risk_level": item.risk_level,
+        "sort_order": item.sort_order,
+        "use_ai": item.use_ai,
+        "allow_attachment": item.allow_attachment,
+        "attachment_required": item.attachment_required,
+        "ai_prompt_template": item.ai_prompt_template,
+    }
 
 
 @router.put("/items/{item_id}", response_model=ApiResponse)
@@ -707,7 +732,8 @@ async def update_item(
     await db.commit()
     await db.refresh(item)
 
-    return make_response(data={"id": str(item.id), "title": item.title})
+    # BUG-37：回传完整字段（此前只回 {id,title}，调用方无法确认落库结果）
+    return make_response(data=_item_payload(item))
 
 
 @router.delete("/items/{item_id}", response_model=ApiResponse)

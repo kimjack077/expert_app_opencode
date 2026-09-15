@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 import json
 
 from app.database import get_db
@@ -102,10 +102,13 @@ async def get_records(
         except ValueError:
             pass
 
+    # BUG-33：template/enterprise/inspector 均为多对一关系，改用 joinedload
+    # 随主查询一次取回，避免 selectinload 额外 3 次 DB 往返（远程库 RTT 敏感）。
+    # 多对一 joinedload 与 LIMIT 分页组合不会产生行重复，是安全用法。
     query = select(InspectionRecord).options(
-        selectinload(InspectionRecord.template),
-        selectinload(InspectionRecord.enterprise),
-        selectinload(InspectionRecord.inspector),
+        joinedload(InspectionRecord.template),
+        joinedload(InspectionRecord.enterprise),
+        joinedload(InspectionRecord.inspector),
     )
     count_query = select(func.count(InspectionRecord.id))
     # 按企业名称筛选时两个查询都需要 join Enterprise 表
