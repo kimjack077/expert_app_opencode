@@ -26,6 +26,7 @@ from app.schemas import (
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
 from app.utils.category import is_category_node, load_parent_ids
+from app.utils.item_stats import calculate_item_stats
 from app.services import AuditService
 from app.services.llm_service import llm_service
 
@@ -720,27 +721,13 @@ async def get_record(
 
 
 def _calculate_item_stats(items: list) -> dict:
-    """计算检查项统计数据"""
-    pass_count = 0
-    fail_count = 0
-    na_count = 0
-    total_count = len(items)
+    """计算检查项统计数据。
 
-    for item in items:
-        radio_value = item.radio_value
-        if radio_value == "pass":
-            pass_count += 1
-        elif radio_value == "fail":
-            fail_count += 1
-        elif radio_value == "na":
-            na_count += 1
-
-    return {
-        "total": total_count,
-        "pass": pass_count,
-        "fail": fail_count,
-        "na": na_count,
-    }
+    统一走 ``app.utils.item_stats``——此前本函数只认 ``"na"``，
+    而写入侧落库的是 ``not_applicable``，导致「不适用项」恒为 0，
+    与检查报告的数字对不上（详见该模块 docstring）。
+    """
+    return calculate_item_stats(items)
 
 
 @router.put("/{record_id}", response_model=ApiResponse)

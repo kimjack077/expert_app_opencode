@@ -1,7 +1,7 @@
 import os
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from reportlab.lib import colors
@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import InspectionTemplate, TemplateItem
+from app.utils.item_stats import calculate_item_stats, compliance_rate
 from app.models.enterprise import Enterprise
 from app.models.user import User
 
@@ -138,7 +139,17 @@ class ReportService:
         ))
 
     def _generate_report_number(self, record: InspectionRecord) -> str:
-        date_str = datetime.now().strftime('%Y-%m%d')
+        """生成报告编号：EFIS-{检查日期}-{记录 ID 前 8 位}。
+
+        日期段必须取「检查日期」而非「当前日期」：原实现用 datetime.now()，
+        同一份记录在不同日期打开会得到不同编号（今天 EFIS-2026-0915-XXXX，
+        明天变成 EFIS-2026-0916-XXXX），报告编号失去唯一标识意义。
+        """
+        source = getattr(record, "inspection_date", None) or datetime.now()
+        if source.tzinfo is not None:
+            # 库内是 UTC，转成东八区再取日期，与界面展示的「检查日期」保持一致
+            source = source.astimezone(timezone(timedelta(hours=8)))
+        date_str = source.strftime('%Y-%m%d')
         short_id = str(record.id)[:8].upper()
         return f"EFIS-{date_str}-{short_id}"
 
@@ -544,24 +555,35 @@ class ReportService:
                 if ri_data.get('audit_findings'):
                     item['audit_findings'] = ri_data['audit_findings']
 
-        pass_count = sum(1 for item in all_items if item.get('radio_value') == 'pass')
-        fail_count = sum(1 for item in all_items if item.get('radio_value') == 'fail')
-        na_count = sum(1 for item in all_items if item.get('radio_value') in ('na', 'not_applicable'))
-        total = len(all_items)
-        filled_count = pass_count + fail_count + na_count
+        # 统计一律走 app.utils.item_stats（唯一口径来源），
+        # 避免与「检查记录详情」接口（/records/{id}）的口径分叉——
+        # 历史上两处对「不适用」的枚举集合不一致，导致同一记录两个页面数字对不上。
+        _stats = calculate_item_stats(all_items)
+        pass_count = _stats['pass']
+        fail_count = _stats['fail']
+        na_count = _stats['na']
+        total = _stats['total']
+        filled_count = _stats['filled']
         # BUG-04：合规率 = 已填报合格项 / 已填报项（分子分母均排除「不适用」与「未填写」），
         # 与工作台 /api/analytics/dashboard 口径保持一致。
-        rated_count = pass_count + fail_count
-        pass_rate = round(pass_count / rated_count * 100, 1) if rated_count > 0 else 0
+        pass_rate = compliance_rate(_stats)
         fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
         return {
             'report_number': self._generate_report_number(record),
             'generated_at': datetime.now().isoformat(),
             'enterprise': {
+                # 记录自身的快照字段优先，为空时回落到企业主数据。
+                # 注意：contact_person / contact_phone 原先只读记录自身字段、没有回落，
+                # 与 name / address 的处理方式不一致——记录已关联企业但这两个字段为空时，
+                # H5 会显示 "-"，而企业主数据里其实有值（PC 端直接读 enterprise 对象，不受影响）。
                 'name': record.enterprise_name or (record.enterprise.name if record.enterprise else '-'),
                 'address': record.enterprise_address or (record.enterprise.address if record.enterprise else '-'),
-                'contact_person': record.contact_person or '-',
-                'contact_phone': record.contact_phone or '-',
+                'contact_person': record.contact_person or (
+                    record.enterprise.contact_person if record.enterprise else None
+                ) or '-',
+                'contact_phone': record.contact_phone or (
+                    record.enterprise.contact_phone if record.enterprise else None
+                ) or '-',
                 'credit_code': record.enterprise.credit_code if record.enterprise else '-',
                 'legal_person': record.enterprise.legal_person if record.enterprise else '-',
                 'risk_level': record.enterprise.risk_level if record.enterprise else '-',

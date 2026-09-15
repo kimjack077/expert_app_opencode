@@ -1,5 +1,5 @@
 <template>
-  <div class="task-detail-page">
+  <div class="task-detail-page" :class="{ 'has-path-hint': isAuditLinkedTask }">
     <div class="page-header">
       <div class="header-nav">
         <div class="back-btn" @click="onClickLeft">
@@ -528,7 +528,14 @@ onUnmounted(() => {
 .task-detail-page {
   min-height: 100vh;
   background: var(--bg-light);
-  padding-bottom: 100px;
+  /* 给固定底栏留出空间。底栏高度不是定值：关联认证审核项目时会多渲染一条
+     .path-hint 提示（约 67px），若仍用固定的 100px，页面底部内容会被压住。
+     因此按是否含提示条分别留白，并叠加安全区。 */
+  padding-bottom: calc(108px + env(safe-area-inset-bottom));
+}
+
+.task-detail-page.has-path-hint {
+  padding-bottom: calc(184px + env(safe-area-inset-bottom));
 }
 
 .page-header {

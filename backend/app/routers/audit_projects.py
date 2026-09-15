@@ -280,10 +280,20 @@ async def get_my_audit_tasks(
 
     默认返回全部分配给当前用户的计划项；传 today_only=true 仅返回今日任务。
     响应补充 project_title / enterprise_name / inspection_task_id，供 Web「我的审核任务」展示。
+
+    注意：必须过滤「所属项目已软删除」的计划项。项目删除后计划项不会级联删除，
+    若此处放行，任务会照常出现在列表里，但点进详情时项目鉴权接口
+    （ensure_project_access → get_project_or_404，带 is_deleted 过滤）会返回 404，
+    用户看到的是「查看结果报错」而不是「任务已归档」。
     """
-    query = select(AuditPlanItem).where(
-        AuditPlanItem.assigned_member_ids.contains([current_user.id]),
-        AuditPlanItem.is_deleted == False,  # noqa: E712
+    query = (
+        select(AuditPlanItem)
+        .join(AuditProject, AuditProject.id == AuditPlanItem.project_id)
+        .where(
+            AuditPlanItem.assigned_member_ids.contains([current_user.id]),
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+            AuditProject.is_deleted == False,  # noqa: E712
+        )
     )
 
     if status:

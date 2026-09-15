@@ -139,7 +139,7 @@
             <span class="col-index">{{ idx + 1 }}</span>
             <span class="col-title">{{ item.title }}</span>
             <span class="col-result" :class="item.radio_value">
-              {{ getRadioText(item.radio_value) }}
+              {{ getItemResultText(item) }}
             </span>
           </div>
         </div>
@@ -170,11 +170,16 @@
           {{ reportData.inspection.remarks }}
         </div>
         <div v-else-if="reportData.fail_items && reportData.fail_items.length > 0" class="remarks-content">
-          <div v-for="(item, idx) in reportData.fail_items" :key="item.id">
-            <div v-if="item.rectification_suggestion" class="rectification-item">
-              {{ idx + 1 }}. {{ item.title }}：{{ item.rectification_suggestion }}
+          <template v-if="hasRectificationSuggestions">
+            <div v-for="(item, idx) in reportData.fail_items" :key="item.id">
+              <div v-if="item.rectification_suggestion" class="rectification-item">
+                {{ idx + 1 }}. {{ item.title }}：{{ item.rectification_suggestion }}
+              </div>
             </div>
-          </div>
+          </template>
+          <!-- 有不合格项但未逐项填写整改建议时，必须给默认引导文案。
+               原实现会让区块渲染成空白，用户以为「H5 没有整改建议」（PC 端有兜底文案）。 -->
+          <span v-else>请依据检查发现的不合格项，制定相应整改措施。</span>
         </div>
         <div v-else class="no-remarks">
           本次检查未发现需要整改的问题。
@@ -249,15 +254,50 @@ const formatDateTime = (dateStr) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`
 }
 
+const hasRectificationSuggestions = computed(() =>
+  (reportData.value?.fail_items || []).some(item => !!item.rectification_suggestion)
+)
+
 const getRadioText = (value) => {
+  // 与 PC 端 InspectionReport 的映射保持一致，补齐历史/集成写入的同义值。
+  // 注意：库里实际存在 observe（观察项），原映射表漏了它，会直接回显英文。
   const map = {
     'pass': '合格',
+    'compliant': '合格',
+    'qualified': '合格',
     'fail': '不合格',
+    'non_compliant': '不合格',
+    'unqualified': '不合格',
+    'partial_pass': '基本合格',
     'pending_rectification': '待整改',
+    'observe': '观察项',
     'not_applicable': '不适用',
     'na': '不适用',
+    'not-applicable': '不适用',
+    'n/a': '不适用',
   }
   return map[value] || value || '-'
+}
+
+/**
+ * 检查项结论的展示文本。
+ *
+ * 与 PC 端 InspectionReport 同构的三级兜底：判定值 → 数值 → 文本描述。
+ * 原实现只读 radio_value，导致「判定型检查项被写入数值/文本」的历史数据
+ * 在 H5 上显示为 "-"，而 PC 端能正常显示数值或"已描述"。
+ */
+const getItemResultText = (item) => {
+  if (item.radio_value) {
+    return getRadioText(item.radio_value)
+  }
+  const numeric = item.numeric_value
+  if (numeric !== null && numeric !== undefined && numeric !== '') {
+    return `${numeric}${item.unit ? ' ' + item.unit : ''}`
+  }
+  if (item.text_value) {
+    return '已描述'
+  }
+  return '—'
 }
 
 const fetchReportData = async () => {

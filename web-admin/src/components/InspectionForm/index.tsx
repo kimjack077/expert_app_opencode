@@ -35,6 +35,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const { id } = useParams<{ id: string }>()
   const { token } = useAuthStore()
   const [record, setRecord] = useState<any>(null)
+  const [loadError, setLoadError] = useState<'' | 'not_found' | 'failed'>('')
   const [items, setItems] = useState<any[]>([])
   const [flatItems, setFlatItems] = useState<any[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -175,8 +176,16 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       }
     }
 
-    const recordsRes: any = await taskApi.getTaskRecords(task.id)
-    const taskRecords = recordsRes.data || []
+    // 检查项加载失败不应让整页判死：任务基本信息仍然可展示，
+    // 否则 setRecord 不会执行，页面会退化成误导性的"检查记录不存在"。
+    let taskRecords: any[] = []
+    try {
+      const recordsRes: any = await taskApi.getTaskRecords(task.id)
+      taskRecords = recordsRes.data || []
+    } catch (e) {
+      console.error('加载任务检查项失败:', e)
+      message.error('检查项加载失败，请刷新重试')
+    }
     const formItems = mapTaskRecordsToFormItems(taskRecords)
 
     setRecord({
@@ -204,8 +213,17 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   const fetchData = async () => {
-    if (!id) return
+    if (!id) {
+      setLoadError('not_found')
+      setLoading(false)
+      return
+    }
     setLoading(true)
+    setLoadError('')
+    // 只有「任务确实不存在」（404）才叫"记录不存在"；
+    // 接口报错 / 无权限 / 网络异常都属于"加载失败"，两者必须分开提示，
+    // 否则用户会误以为数据被删了（原实现一律显示"检查记录不存在"）。
+    let notFound = false
     try {
       // 1) 优先按独立检查记录加载
       try {
@@ -237,14 +255,15 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           await loadTaskMode(taskRes.data)
           return
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('Failed to load task inspection:', e)
+        if (e?.response?.status === 404) notFound = true
       }
 
-      message.error('获取检查数据失败')
-    } catch (error) {
+      setLoadError(notFound ? 'not_found' : 'failed')
+    } catch (error: any) {
       console.error('Failed to fetch data:', error)
-      message.error('获取检查数据失败')
+      setLoadError('failed')
     } finally {
       setLoading(false)
     }
@@ -788,10 +807,24 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   if (!record) {
+    const notFound = loadError === 'not_found'
     return (
       <div style={{ padding: 24 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backPath)}>返回</Button>
-        <div style={{ marginTop: 24, textAlign: 'center' }}>检查记录不存在</div>
+        <div style={{ marginTop: 24, textAlign: 'center' }}>
+          <div
+            style={{
+              fontSize: 15,
+              color: notFound ? 'var(--text-muted)' : '#d4380d',
+              marginBottom: 16,
+            }}
+          >
+            {notFound ? '检查记录不存在' : '检查数据加载失败，请重试'}
+          </div>
+          {!notFound && (
+            <Button type="primary" onClick={fetchData}>重新加载</Button>
+          )}
+        </div>
       </div>
     )
   }

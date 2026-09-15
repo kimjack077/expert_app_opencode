@@ -65,7 +65,8 @@
           :color="progressColor"
         />
         <div class="progress-hint">
-          <span v-if="totalCheckItems === 0">检查项加载中，请稍候…</span>
+          <span v-if="isReadonlyMode" class="complete">✓ {{ readonlyStateText }}，以下为只读查看</span>
+          <span v-else-if="totalCheckItems === 0">检查项加载中，请稍候…</span>
           <span v-else-if="completedCount === 0">请开始填写检查项</span>
           <span v-else-if="requiredCompletedCount < requiredCheckItems">必填项还有 {{ requiredCheckItems - requiredCompletedCount }} 项未完成</span>
           <span v-else class="complete">必填项已全完成，请在下方填写最终判定</span>
@@ -117,7 +118,7 @@
                 <div v-if="isItemCompleted(item)" class="item-result-preview">
                   {{ getItemResultText(item) }}
                 </div>
-                <div v-else-if="item.attachment_required && itemResults[item.id]?.radio_value && !hasAttachment(item)" class="item-incomplete-hint">
+                <div v-else-if="!isReadonlyMode && item.attachment_required && itemResults[item.id]?.radio_value && !hasAttachment(item)" class="item-incomplete-hint">
                   <van-icon name="info-o" size="12" /> 需上传附件
                 </div>
               </div>
@@ -353,30 +354,41 @@
 
     <van-empty v-else description="检查记录不存在" />
 
-    <!-- 底部提交按钮 -->
+    <!-- 底部操作区 -->
     <div class="action-bar">
-      <van-button
-        type="primary"
-        block
-        :disabled="!canSubmit"
-        :loading="submitting"
-        @click="showSubmitConfirm"
-        class="submit-btn"
-        :class="{ 'ready-submit': canSubmit }"
-      >
-        {{ submitButtonText }}
-      </van-button>
-      <div class="submit-hint" v-if="!canSubmit">
-        <span v-if="totalCheckItems === 0">
-          检查项加载中，请稍候…
-        </span>
-        <span v-else-if="completedCount < totalCheckItems">
-          需完成全部 {{ totalCheckItems }} 项检查，当前已完成 {{ completedCount }} 项
-        </span>
-        <span v-else-if="!finalJudgment.result">
-          ✓ 检查项已全部完成，请在上方填写【最终判定结论】后提交
-        </span>
-      </div>
+      <!-- 已完成 / 已提交：只读查看态，不再按填报期规则催办 -->
+      <template v-if="isReadonlyMode">
+        <van-button type="default" block class="submit-btn" @click="router.back()">
+          返回
+        </van-button>
+        <div class="submit-hint">
+          <span>{{ readonlyStateText }}，内容仅供查看，如需修改请回到 PC 端处理</span>
+        </div>
+      </template>
+      <template v-else>
+        <van-button
+          type="primary"
+          block
+          :disabled="!canSubmit"
+          :loading="submitting"
+          @click="showSubmitConfirm"
+          class="submit-btn"
+          :class="{ 'ready-submit': canSubmit }"
+        >
+          {{ submitButtonText }}
+        </van-button>
+        <div class="submit-hint" v-if="!canSubmit">
+          <span v-if="totalCheckItems === 0">
+            检查项加载中，请稍候…
+          </span>
+          <span v-else-if="completedCount < totalCheckItems">
+            需完成全部 {{ totalCheckItems }} 项检查，当前已完成 {{ completedCount }} 项
+          </span>
+          <span v-else-if="!finalJudgment.result">
+            ✓ 检查项已全部完成，请在上方填写【最终判定结论】后提交
+          </span>
+        </div>
+      </template>
     </div>
 
     <!-- 风险预警弹窗 -->
@@ -646,6 +658,25 @@ const progressColor = computed(() => {
   return '#FF9800'
 })
 
+/**
+ * 已提交 / 已完成 → 只读查看态。
+ *
+ * 这类记录不该再用「填报期」规则去校验必填项：否则已完成的任务会因为
+ * 「不合格项未填写问题描述」这类只属于填报阶段的约束，在 H5 上被算成未完成，
+ * 显示成「还需完成 N 个必填项」，与 PC 端结论矛盾。
+ */
+const isReadonlyMode = computed(() => {
+  if (!record.value) return false
+  if (executionMode.value === 'task') {
+    return record.value.status === 'completed'
+  }
+  return record.value.status === 'submitted'
+})
+
+const readonlyStateText = computed(() =>
+  executionMode.value === 'task' ? '该任务已完成' : '该记录已提交'
+)
+
 const canSubmit = computed(() => {
   // All required items must be completed, plus final judgment
   return requiredCompletedCount.value >= requiredCheckItems.value &&
@@ -690,6 +721,9 @@ const mergeTemplateResults = (items, resultByItemId) => {
       score_value: existing.score_value ?? '',
       problem_description: existing.problem_description || '',
       multi_value: existing.multi_value || [],
+      // 附件必须一并合并：hasAttachment() 读的是 item.photos，
+      // 漏掉这一项会让已上传的附件在任务模式下永远显示不出来。
+      photos: existing.photos || [],
       children: item.children ? mergeTemplateResults(item.children, resultByItemId) : [],
     }
   })
@@ -706,6 +740,9 @@ const mapTaskRecordToForm = (taskRecord) => {
     score_value: resultValue ?? '',
     problem_description: taskRecord?.inspector_note || '',
     multi_value: [],
+    // 后端 GET /tasks/{id}/records 已按 record_id 聚合 media_files 返回 photos，
+    // 原实现漏映射，导致「上传附件后再次进入任务看不到附件」（PC 端 InspectionForm 有映射）。
+    photos: taskRecord?.photos || [],
   }
 }
 
@@ -1130,6 +1167,7 @@ const loadExistingResults = () => {
           text_value: item.text_value,
           multi_value: item.multi_value || [],
           problem_description: item.problem_description || '',
+          photos: item.photos || [],
         }
       }
       if (item.children && item.children.length > 0) {
@@ -1241,8 +1279,9 @@ const isItemCompleted = (item) => {
     case 'pass_fail':
       // 必须有明确的 radio_value
       resultFilled = !!result.radio_value
-      // 不合格项还必须填写问题描述，避免页面显示已完成但数据库只保存了半条结果
-      if (result.radio_value === 'fail') {
+      // 不合格项还必须填写问题描述，避免页面显示已完成但数据库只保存了半条结果。
+      // 注意：这是「填报期」约束，已提交/已完成记录的只读查看态不适用。
+      if (!isReadonlyMode.value && result.radio_value === 'fail') {
         resultFilled = !!result.problem_description?.trim()
       }
       break

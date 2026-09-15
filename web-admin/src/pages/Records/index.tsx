@@ -370,15 +370,6 @@ export default function Records() {
       render: (status: string) => getStatusTag(status),
     },
     {
-      title: '总分',
-      dataIndex: 'total_score',
-      key: 'total_score',
-      width: 70,
-      sorter: true,
-      sortOrder: sorter.field === 'total_score' ? (sorter.order || null) : null,
-      render: (score: string, record: any) => (record.template?.is_quantified && hasQuantifiedItems(record.template)) ? <span style={{ color: '#F59E0B', fontWeight: 'bold' }}>{score ?? '-'}</span> : '-',
-    },
-    {
       title: '总体结果',
       dataIndex: 'overall_result',
       key: 'overall_result',

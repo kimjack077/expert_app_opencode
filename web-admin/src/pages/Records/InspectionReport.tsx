@@ -1,4 +1,4 @@
-import React, { useRef, useState, Fragment } from 'react'
+import React, { useRef, useState, useEffect, Fragment } from 'react'
 import { Modal, Button, Space, Tag, Divider, message, Spin } from 'antd'
 import { PrinterOutlined, ShareAltOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -56,8 +56,32 @@ function normalizeUrl(url: string) {
 export default function InspectionReport({ open, record, onClose }: Props) {
     const reportRef = useRef<HTMLDivElement>(null)
     const [downloading, setDownloading] = useState(false)
+    const [reportNumber, setReportNumber] = useState('')
+
+    // 报告编号与 H5 报告页同源（后端 /records/{id}/report），避免两边规则漂移。
+    useEffect(() => {
+        if (!open || !record?.id) return
+        let cancelled = false
+        recordApi.getRecordReport(record.id)
+            .then((res: any) => {
+                if (!cancelled && res?.data?.report_number) {
+                    setReportNumber(res.data.report_number)
+                }
+            })
+            .catch(() => {
+                // 报告编号属附加信息，取不到不打扰用户，下面用同规则本地兜底
+            })
+        return () => { cancelled = true }
+    }, [open, record?.id])
 
     if (!record) return null
+
+    // 兜底规则必须与后端 report_service._generate_report_number 保持一致：
+    // EFIS-{检查日期 YYYY-MMDD}-{记录 ID 前 8 位大写}
+    const fallbackReportNumber = record.id
+        ? `EFIS-${dayjs(record.inspection_date || undefined).format('YYYY-MMDD')}-${String(record.id).slice(0, 8).toUpperCase()}`
+        : ''
+    const reportNumberText = reportNumber || fallbackReportNumber
 
     const templateItems = record.template?.items || []
     const allCheckItems = flattenItems(templateItems)
@@ -187,6 +211,11 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                 {/* ── 封面 ── */}
                 <div className="report-cover" style={{ textAlign: 'center', paddingBottom: 24, borderBottom: '2px solid #222', marginBottom: 24 }}>
                     <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: 4, marginBottom: 8 }}>现场检查报告</h1>
+                    {reportNumberText && (
+                        <div style={{ fontSize: 13, color: '#666', letterSpacing: 1, marginBottom: 6 }}>
+                            报告编号：{reportNumberText}
+                        </div>
+                    )}
                     <div style={{ fontSize: 14, color: '#555' }}>
                         {record.enterprise_name || '未知企业'} · {inspectionDate}
                     </div>

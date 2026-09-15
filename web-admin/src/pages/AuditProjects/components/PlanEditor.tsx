@@ -99,6 +99,18 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
     fetchTemplates()
   }, [projectId])
 
+  /**
+   * 跳转到「审核组」页签前，先关掉当前的「添加审核计划项」弹窗。
+   *
+   * 原实现只调 onGoToTeam()（父组件里是 setActiveTab('team')），页签虽然切了，
+   * 但本组件自己的 Modal 仍浮在上层，把底下的成员列表挡住了，
+   * 用户观感就是「点了没反应 / 没跳转」。
+   */
+  const handleGoToTeam = () => {
+    setModalVisible(false)
+    onGoToTeam?.()
+  }
+
   const fetchProject = async () => {
     try {
       const response = await auditProjectApi.get(projectId)
@@ -814,7 +826,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                       type="link"
                       size="small"
                       style={{ padding: '0 4px' }}
-                      onClick={onGoToTeam}
+                      onClick={handleGoToTeam}
                     >
                       去添加审核员
                     </Button>
@@ -837,7 +849,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                         type="link"
                         size="small"
                         style={{ padding: 0 }}
-                        onClick={onGoToTeam}
+                        onClick={handleGoToTeam}
                       >
                         去添加审核员
                       </Button>

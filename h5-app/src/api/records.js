@@ -107,5 +107,7 @@ export const getEnterprise = (enterpriseId) => {
 
 // 获取企业风险画像
 export const getEnterpriseRiskProfile = (enterpriseId) => {
-  return request.get(`/enterprises/${enterpriseId}/risk-profile`)
+  // 风险画像是「附加增强信息」，企业被软删除 / 不存在时不应打扰用户，
+  // 因此静默失败（skipErrorToast），由调用方决定是否降级处理。
+  return request.get(`/enterprises/${enterpriseId}/risk-profile`, { skipErrorToast: true })
 }
