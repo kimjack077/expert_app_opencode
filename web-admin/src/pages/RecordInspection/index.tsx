@@ -339,8 +339,10 @@ export default function RecordInspection() {
           await recordApi.submitRecord(id)
           message.success('检查记录已提交')
           navigate('/records')
-        } catch (error) {
-          message.error('提交失败')
+        } catch (error: any) {
+          // 透传后端校验原因（未填结论 / 必填检查项未填）
+          const detail = error?.response?.data?.detail || error?.response?.data?.message
+          message.error(typeof detail === 'string' && detail ? detail : '提交失败')
         }
       },
     })

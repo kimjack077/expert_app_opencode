@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
@@ -12,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User
 from app.models.task import InspectionTask, TaskItemRecord
+from app.models.media import MediaFile
 from app.models.template import InspectionTemplate, TemplateItem
 from app.schemas import (
     ApiResponse,
@@ -270,6 +272,16 @@ async def update_task(
             raise HTTPException(status_code=403, detail="Not authorized to update this task")
         # 专家用户只能更新状态
         if task_data.status:
+            # 与 POST /{task_id}/complete 同一口径：没有最终判定结论不允许置为已完成
+            if task_data.status == "completed" and not re.search(
+                r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
+                (task_data.remarks or task.remarks or ""),
+                re.IGNORECASE,
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
+                )
             task.status = task_data.status
             if task_data.status == "in_progress":
                 task.started_at = datetime.now(timezone.utc)
@@ -286,14 +298,23 @@ async def update_task(
                     plan_item = None
                 if plan_item:
                     plan_item.status = "completed"
-                    project = await db.get(AuditProject, plan_item.project_id)
-                    if project and project.status == "planning":
-                        project.status = "in_progress"
+                    await _sync_project_status_after_plan_item(db, plan_item.project_id)
     else:
         # 管理员可以更新所有字段
         update_data = task_data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(task, key, value)
+        # 与专家分支同一口径：没有最终判定结论不允许置为已完成
+        #（setattr 已应用，task.remarks 即为合并后的备注）
+        if task_data.status == "completed" and not re.search(
+            r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
+            task.remarks or "",
+            re.IGNORECASE,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
+            )
         # 如果管理员更新状态为 completed，也要同步审核计划项
         if task_data.status == "completed":
             task.completed_at = datetime.now(timezone.utc)
@@ -307,9 +328,7 @@ async def update_task(
                 plan_item = None
             if plan_item:
                 plan_item.status = "completed"
-                project = await db.get(AuditProject, plan_item.project_id)
-                if project and project.status == "planning":
-                    project.status = "in_progress"
+                await _sync_project_status_after_plan_item(db, plan_item.project_id)
 
     # Older clients complete tasks through PUT instead of POST /complete.
     # Route both paths through the formal-record bridge before committing.
@@ -382,6 +401,46 @@ async def start_task(
     return make_response(message="Task started")
 
 
+async def _sync_project_status_after_plan_item(db: AsyncSession, project_id) -> None:
+    """计划项完成后回写审核项目状态。
+
+    规则：
+    - 还有未完成的计划项 → 项目置为进行中
+    - 全部计划项完成 → 项目置为已完成，并补记 actual_end
+
+    原实现只在任务开始时把项目置为 in_progress，**没有任何地方置 completed**，
+    导致审核统计里「已完成」永远是 0（测试问题清单第 16 条）。
+    """
+    if not project_id:
+        return
+
+    from app.models.audit_project import AuditPlanItem, AuditProject
+
+    project = await db.get(AuditProject, project_id)
+    if not project or project.is_deleted:
+        return
+    # 已取消/已完成的项目不再被回写覆盖
+    if project.status in ("cancelled", "completed"):
+        return
+
+    remaining = (
+        await db.execute(
+            select(func.count(AuditPlanItem.id)).where(
+                AuditPlanItem.project_id == project_id,
+                AuditPlanItem.is_deleted == False,  # noqa: E712
+                AuditPlanItem.status != "completed",
+            )
+        )
+    ).scalar() or 0
+
+    if remaining == 0:
+        project.status = "completed"
+        if not project.actual_end:
+            project.actual_end = datetime.now(timezone.utc)
+    elif project.status == "planning":
+        project.status = "in_progress"
+
+
 @router.post("/{task_id}/complete", response_model=ApiResponse)
 async def complete_task(
     task_id: str,
@@ -422,6 +481,18 @@ async def complete_task(
             detail=f"存在未填报的必填检查项，无法完成任务：{preview}{suffix}",
         )
 
+    # 最终判定结论必填：任务模式把结论写在 remarks 里（`最终判定:合格 | 判定说明:...`）。
+    # 原先不校验，未选判定结果也能完成任务，落库一批没有结论的「已完成」任务。
+    if not re.search(
+        r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
+        task.remarks or "",
+        re.IGNORECASE,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
+        )
+
     try:
         task_uuid = UUID(task_id)
         plan_item = await get_linked_plan_item(db, task_uuid)
@@ -438,6 +509,8 @@ async def complete_task(
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # 计划项完成后回写项目状态（全部完成 → 项目已完成）
+        await _sync_project_status_after_plan_item(db, plan_item.project_id)
     else:
         task.status = "completed"
         task.completed_at = datetime.now(timezone.utc)
@@ -549,6 +622,23 @@ async def get_task_records(
             )
             records = result.scalars().all()
 
+    # 一次性取出本任务所有附件，按检查项分组。
+    # 原实现不返回附件，前端 photos 只能恒为空，导致「上传后再次查看附件丢失」。
+    record_ids = [r.id for r in records]
+    photos_by_record: dict = {}
+    if record_ids:
+        media_rows = await db.execute(
+            select(MediaFile.record_id, MediaFile.file_path)
+            .where(
+                MediaFile.record_id.in_(record_ids),
+                MediaFile.is_deleted == False,  # noqa: E712
+            )
+            .order_by(MediaFile.uploaded_at)
+        )
+        for rec_id, file_path in media_rows.all():
+            if rec_id and file_path:
+                photos_by_record.setdefault(rec_id, []).append(file_path)
+
     payload = []
     for r in records:
         ti = r.template_item
@@ -563,6 +653,8 @@ async def get_task_records(
                 continue
 
         item = InspectionRecordResponse.model_validate(r).model_dump()
+        # 附件（现场照片等）随记录一起返回，供前端回显
+        item["photos"] = photos_by_record.get(r.id, [])
         if r.template_item is not None:
             check_item = {
                 "id": str(r.template_item.id),

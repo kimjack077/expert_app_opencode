@@ -17,9 +17,9 @@ import {
   BookOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import { analyticsApi, taskApi } from '@/services/api'
+import { analyticsApi, taskApi, statisticsApi } from '@/services/api'
 import { useNavigate } from 'react-router-dom'
-import { formatTaskDisplay } from '@/utils/display'
+import { formatTaskDisplay, taskStatusLabel } from '@/utils/display'
 import { useAuthStore } from '@/stores/auth'
 import dayjs from 'dayjs'
 
@@ -29,6 +29,8 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const [stats, setStats] = useState<any>(null)
+  /** 审核项目概览（与「审核项目」列表同源，保证卡片数字与跳转后的列表条数一致） */
+  const [projectOverview, setProjectOverview] = useState<any>(null)
   const [recentTasks, setRecentTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [trends, setTrends] = useState<any>(null)
@@ -50,14 +52,16 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [dashboardRes, tasksRes, riskRes]: any[] = await Promise.all([
+      const [dashboardRes, tasksRes, riskRes, overviewRes]: any[] = await Promise.all([
         analyticsApi.getDashboard(),
         taskApi.getTasks({ limit: 8 }),
         analyticsApi.getEnterpriseRisk(),
+        statisticsApi.getOverview(),
       ])
       setStats(dashboardRes.data)
       setRecentTasks(tasksRes.data.items || [])
       setEnterpriseRisk(riskRes.data)
+      setProjectOverview(overviewRes.data)
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     } finally {
@@ -99,7 +103,8 @@ export default function Dashboard() {
       item.task_no,
       item.title,
       item.target_name,
-      item.status,
+      // 状态导出为中文，不要直接把 pending / in_progress 这类枚举写进文件
+      taskStatusLabel(item.status),
       item.created_at,
       item.completed_at,
       item.compliant_items,
@@ -191,17 +196,24 @@ export default function Dashboard() {
     },
   ]
 
-  const cancelledTasks = stats?.tasks?.cancelled || 0
   const inProgressTasks = stats?.tasks?.in_progress || 0
   const pendingTasks = stats?.tasks?.pending || 0
   const pendingCount = inProgressTasks + pendingTasks
-  const totalTasks = stats?.tasks?.total || 0
-  const completedTasks = stats?.tasks?.completed || 0
-  const completionRate = stats?.tasks?.completion_rate || 0
   const complianceRate = stats?.inspections?.compliance_rate || 0
   const compliantItems = stats?.inspections?.compliant || 0
   const nonCompliantItems = stats?.inspections?.non_compliant || 0
+  const notApplicableItems = stats?.inspections?.not_applicable || 0
+  const filledItems = stats?.inspections?.filled || 0
+  const notFilledItems = stats?.inspections?.not_filled || 0
   const totalItems = stats?.inspections?.total || 0
+
+  // 审核项目概览：口径与「审核项目」列表完全一致（均排除软删除项目）
+  const projectTotal = projectOverview?.total || 0
+  const projectInProgress = projectOverview?.in_progress || 0
+  const projectCompleted = projectOverview?.completed || 0
+  const projectThisMonth = projectOverview?.this_month || 0
+  const projectCompletionRate =
+    projectTotal > 0 ? Math.round((projectCompleted / projectTotal) * 100) : 0
 
   const highRisk = enterpriseRisk?.high || 0
   const mediumRisk = enterpriseRisk?.medium || 0
@@ -298,7 +310,9 @@ export default function Dashboard() {
           </div>
         </Col>
 
-        {/* Metric 2: Audit Tasks & Completion */}
+        {/* Metric 2: Audit Projects & Completion
+            数据源与「审核项目」列表一致（statisticsApi.getOverview，均排除软删除项目），
+            否则会出现「卡片 27 条、点进去只有 10 条」的口径错位。 */}
         <Col xs={24} sm={12} lg={6}>
           <div
             className="dashboard-kpi-card"
@@ -306,33 +320,35 @@ export default function Dashboard() {
           >
             <div>
               <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-title">审核任务总览</span>
+                <span className="dashboard-kpi-title">审核项目总览</span>
                 <div className="dashboard-kpi-icon" style={{ background: '#ccfbf1', color: '#0d9488' }}>
                   <FileTextOutlined />
                 </div>
               </div>
               <div className="dashboard-kpi-body">
                 <span className="dashboard-kpi-value" style={{ color: '#0f766e' }}>
-                  {totalTasks}
+                  {projectTotal}
                 </span>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: 11, color: '#64748b' }}>完成率 </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0d9488' }}>{completionRate}%</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0d9488' }}>{projectCompletionRate}%</span>
                 </div>
               </div>
             </div>
             <div className="dashboard-kpi-footer">
-              <span>已完成 {completedTasks} · 待办/推进中 {pendingCount}{cancelledTasks > 0 ? ` · 已取消 ${cancelledTasks}` : ''} / 共 {totalTasks} 项</span>
+              <span>进行中 {projectInProgress} · 已完成 {projectCompleted} · 本月新增 {projectThisMonth} / 共 {projectTotal} 项</span>
               <span style={{ color: '#0d9488', fontWeight: 600 }}>项目库 →</span>
             </div>
           </div>
         </Col>
 
-        {/* Metric 3: Overall Compliance Rate */}
+        {/* Metric 3: Overall Compliance Rate
+            口径为「日常检查检查项」，跳转目标因此对齐到日常检查任务列表，
+            不再跳到检查记录（那是另一套数据集，数量必然对不上）。 */}
         <Col xs={24} sm={12} lg={6}>
           <div
             className="dashboard-kpi-card"
-            onClick={() => navigate('/records')}
+            onClick={() => navigate('/tasks')}
           >
             <div>
               <div className="dashboard-kpi-header">
@@ -351,8 +367,8 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="dashboard-kpi-footer">
-              <span>合格 {compliantItems} · 不合规 {nonCompliantItems}</span>
-              <span style={{ color: '#16a34a', fontWeight: 600 }}>记录明细 →</span>
+              <span>已填报 {filledItems} 项 · 合格 {compliantItems} · 不合格 {nonCompliantItems}</span>
+              <span style={{ color: '#16a34a', fontWeight: 600 }}>查看任务 →</span>
             </div>
           </div>
         </Col>
@@ -713,7 +729,7 @@ export default function Dashboard() {
             >
               <div style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                  <span style={{ color: '#64748b' }}>检查项达标率</span>
+                  <span style={{ color: '#64748b' }}>检查项达标率（合格 ÷ 已填报）</span>
                   <span style={{ fontWeight: 700, color: '#16a34a' }}>{complianceRate}%</span>
                 </div>
                 <Progress
@@ -765,12 +781,21 @@ export default function Dashboard() {
                     border: '1px solid #e2e8f0',
                   }}>
                     <div style={{ fontSize: 18, fontWeight: 700, color: '#0369a1', lineHeight: 1.1 }}>
-                      {totalItems}
+                      {notFilledItems}
                     </div>
-                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>总检查项</div>
+                    <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>未填报</div>
                   </div>
                 </Col>
               </Row>
+
+              {/* 口径说明：四项相加必须等于总检查项，避免「135 + 21 ≠ 248」这类对不上的数字 */}
+              <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
+                总检查项 {totalItems} 项 = 合格 {compliantItems} + 不合格 {nonCompliantItems}
+                {notApplicableItems > 0 ? ` + 不适用 ${notApplicableItems}` : ''}
+                {notFilledItems > 0 ? ` + 未填报 ${notFilledItems}` : ''}
+                <br />
+                已填报 {filledItems} 项；不适用项不计入达标率分母。
+              </div>
             </Card>
           )}
         </Col>

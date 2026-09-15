@@ -59,17 +59,21 @@ async def get_overview_statistics(
     month_start = datetime(now.year, now.month, 1)
 
     # 使用单个查询获取所有统计数据
-    stmt = select(
-        func.count(AuditProject.id).label("total"),
-        func.count(AuditProject.id).filter(
-            AuditProject.status == "in_progress"
-        ).label("in_progress"),
-        func.count(AuditProject.id).filter(
-            AuditProject.status == "completed"
-        ).label("completed"),
-        func.count(AuditProject.id).filter(
-            AuditProject.created_at >= month_start
-        ).label("this_month"),
+    # 注意：必须排除软删除项目，否则统计数会大于审核项目列表（列表接口是过滤的）
+    stmt = (
+        select(
+            func.count(AuditProject.id).label("total"),
+            func.count(AuditProject.id).filter(
+                AuditProject.status == "in_progress"
+            ).label("in_progress"),
+            func.count(AuditProject.id).filter(
+                AuditProject.status == "completed"
+            ).label("completed"),
+            func.count(AuditProject.id).filter(
+                AuditProject.created_at >= month_start
+            ).label("this_month"),
+        )
+        .where(AuditProject.is_deleted == False)  # noqa: E712
     )
 
     result = await db.execute(stmt)
@@ -100,11 +104,15 @@ async def get_project_distribution(
     返回：[{name, value}] 格式的分布数据
     """
     if by == "status":
-        # 按状态分布
-        stmt = select(
-            AuditProject.status,
-            func.count(AuditProject.id).label("count"),
-        ).group_by(AuditProject.status)
+        # 按状态分布（排除软删除项目，口径与审核项目列表保持一致）
+        stmt = (
+            select(
+                AuditProject.status,
+                func.count(AuditProject.id).label("count"),
+            )
+            .where(AuditProject.is_deleted == False)  # noqa: E712
+            .group_by(AuditProject.status)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -122,11 +130,15 @@ async def get_project_distribution(
         ]
 
     elif by == "type":
-        # 按审核类型分布
-        stmt = select(
-            AuditProject.audit_type,
-            func.count(AuditProject.id).label("count"),
-        ).group_by(AuditProject.audit_type)
+        # 按审核类型分布（排除软删除项目）
+        stmt = (
+            select(
+                AuditProject.audit_type,
+                func.count(AuditProject.id).label("count"),
+            )
+            .where(AuditProject.is_deleted == False)  # noqa: E712
+            .group_by(AuditProject.audit_type)
+        )
 
         result = await db.execute(stmt)
         rows = result.all()
@@ -182,21 +194,23 @@ async def get_project_trend(
         else:
             month_end = datetime(month_start.year, month_start.month + 1, 1)
 
-        # 查询该月创建的项目数
+        # 查询该月创建的项目数（排除软删除项目）
         created_stmt = select(func.count(AuditProject.id)).where(
             and_(
                 AuditProject.created_at >= month_start,
                 AuditProject.created_at < month_end,
+                AuditProject.is_deleted == False,  # noqa: E712
             )
         )
         created_count = (await db.execute(created_stmt)).scalar() or 0
 
-        # 查询该月完成的项目数
+        # 查询该月完成的项目数（排除软删除项目）
         completed_stmt = select(func.count(AuditProject.id)).where(
             and_(
                 AuditProject.status == "completed",
                 AuditProject.actual_end >= month_start,
                 AuditProject.actual_end < month_end,
+                AuditProject.is_deleted == False,  # noqa: E712
             )
         )
         completed_count = (await db.execute(completed_stmt)).scalar() or 0
@@ -430,11 +444,11 @@ async def get_auditor_workload(
     # 查询审核员参与的项目数和区域数
     # 使用 CTE 或子查询来处理数组字段
 
-    # 第一步：获取所有审核员及其参与的项目
+    # 第一步：获取所有审核员及其参与的项目（排除软删除的组员关系）
     atm_stmt = select(
         AuditTeamMember.member_id,
         AuditTeamMember.project_id,
-    )
+    ).where(AuditTeamMember.is_deleted == False)  # noqa: E712
 
     if project_id:
         atm_stmt = atm_stmt.where(AuditTeamMember.project_id == project_id)
@@ -452,7 +466,10 @@ async def get_auditor_workload(
 
     # 执行查询并手动聚合
     # 查询审核员基础信息
-    users_stmt = select(User).where(User.role.in_(["expert", "auditor", "admin", "super_admin"]))
+    users_stmt = select(User).where(
+        User.role.in_(["expert", "auditor", "admin", "super_admin"]),
+        User.is_deleted == False,  # noqa: E712
+    )
     users_result = await db.execute(users_stmt)
     users = users_result.scalars().all()
 
@@ -475,11 +492,11 @@ async def get_auditor_workload(
             user_areas[row.member_id] = set()
         user_projects[row.member_id].add(row.project_id)
 
-    # 查询审核区域分配
+    # 查询审核区域分配（排除软删除的计划项）
     api_stmt = select(
         AuditPlanItem.assigned_member_ids,
         AuditPlanItem.id,
-    )
+    ).where(AuditPlanItem.is_deleted == False)  # noqa: E712
 
     if project_id:
         api_stmt = api_stmt.where(AuditPlanItem.project_id == project_id)
@@ -532,15 +549,18 @@ async def get_auditor_ranking(
     返回：排名列表
     """
     # 复用工作量统计逻辑
-    users_stmt = select(User).where(User.role.in_(["expert", "auditor", "admin", "super_admin"]))
+    users_stmt = select(User).where(
+        User.role.in_(["expert", "auditor", "admin", "super_admin"]),
+        User.is_deleted == False,  # noqa: E712
+    )
     users_result = await db.execute(users_stmt)
     users = users_result.scalars().all()
 
-    # 查询审核组成员关系
+    # 查询审核组成员关系（排除软删除的组员关系）
     atm_stmt = select(
         AuditTeamMember.member_id,
         AuditTeamMember.project_id,
-    )
+    ).where(AuditTeamMember.is_deleted == False)  # noqa: E712
     atm_result = await db.execute(atm_stmt)
     atm_rows = atm_result.all()
 
@@ -563,11 +583,11 @@ async def get_auditor_ranking(
             user_areas[row.member_id] = set()
         user_projects[row.member_id].add(row.project_id)
 
-    # 查询审核区域分配
+    # 查询审核区域分配（排除软删除的计划项）
     api_stmt = select(
         AuditPlanItem.assigned_member_ids,
         AuditPlanItem.id,
-    )
+    ).where(AuditPlanItem.is_deleted == False)  # noqa: E712
     api_result = await db.execute(api_stmt)
     api_rows = api_result.all()
 

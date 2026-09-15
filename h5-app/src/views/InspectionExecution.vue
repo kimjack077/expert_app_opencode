@@ -1626,7 +1626,9 @@ const completeInspection = async () => {
     }
   } catch (error) {
     console.error('完成检查失败:', error)
-    showToast('操作失败')
+    // 后端提交校验会返回具体原因（未填结论 / 必填检查项未填），要透传给用户
+    const detail = error?.response?.data?.detail || error?.response?.data?.message
+    showToast(typeof detail === 'string' && detail ? detail : '操作失败')
   } finally {
     submitting.value = false
   }

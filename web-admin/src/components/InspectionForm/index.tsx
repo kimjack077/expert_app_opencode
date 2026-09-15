@@ -12,6 +12,7 @@ import {
   SafetyCertificateOutlined, RobotOutlined
 } from '@ant-design/icons'
 import { recordApi, llmApi, mediaApi, taskApi } from '@/services/api'
+import { resultTagColor, resolveOptionLabel, resultLabel } from '@/utils/display'
 import { useAuthStore } from '@/stores/auth'
 
 const { TextArea } = Input
@@ -112,10 +113,52 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           score_value: tr.result_value ?? '',
           text_value: tr.result_text || '',
           inspector_note: tr.inspector_note || '',
-          photos: [],
+          // 附件由后端随记录返回（media_files），不能写死为空数组，
+          // 否则上传后再次进入本页附件会全部消失。
+          photos: tr.photos || [],
           llm_suggestion: tr.llm_suggestion,
         }
       })
+  }
+
+  /** 判定结果 → 中文（写库一律用中文，避免英文枚举回显到备注） */
+  const verdictToCn = (result: string) =>
+    result === 'pass' ? '合格'
+      : result === 'fail' ? '不合格'
+        : result === 'partial_pass' ? '基本合格'
+          : result
+
+  /**
+   * 任务模式下「最终判定 + 判定说明」共用 inspection_tasks.remarks 一个字段存储。
+   * 这里统一生成带标记的文本，读取侧按同一套标记解析，
+   * 避免把任务备注原文误当成判定说明回显。
+   */
+  const buildTaskRemark = (result: string, remarks: string) =>
+    [
+      result ? `最终判定:${verdictToCn(result)}` : '',
+      remarks ? `判定说明:${remarks}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ')
+
+  /** 从任务备注中解析出「最终判定 + 判定说明」；无标记时返回 null（不回填） */
+  const parseTaskRemark = (raw: string) => {
+    const match = raw.match(
+      /最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)/i
+    )
+    if (!match) return null
+    const val = match[1].toLowerCase()
+    const result =
+      val === 'pass' || val === '合格' || val === '符合'
+        ? 'pass'
+        : val === 'fail' || val === '不合格' || val === '不符合'
+          ? 'fail'
+          : 'partial_pass'
+    const remarks = raw
+      .replace(/^最终判定\s*[:：]\s*[^|｜]+[|｜]?/i, '')
+      .replace(/^判定说明\s*[:：]\s*/i, '')
+      .trim()
+    return { result, remarks }
   }
 
   const loadTaskMode = async (task: any) => {
@@ -151,17 +194,12 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     setItems(formItems)
     setFlatItems(formItems)
     if (task.remarks) {
-      let savedResult = ''
-      let savedRemarks = task.remarks
-      const match = task.remarks.match(/最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)/i)
-      if (match) {
-        const val = match[1].toLowerCase()
-        if (val === 'pass' || val === '合格' || val === '符合') savedResult = 'pass'
-        else if (val === 'fail' || val === '不合格' || val === '不符合') savedResult = 'fail'
-        else if (val === 'partial_pass' || val === '基本合格') savedResult = 'partial_pass'
-        savedRemarks = task.remarks.replace(/^最终判定\s*[:：]\s*[^|]+(\||\s*)/i, '').trim()
+      // 只在能识别出「最终判定:」标记时回填判定说明。
+      // 否则任务备注原文会被整段灌进「判定说明」输入框（历史 bug）。
+      const parsed = parseTaskRemark(task.remarks)
+      if (parsed) {
+        setFinalJudgment(parsed)
       }
-      setFinalJudgment({ result: savedResult, remarks: savedRemarks })
     }
   }
 
@@ -363,14 +401,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     setSavingJudgment(true)
     try {
       if (isTaskMode && taskId) {
-        const verdictCn = finalJudgment.result === 'pass' ? '合格' : finalJudgment.result === 'fail' ? '不合格' : finalJudgment.result === 'partial_pass' ? '基本合格' : finalJudgment.result
-        const remarkText = [
-          verdictCn ? `最终判定:${verdictCn}` : '',
-          finalJudgment.remarks || '',
-        ]
-          .filter(Boolean)
-          .join(' | ')
-        await taskApi.updateTask(taskId, { remarks: remarkText })
+        await taskApi.updateTask(taskId, {
+          remarks: buildTaskRemark(finalJudgment.result, finalJudgment.remarks),
+        })
         message.success('最终判定已保存')
         return
       }
@@ -547,8 +580,9 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       return
     }
 
-    // 任务模式：最终判定可选（写入 remarks）；记录模式：首次提交必填
-    if (!isTaskMode && !finalJudgment.result) {
+    // 最终判定为必填项：任务模式同样不能空着提交，
+    // 否则会落库一条没有结论的「已完成」检查。
+    if (!finalJudgment.result) {
       Modal.error({
         title: '提交失败',
         content: '请先选择最终判定结果（合格/基本合格/不合格）',
@@ -606,20 +640,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         try {
           if (isTaskMode && taskId) {
             // 判定结论一律写中文，避免 pass/fail 等英文枚举落库并回显到备注里
-            const verdictCn =
-              finalJudgment.result === 'pass'
-                ? '合格'
-                : finalJudgment.result === 'fail'
-                  ? '不合格'
-                  : finalJudgment.result === 'partial_pass'
-                    ? '基本合格'
-                    : finalJudgment.result
-            const remarkText = [
-              verdictCn ? `最终判定:${verdictCn}` : '',
-              finalJudgment.remarks || '',
-            ]
-              .filter(Boolean)
-              .join(' | ')
+            const remarkText = buildTaskRemark(finalJudgment.result, finalJudgment.remarks)
             if (remarkText) {
               await taskApi.updateTask(taskId, { remarks: remarkText })
             }
@@ -650,8 +671,17 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           message.success('检查记录已提交')
           if (onComplete) onComplete()
           else navigate(backPath)
-        } catch (error) {
-          message.error(alreadyDone ? '保存失败' : '提交失败')
+        } catch (error: any) {
+          // 后端提交校验会返回具体原因（未填结论 / 必填检查项未填），必须透传给用户，
+          // 否则用户只看到「提交失败」，不知道该补什么。
+          const detail = error?.response?.data?.detail || error?.response?.data?.message
+          message.error(
+            typeof detail === 'string' && detail
+              ? detail
+              : alreadyDone
+                ? '保存失败'
+                : '提交失败'
+          )
         }
       },
     })
@@ -724,22 +754,23 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     ? progress === 100
     : progress === 100 && !!finalJudgment.result && record?.status === 'draft'
 
+  const hasValue = (v: any) => v !== undefined && v !== null && v !== ''
+
   const getResultTag = (item: any) => {
     if (item.radio_value) {
-      const valueMap: Record<string, { color: string; text: string }> = {
-        'pass': { color: 'success', text: '合格' },
-        'fail': { color: 'error', text: '不合格' },
-        'pending_rectification': { color: 'warning', text: '待整改' },
-        'not_applicable': { color: 'default', text: '不适用' },
-        'na': { color: 'default', text: '不适用' },
-      }
-      const info = valueMap[item.radio_value] || { color: 'default', text: item.radio_value }
-      return <Tag color={info.color}>{info.text}</Tag>
+      // 统一走公共映射，避免 observe / not_applicable 这类值直接以英文显示
+      return (
+        <Tag color={resultTagColor(item.radio_value)}>
+          {resolveOptionLabel(item.radio_value, item.result_options)}
+        </Tag>
+      )
     }
-    if (item.numeric_value !== undefined && item.numeric_value !== null) {
+    // 注意：numeric_value / score_value 在未填写时可能是空字符串，
+    // 只判 undefined/null 会渲染出一个内容为空的标签。
+    if (hasValue(item.numeric_value)) {
       return <Tag color="processing">{item.numeric_value} {item.unit || ''}</Tag>
     }
-    if (item.score_value !== undefined && item.score_value !== null) {
+    if (hasValue(item.score_value)) {
       return <Tag color="processing">{item.score_value} 分</Tag>
     }
     if (item.text_value) {
@@ -892,7 +923,10 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
                       { value: 'fail', label: '不合格' },
                       { value: 'not_applicable', label: '不适用' },
                     ]).map((opt: any) => {
-                      const label = (opt.label === '未涉及' ? '不适用' : opt.label)
+                      // 选项没配 label 时回落到统一中文映射，避免把 value 直接显示成英文
+                      const label = opt.label
+                        ? (opt.label === '未涉及' ? '不适用' : opt.label)
+                        : resultLabel(opt.value)
                       return (
                         <Radio.Button key={opt.value || opt.label} value={opt.value}>
                           {label}

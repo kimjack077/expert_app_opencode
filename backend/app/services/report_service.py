@@ -2,6 +2,7 @@ import os
 import io
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -31,29 +32,55 @@ class ReportService:
         self._setup_styles()
 
     def _init_fonts(self):
-        font_paths = [
-            'C:/Windows/Fonts/simhei.ttf',
-            'C:/Windows/Fonts/msyh.ttc',
-            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-            '/usr/share/fonts/truetype/arphic/uming.ttc',
-            '/System/Library/Fonts/PingFang.ttc',
+        """注册中文字体。
+
+        排查提示：线上「报告 PDF 中文变方块」的根因就是这里找不到中文字体，
+        静默回退到 reportlab 内置 Helvetica（没有中文字形）。
+        因此候选顺序把「仓库自带字体」放在第一位，随部署一起走，不依赖服务器环境；
+        并且加载失败时打 error 日志而不是 warning，避免再次被当成「报告乱码」查不出来。
+        """
+        repo_fonts = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+        candidates = [
+            # 仓库自带（推荐：把字体文件提交进 backend/assets/fonts/）
+            repo_fonts / "NotoSansSC-Regular.ttf",
+            repo_fonts / "SourceHanSansSC-Regular.otf",
+            # Windows 开发机
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            Path("C:/Windows/Fonts/msyh.ttc"),
+            # Linux 服务器
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            Path("/usr/share/fonts/truetype/arphic/uming.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            # macOS
+            Path("/System/Library/Fonts/PingFang.ttc"),
         ]
-        self.font_name = 'Helvetica'
-        self.font_name_cn = 'Helvetica'
-        for path in font_paths:
-            if os.path.exists(path):
-                try:
-                    font_name = 'ChineseFont'
-                    pdfmetrics.registerFont(TTFont(font_name, path))
-                    self.font_name = font_name
-                    self.font_name_cn = font_name
-                    break
-                except Exception as exc:
-                    # 字体注册失败会静默退回 Helvetica，导致 PDF 中文变方块。
-                    # 必须留痕，否则线上只能看到"报告乱码"却找不到原因。
-                    logger.warning(
-                        "注册中文字体失败，将回退到 Helvetica: %s (%s)", path, exc
-                    )
+        self.font_name = "Helvetica"
+        self.font_name_cn = "Helvetica"
+        self.cjk_font_ready = False
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                # .ttc 是字体集合，必须指定子字体索引，否则 TTFont 会直接抛错
+                pdfmetrics.registerFont(
+                    TTFont("ChineseFont", str(path), subfontIndex=0)
+                )
+                self.font_name = "ChineseFont"
+                self.font_name_cn = "ChineseFont"
+                self.cjk_font_ready = True
+                logger.info("报告 PDF 使用中文字体：%s", path)
+                break
+            except Exception as exc:
+                logger.warning("注册中文字体失败，继续尝试下一个：%s (%s)", path, exc)
+
+        if not self.cjk_font_ready:
+            logger.error(
+                "未找到任何可用中文字体，报告 PDF 中文将显示为方块。"
+                "请把中文字体放到 %s，或在服务器安装 fonts-noto-cjk / fonts-wqy-microhei。",
+                repo_fonts,
+            )
 
     def _setup_styles(self):
         self.styles.add(ParagraphStyle(

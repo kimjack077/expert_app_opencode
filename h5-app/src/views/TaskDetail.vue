@@ -217,7 +217,6 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
 import {
-  completeTask as completeTaskApi,
   getTask,
   startTask as startTaskApi,
 } from '../api/tasks.js'
@@ -403,25 +402,22 @@ const startTask = async () => {
   }
 }
 
+/**
+ * 完成任务需要填写「最终判定结论」，统一到执行页完成。
+ * 直接在这里完成任务会落库一条没有结论的记录（后端已拦截），
+ * 所以这里改为引导用户进入执行页填写结论后提交。
+ */
 const completeTask = async () => {
   try {
     await showConfirmDialog({
-      title: '确认完成',
-      message: '确定要完成这个任务吗？',
+      title: '去填写最终判定',
+      message: '完成任务前需要填写「最终判定结论」，将跳转到执行页，请在页面底部选择结论后提交。',
+      confirmButtonText: '去填写',
     })
-    const res = await completeTaskApi(task.value.id)
-    console.log('完成任务响应:', res)
-    if (res.code === 200) {
-      showToast({ type: 'success', message: '任务已完成' })
-      fetchTask()
-    } else {
-      showToast({ type: 'fail', message: res.message || '操作失败' })
-    }
+    router.push(`/task/${task.value.id}/execute`)
   } catch (error) {
     if (error?.message !== 'cancel' && error !== 'cancel') {
-      console.error('完成任务失败:', error)
-      const errorMsg = error.response?.data?.detail || error.response?.data?.message || '完成任务失败'
-      showToast({ type: 'fail', message: errorMsg })
+      console.error('跳转执行页失败:', error)
     }
   }
 }

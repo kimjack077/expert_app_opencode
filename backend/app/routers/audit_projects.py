@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -213,34 +213,57 @@ async def list_audit_projects(
     status: Optional[str] = None,
     enterprise_id: Optional[UUID] = None,
     audit_type: Optional[str] = None,
+    keyword: Optional[str] = Query(None, description="项目编号 / 项目名称模糊搜索"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """获取审核项目列表"""
-    query = select(AuditProject).where(AuditProject.is_deleted == False)  # noqa: E712
+    """获取审核项目列表
+
+    返回 ``{"items": [...], "total": n}``。
+    原先返回纯数组且不带 total，前端只能把「当页条数」当成总数，分页器数字是错的。
+    筛选条件只构建一次，分页查询与计数查询共用，避免两边漂移。
+    """
+    conditions = [AuditProject.is_deleted == False]  # noqa: E712
 
     # 可见性：非平台管理角色只能看到自己创建/负责/参与的项目。
     # 缺少此过滤会导致任何登录用户都能枚举全部项目元数据。
     visibility = project_visibility_condition(current_user)
     if visibility is not None:
-        query = query.where(visibility)
+        conditions.append(visibility)
 
     # 过滤条件
-    conditions = []
     if status:
         conditions.append(AuditProject.status == status)
     if enterprise_id:
         conditions.append(AuditProject.enterprise_id == enterprise_id)
     if audit_type:
         conditions.append(AuditProject.audit_type == audit_type)
+    if keyword and keyword.strip():
+        like = f"%{keyword.strip()}%"
+        conditions.append(
+            or_(
+                AuditProject.project_no.ilike(like),
+                AuditProject.title.ilike(like),
+            )
+        )
 
-    if conditions:
-        query = query.where(and_(*conditions))
+    total = (
+        await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
+    ).scalar() or 0
 
-    query = query.offset(skip).limit(limit).order_by(AuditProject.created_at.desc())
+    query = (
+        select(AuditProject)
+        .where(and_(*conditions))
+        .order_by(AuditProject.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(query)
     projects = result.scalars().all()
-    return make_response(projects)
+
+    return make_response(
+        {"items": jsonable_encoder(projects), "total": total}
+    )
 
 
 # ==================== My Tasks (审核员视角) ====================

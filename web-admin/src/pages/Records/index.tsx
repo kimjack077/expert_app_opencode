@@ -5,7 +5,7 @@ import { recordApi, templateApi } from '@/services/api'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import InspectionReport from './InspectionReport'
-import { hasQuantifiedItems } from '@/utils/display'
+import { hasQuantifiedItems, resultLabel, resultTagColor } from '@/utils/display'
 
 const { RangePicker } = DatePicker
 
@@ -161,11 +161,17 @@ export default function Records() {
 
       flatItems.forEach((item, index) => {
         // 检查必填项是否已填写
+        // 注意：接口未填写时返回的是 null，只判 undefined 会让校验恒为通过
         if (item.is_required !== false) {
-          const hasResult = item.radio_value ||
-            item.numeric_value !== undefined ||
+          const hasResult =
+            item.radio_value ||
+            (item.numeric_value !== undefined &&
+              item.numeric_value !== null &&
+              item.numeric_value !== '') ||
             item.text_value ||
-            item.score_value !== undefined
+            (item.score_value !== undefined &&
+              item.score_value !== null &&
+              item.score_value !== '')
           if (!hasResult) {
             incompleteItems.push(`第${index + 1}项: ${item.title || '未命名'}`)
           }
@@ -223,6 +229,25 @@ export default function Records() {
         return
       }
 
+      // 最终判定结论是必填项：没有结论的记录不允许提交，
+      // 否则会落库一条「已提交但没有总体结论」的脏记录。
+      if (!recordData?.overall_result) {
+        Modal.warning({
+          title: '提交失败',
+          content: (
+            <div>
+              <div style={{ marginBottom: 8 }}>该记录还没有填写「最终判定结论」，无法提交。</div>
+              <div style={{ color: '#666' }}>
+                请进入记录执行页，在页面底部选择「合格 / 基本合格 / 不合格」后再提交。
+              </div>
+            </div>
+          ),
+          okText: '去填写',
+          onOk: () => navigate(`/record/${id}`),
+        })
+        return
+      }
+
       // 校验通过，显示确认对话框
       Modal.confirm({
         title: '确认提交',
@@ -232,8 +257,10 @@ export default function Records() {
             await recordApi.submitRecord(id)
             message.success('记录已提交')
             fetchRecords()
-          } catch (error) {
-            message.error('提交失败')
+          } catch (error: any) {
+            // 透传后端校验原因，避免只显示「提交失败」
+            const detail = error?.response?.data?.detail || error?.response?.data?.message
+            message.error(typeof detail === 'string' && detail ? detail : '提交失败')
           }
         },
       })
@@ -807,13 +834,9 @@ function TreeItem({
 
     // 单选/通过不通过
     if (item.radio_value || item.result) {
+      // 统一走公共映射，避免 observe / not_applicable 这类值直接显示英文
       const val = item.radio_value || item.result
-      const isPass = val === 'pass' || val === 'compliant' || val === 'qualified'
-      const isFail = val === 'fail' || val === 'non_compliant' || val === 'unqualified'
-      const isNa = val === 'na' || val === 'not_applicable' || val === '不适用'
-      const color = isPass ? 'success' : isFail ? 'error' : 'default'
-      const text = isPass ? '合格' : isFail ? '不合格' : isNa ? '不适用' : val
-      return <Tag color={color}>{text}</Tag>
+      return <Tag color={resultTagColor(val)}>{resultLabel(val)}</Tag>
     }
 
     // 打分

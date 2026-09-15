@@ -3,7 +3,7 @@ import { Modal, Button, Space, Tag, Divider, message, Spin } from 'antd'
 import { PrinterOutlined, ShareAltOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { recordApi } from '../../services/api'
-import { hasQuantifiedItems } from '../../utils/display'
+import { hasQuantifiedItems, resultLabel } from '../../utils/display'
 import { useAuthStore } from '@/stores/auth'
 
 interface Props {
@@ -12,7 +12,8 @@ interface Props {
     onClose: () => void
 }
 
-const resultLabel: Record<string, string> = {
+// 总体结论专用映射（与逐项结论的公共映射区分开）
+const overallResultLabel: Record<string, string> = {
     pass: '合格',
     partial_pass: '基本合格',
     fail: '不合格',
@@ -24,12 +25,9 @@ const resultColor: Record<string, string> = {
 }
 
 function getRadioLabel(val: string) {
-    const map: Record<string, string> = {
-        pass: '合格',
-        fail: '不合格',
-        na: '不适用',
-    }
-    return map[val] || val
+  // 统一走公共映射：not_applicable / observe / pending_rectification 等
+  // 曾经因本地映射表缺项而在报告里直接显示英文枚举。
+  return resultLabel(val)
 }
 
 function flattenItems(items: any[], result: any[] = [], currentCategory = ''): any[] {
@@ -203,7 +201,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                 fontWeight: 700,
                                 fontSize: 16,
                             }}>
-                                总体结论：{resultLabel[record.overall_result] || record.overall_result}
+                                总体结论：{overallResultLabel[record.overall_result] || resultLabel(record.overall_result)}
                             </span>
                         )}
                     </div>

@@ -393,6 +393,19 @@ export default function TaskDetail() {
       }
     : localStats
 
+  // 三色占比条的分段：合格 / 不合格 / 不适用 / 未填写，四者相加等于总检查项
+  const progressSegments = (() => {
+    const total = stats.total || 0
+    if (total <= 0) return []
+    const notFilled = Math.max(total - (stats.completed || 0), 0)
+    return [
+      { key: 'compliant', label: '合格', value: stats.compliant || 0, color: '#52c41a' },
+      { key: 'non_compliant', label: '不合格', value: stats.non_compliant || 0, color: '#ff4d4f' },
+      { key: 'not_applicable', label: '不适用', value: stats.not_applicable || 0, color: '#bfbfbf' },
+      { key: 'not_filled', label: '未填写', value: notFilled, color: '#e2e8f0' },
+    ].filter((seg) => seg.value > 0)
+  })()
+
   return (
     <div>
       <style>{`
@@ -466,29 +479,71 @@ export default function TaskDetail() {
           </Card>
 
           <Card title="检查进度" style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-              <div style={{ flex: '0 0 200px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
+              <div style={{ flex: '0 0 160px', textAlign: 'center' }}>
+                {/* 进度圈只表达「完成度」，用中性蓝而非绿色：
+                    绿色在检查场景里代表「通过」，和可能只有 50% 的合规率互相矛盾。 */}
                 <Progress
                   type="circle"
                   percent={
                     stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0
                   }
-                  format={() => `${stats.completed}/${stats.total}`}
+                  strokeColor={{ '0%': '#60a5fa', '100%': '#2563eb' }}
+                  format={() => (
+                    <span style={{ fontSize: 16 }}>
+                      {stats.completed}/{stats.total}
+                      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 400 }}>
+                        完成率
+                      </div>
+                    </span>
+                  )}
                 />
               </div>
-              <div>
-                <p>
-                  <Tag color="success">合规/合格: {stats.compliant}</Tag>
-                </p>
-                <p>
-                  <Tag color="error">不合规/不合格: {stats.non_compliant}</Tag>
-                </p>
-                <p>
-                  <Tag>不适用: {stats.not_applicable}</Tag>
-                </p>
-                <p>
-                  <strong>合规率: {stats.compliance_rate}%</strong>
-                </p>
+              <div style={{ flex: 1, minWidth: 320 }}>
+                {/* 三色占比条：同时呈现合格 / 不合格 / 不适用 / 未填的构成与比例 */}
+                <div
+                  style={{
+                    display: 'flex',
+                    height: 12,
+                    borderRadius: 6,
+                    overflow: 'hidden',
+                    background: '#f1f5f9',
+                  }}
+                >
+                  {progressSegments.map((seg) => (
+                    <div
+                      key={seg.key}
+                      title={`${seg.label} ${seg.value} 项`}
+                      style={{
+                        width: `${(seg.value / (stats.total || 1)) * 100}%`,
+                        background: seg.color,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginTop: 12 }}>
+                  {progressSegments.map((seg) => (
+                    <span key={seg.key} style={{ fontSize: 13, color: '#475569' }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 8,
+                          height: 8,
+                          borderRadius: 2,
+                          background: seg.color,
+                          marginRight: 6,
+                        }}
+                      />
+                      {seg.label} <strong>{seg.value}</strong> 项
+                    </span>
+                  ))}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 13, color: '#475569' }}>
+                  <strong>合规率 {stats.compliance_rate}%</strong>
+                  <span style={{ color: '#94a3b8', marginLeft: 8 }}>
+                    （口径：合格 ÷ 已判定项，不含不适用）
+                  </span>
+                </div>
               </div>
             </div>
           </Card>

@@ -50,13 +50,21 @@ async def get_dashboard(
             await db.execute(
                 select(TaskItemRecord.result, func.count(TaskItemRecord.id))
                 .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
-                .where(InspectionTask.assigned_to == current_user.id)
+                .where(
+                    InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,  # noqa: E712
+                )
                 .group_by(TaskItemRecord.result)
             )
         ).all()
         total_records = sum(c for _, c in record_rows)
+        # result 非空即为「已填报」，用于把达标率分母限定在已填报项上
+        filled_records = sum(c for r, c in record_rows if r)
         compliant_records = sum(c for r, c in record_rows if r == "pass")
         non_compliant_records = sum(c for r, c in record_rows if r == "fail")
+        not_applicable_records = sum(
+            c for r, c in record_rows if r in ("na", "not_applicable")
+        )
     else:
         task_rows = (
             await db.execute(
@@ -75,12 +83,19 @@ async def get_dashboard(
         record_rows = (
             await db.execute(
                 select(TaskItemRecord.result, func.count(TaskItemRecord.id))
+                .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
+                .where(InspectionTask.is_deleted == False)  # noqa: E712
                 .group_by(TaskItemRecord.result)
             )
         ).all()
         total_records = sum(c for _, c in record_rows)
+        # result 非空即为「已填报」，用于把达标率分母限定在已填报项上
+        filled_records = sum(c for r, c in record_rows if r)
         compliant_records = sum(c for r, c in record_rows if r == "pass")
         non_compliant_records = sum(c for r, c in record_rows if r == "fail")
+        not_applicable_records = sum(
+            c for r, c in record_rows if r in ("na", "not_applicable")
+        )
 
     total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
     total_enterprises = (await db.execute(select(func.count(Enterprise.id)))).scalar() or 0
@@ -98,16 +113,20 @@ async def get_dashboard(
                 else 0,
             },
             "inspections": {
+                # total = 全部检查项；filled = 已填报项；两者相减即为未填报，
+                # 让「合格 + 不合格 + 不适用 + 未填报 = 总检查项」在页面上闭合
                 "total": total_records,
+                "filled": filled_records,
+                "not_filled": max(total_records - filled_records, 0),
                 "compliant": compliant_records,
                 "non_compliant": non_compliant_records,
+                "not_applicable": not_applicable_records,
+                # 达标率口径：合格 ÷ 已填报项（不含不适用、不含未填报）
                 "compliance_rate": round(
-                    compliant_records
-                    / (compliant_records + non_compliant_records)
-                    * 100,
+                    compliant_records / filled_records * 100,
                     2,
                 )
-                if (compliant_records + non_compliant_records) > 0
+                if filled_records > 0
                 else 0,
             },
             "users": {
@@ -374,10 +393,19 @@ async def export_data(
     else:
         end = datetime.now(timezone.utc) + timedelta(days=1)
     
+    # 状态一律导出中文，避免把 pending / in_progress 这类枚举写进交付文件
+    status_labels = {
+        "pending": "待开始",
+        "in_progress": "进行中",
+        "completed": "已完成",
+        "cancelled": "已取消",
+    }
+
     if current_user.role == "expert":
         tasks_query = await db.execute(
             select(InspectionTask).where(
                 InspectionTask.assigned_to == current_user.id,
+                InspectionTask.is_deleted == False,  # noqa: E712
                 InspectionTask.created_at >= start,
                 InspectionTask.created_at < end,
             ).order_by(InspectionTask.created_at.desc())
@@ -385,6 +413,7 @@ async def export_data(
     else:
         tasks_query = await db.execute(
             select(InspectionTask).where(
+                InspectionTask.is_deleted == False,  # noqa: E712
                 InspectionTask.created_at >= start,
                 InspectionTask.created_at < end,
             ).order_by(InspectionTask.created_at.desc())
@@ -407,7 +436,8 @@ async def export_data(
             "task_no": task.task_no,
             "title": task.title,
             "target_name": task.target_name,
-            "status": task.status,
+            "status": status_labels.get(task.status, task.status),
+            "status_code": task.status,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "completed_at": task.completed_at.isoformat() if task.completed_at else None,
             "compliant_items": compliant,

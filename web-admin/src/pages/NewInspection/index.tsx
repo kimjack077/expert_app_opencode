@@ -116,7 +116,8 @@ export default function NewInspection() {
             label="检查时间"
             rules={[{ required: true, message: '请选择检查时间' }]}
           >
-            <DatePicker showTime style={{ width: '100%' }} />
+            {/* 检查时间精确到分钟，不显示秒列 */}
+            <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
           </Form.Item>
 
           <Divider orientation="left" orientationMargin="0">企业信息</Divider>

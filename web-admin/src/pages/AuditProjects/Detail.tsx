@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography } from 'antd'
+import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography, Tooltip } from 'antd'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
   EditOutlined, 
@@ -15,6 +15,7 @@ import {
   CheckOutlined,
 } from '@ant-design/icons'
 import { auditProjectApi, auditAIApi } from '@/services/auditProjectApi'
+import { projectStatusMeta } from '@/utils/display'
 import TeamManagement from './components/TeamManagement'
 import PlanManagement from './components/PlanManagement'
 import RecordsList from './components/RecordsList'
@@ -31,12 +32,8 @@ const auditTypeMap: Record<string, string> = {
   expansion: '扩项',
 }
 
-const statusMap: Record<string, { text: string; color: string }> = {
-  planning: { text: '策划中', color: 'default' },
-  in_progress: { text: '进行中', color: 'processing' },
-  completed: { text: '已完成', color: 'success' },
-  cancelled: { text: '已取消', color: 'error' },
-}
+// 状态文案 / 颜色 / 含义说明统一走公共映射，列表页与详情页保持一致
+const statusConfigOf = projectStatusMeta
 
 export default function AuditProjectDetail() {
   const { id } = useParams<{ id: string }>()
@@ -181,7 +178,7 @@ export default function AuditProjectDetail() {
     return <div style={{ padding: '24px' }}>加载中...</div>
   }
 
-  const statusConfig = statusMap[project.status] || { text: project.status, color: 'default' }
+  const statusConfig = statusConfigOf(project.status)
 
   return (
     <div style={{ padding: '24px' }}>
@@ -216,9 +213,11 @@ export default function AuditProjectDetail() {
               <Tag color="blue" style={{ fontSize: 12, margin: 0, fontFamily: 'monospace' }}>
                 {project.project_no}
               </Tag>
-              <Tag color={statusConfig.color} style={{ fontSize: 12, margin: 0, fontWeight: 600 }}>
-                {statusConfig.text}
-              </Tag>
+              <Tooltip title={statusConfig.desc}>
+                <Tag color={statusConfig.color} style={{ fontSize: 12, margin: 0, fontWeight: 600, cursor: 'help' }}>
+                  {statusConfig.text}
+                </Tag>
+              </Tooltip>
               <Tag color="cyan" style={{ fontSize: 12, margin: 0 }}>
                 {auditTypeMap[project.audit_type] || project.audit_type} · {project.audit_days || 0}人天
               </Tag>
@@ -437,7 +436,9 @@ export default function AuditProjectDetail() {
               {
                 key: 'plan',
                 label: '审核计划',
-                children: <PlanManagement projectId={id!} />,
+                children: (
+                  <PlanManagement projectId={id!} onGoToTeam={() => setActiveTab('team')} />
+                ),
               },
               {
                 key: 'records',

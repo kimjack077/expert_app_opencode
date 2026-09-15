@@ -93,3 +93,133 @@ export function hasQuantifiedItems(template?: any): boolean {
     })
   return walk(template?.items || [])
 }
+
+/**
+ * 检查结果取值 → 中文文案 的统一映射。
+ *
+ * 后端与模板里并存多套取值（pass/fail/na/not_applicable/observe/pending_rectification 等），
+ * 各页面曾各自维护一份不完整的映射表，导致 observe、not_applicable 这类值直接以英文暴露给业务用户。
+ * 展示层一律走这里，不要再各写一份。
+ */
+export const RESULT_LABELS: Record<string, string> = {
+  pass: '合格',
+  compliant: '合格',
+  qualified: '合格',
+  fail: '不合格',
+  non_compliant: '不合格',
+  unqualified: '不合格',
+  partial_pass: '基本合格',
+  na: '不适用',
+  'n/a': '不适用',
+  not_applicable: '不适用',
+  未涉及: '不适用',
+  observe: '观察项',
+  observation: '观察项',
+  pending_rectification: '待整改',
+  corrected: '已整改',
+  pending_verification: '待验证',
+  verified: '已验证',
+  closed: '已关闭',
+}
+
+/** 结果值 → 中文文案；未命中时原样返回，便于发现新枚举 */
+export function resultLabel(value?: string | null): string {
+  const key = String(value ?? '').trim()
+  if (!key) return ''
+  return RESULT_LABELS[key] || RESULT_LABELS[key.toLowerCase()] || key
+}
+
+/** 结果值 → Ant Design Tag 颜色 */
+export function resultTagColor(value?: string | null): string {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (key === 'pass' || key === 'compliant' || key === 'qualified') return 'success'
+  if (key === 'fail' || key === 'non_compliant' || key === 'unqualified') return 'error'
+  if (key === 'partial_pass' || key === 'pending_rectification') return 'warning'
+  if (key === 'observe' || key === 'observation') return 'blue'
+  return 'default'
+}
+
+/**
+ * 优先使用模板项自带 result_options 里的 label（业务方自定义的叫法优先），
+ * 没有配置时再回落到统一映射。
+ */
+export function resolveOptionLabel(value: any, resultOptions?: any): string {
+  const key = String(value ?? '')
+  const raw = resultOptions?.options ?? resultOptions
+  if (Array.isArray(raw)) {
+    const hit = raw.find((o: any) => String(o?.value ?? o?.name ?? '') === key)
+    const label = hit?.label ?? hit?.name
+    if (label) return String(label)
+  }
+  return resultLabel(key)
+}
+
+/** 检查任务状态 → 中文（导出、表格共用，避免把英文枚举写进交付文件） */
+export const TASK_STATUS_LABELS: Record<string, string> = {
+  pending: '待开始',
+  in_progress: '进行中',
+  completed: '已完成',
+  cancelled: '已取消',
+}
+
+export function taskStatusLabel(status?: string | null): string {
+  const key = String(status ?? '').trim()
+  if (!key) return ''
+  return TASK_STATUS_LABELS[key] || key
+}
+
+/**
+ * 审核项目状态 → 展示文案 / 颜色 / 含义说明。
+ *
+ * 状态流转对用户是个谜（测试问题清单第 16 条），列表里必须能悬停看到解释。
+ * 当前真实流转：创建时为 planning → 关联检查任务开始后置 in_progress → completed / cancelled。
+ */
+export const PROJECT_STATUS_META: Record<
+  string,
+  { text: string; color: string; desc: string }
+> = {
+  planning: {
+    text: '策划中',
+    color: 'default',
+    desc: '项目已建立，尚未开始现场审核。此阶段需要完善审核计划、组建审核组并分配审核员。',
+  },
+  in_progress: {
+    text: '进行中',
+    color: 'processing',
+    desc: '已生成检查任务或已开始现场审核，审核活动正在推进。',
+  },
+  completed: {
+    text: '已完成',
+    color: 'success',
+    desc: '全部审核活动结束，审核报告与不符合项处理均已完成。',
+  },
+  cancelled: {
+    text: '已取消',
+    color: 'error',
+    desc: '项目中途终止，不再继续审核。',
+  },
+}
+
+export function projectStatusMeta(status?: string | null) {
+  const key = String(status ?? '')
+  return (
+    PROJECT_STATUS_META[key] || {
+      text: key || '-',
+      color: 'default',
+      desc: '未知状态',
+    }
+  )
+}
+
+/** 审核类型 → 中文 */
+export const AUDIT_TYPE_LABELS: Record<string, string> = {
+  initial: '初审',
+  surveillance: '监督',
+  recertification: '再认证',
+  expansion: '扩项',
+}
+
+export function auditTypeLabel(type?: string | null): string {
+  const key = String(type ?? '')
+  return AUDIT_TYPE_LABELS[key] || key
+}

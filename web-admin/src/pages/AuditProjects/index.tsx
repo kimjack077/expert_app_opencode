@@ -1,8 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Space, Tag, message, Modal, Dropdown } from 'antd'
-import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, MoreOutlined } from '@ant-design/icons'
+import {
+  Card, Table, Button, Space, Tag, message, Modal, Dropdown, Input, Select, Tooltip,
+} from 'antd'
+import {
+  PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, MoreOutlined, SearchOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { auditProjectApi } from '@/services/auditProjectApi'
+import { auditTypeLabel, projectStatusMeta } from '@/utils/display'
 import type { ColumnsType } from 'antd/es/table'
 
 interface AuditProject {
@@ -19,18 +24,24 @@ interface AuditProject {
   created_at: string
 }
 
-const auditTypeMap: Record<string, { text: string; color: string }> = {
-  initial: { text: '初审', color: 'blue' },
-  surveillance: { text: '监督', color: 'green' },
-  recertification: { text: '再认证', color: 'orange' },
-  expansion: { text: '扩项', color: 'purple' },
-}
+const AUDIT_TYPE_OPTIONS = [
+  { value: 'initial', label: '初审' },
+  { value: 'surveillance', label: '监督' },
+  { value: 'recertification', label: '再认证' },
+  { value: 'expansion', label: '扩项' },
+]
 
-const statusMap: Record<string, { text: string; color: string }> = {
-  planning: { text: '策划中', color: 'default' },
-  in_progress: { text: '进行中', color: 'processing' },
-  completed: { text: '已完成', color: 'success' },
-  cancelled: { text: '已取消', color: 'error' },
+const STATUS_OPTIONS = [
+  { value: 'planning', label: '策划中' },
+  { value: 'in_progress', label: '进行中' },
+  { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
+]
+
+const EMPTY_FILTERS = {
+  status: undefined as string | undefined,
+  audit_type: undefined as string | undefined,
+  keyword: '',
 }
 
 export default function AuditProjects() {
@@ -38,10 +49,14 @@ export default function AuditProjects() {
   const [loading, setLoading] = useState(false)
   const [projects, setProjects] = useState<AuditProject[]>([])
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 })
+  // 筛选条件与「已提交」的筛选分开：输入框改的是 draft，点查询才生效，
+  // 避免每敲一个字都打一次接口。
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS })
+  const [draftFilters, setDraftFilters] = useState({ ...EMPTY_FILTERS })
 
   useEffect(() => {
     fetchProjects()
-  }, [pagination.current, pagination.pageSize])
+  }, [pagination.current, pagination.pageSize, filters])
 
   const fetchProjects = async () => {
     setLoading(true)
@@ -49,14 +64,33 @@ export default function AuditProjects() {
       const response = await auditProjectApi.list({
         skip: (pagination.current - 1) * pagination.pageSize,
         limit: pagination.pageSize,
+        ...(filters.status ? { status: filters.status } : {}),
+        ...(filters.audit_type ? { audit_type: filters.audit_type } : {}),
+        ...(filters.keyword.trim() ? { keyword: filters.keyword.trim() } : {}),
       })
-      setProjects(response.data || [])
-      setPagination((prev) => ({ ...prev, total: response.data?.length || 0 }))
+      // 后端已返回 { items, total }；total 是过滤后的真实总数，分页器不再用当页条数凑
+      const data = response.data || {}
+      setProjects(Array.isArray(data) ? data : data.items || [])
+      setPagination((prev) => ({
+        ...prev,
+        total: Array.isArray(data) ? data.length : data.total || 0,
+      }))
     } catch (error: any) {
       message.error(error.response?.data?.message || '获取审核项目列表失败')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSearch = () => {
+    setPagination((prev) => ({ ...prev, current: 1 }))
+    setFilters({ ...draftFilters })
+  }
+
+  const handleReset = () => {
+    setDraftFilters({ ...EMPTY_FILTERS })
+    setFilters({ ...EMPTY_FILTERS })
+    setPagination((prev) => ({ ...prev, current: 1 }))
   }
 
   const handleDelete = (id: string) => {
@@ -96,10 +130,11 @@ export default function AuditProjects() {
       dataIndex: 'audit_type',
       key: 'audit_type',
       width: 100,
-      render: (type: string) => {
-        const config = auditTypeMap[type] || { text: type, color: 'default' }
-        return <Tag color={config.color}>{config.text}</Tag>
-      },
+      render: (type: string) => (
+        <Tag color={type === 'initial' ? 'blue' : type === 'surveillance' ? 'green' : type === 'recertification' ? 'orange' : 'purple'}>
+          {auditTypeLabel(type)}
+        </Tag>
+      ),
     },
     {
       title: '认证体系',
@@ -137,9 +172,16 @@ export default function AuditProjects() {
       dataIndex: 'status',
       key: 'status',
       width: 120,
+      // 悬停显示该状态的含义，避免用户看不懂「策划中 / 进行中」到底代表什么
       render: (status: string) => {
-        const config = statusMap[status] || { text: status, color: 'default' }
-        return <Tag color={config.color} style={{ whiteSpace: 'nowrap' }}>{config.text}</Tag>
+        const meta = projectStatusMeta(status)
+        return (
+          <Tooltip title={meta.desc}>
+            <Tag color={meta.color} style={{ whiteSpace: 'nowrap', cursor: 'help' }}>
+              {meta.text}
+            </Tag>
+          </Tooltip>
+        )
       },
     },
     {
@@ -197,6 +239,39 @@ export default function AuditProjects() {
           </Button>
         }
       >
+        {/* 查询条件：状态 / 审核类型 / 编号或名称关键字 */}
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="项目编号 / 项目名称"
+            style={{ width: 220 }}
+            value={draftFilters.keyword}
+            onChange={(e) => setDraftFilters((prev) => ({ ...prev, keyword: e.target.value }))}
+            onPressEnter={handleSearch}
+          />
+          <Select
+            placeholder="项目状态"
+            allowClear
+            style={{ width: 140 }}
+            value={draftFilters.status}
+            onChange={(value) => setDraftFilters((prev) => ({ ...prev, status: value }))}
+            options={STATUS_OPTIONS}
+          />
+          <Select
+            placeholder="审核类型"
+            allowClear
+            style={{ width: 140 }}
+            value={draftFilters.audit_type}
+            onChange={(value) => setDraftFilters((prev) => ({ ...prev, audit_type: value }))}
+            options={AUDIT_TYPE_OPTIONS}
+          />
+          <Button type="primary" onClick={handleSearch}>
+            查询
+          </Button>
+          <Button onClick={handleReset}>重置</Button>
+        </Space>
+
         <Table
           columns={columns}
           dataSource={projects}

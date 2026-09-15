@@ -38,6 +38,8 @@ const { Text } = Typography
 
 interface Props {
   projectId: string
+  /** 跳转到「审核组」页签。审核组为空时用它引导用户先去添加审核员。 */
+  onGoToTeam?: () => void
 }
 
 interface PlanItem {
@@ -78,7 +80,7 @@ const statusColorMap: Record<string, string> = {
   completed: 'success',
 }
 
-export default function PlanEditor({ projectId }: Props) {
+export default function PlanEditor({ projectId, onGoToTeam }: Props) {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [planItems, setPlanItems] = useState<PlanItem[]>([])
@@ -801,8 +803,49 @@ export default function PlanEditor({ projectId }: Props) {
             label="分配的审核员"
             name="assigned_member_ids"
             rules={[{ required: true, message: '请选择审核员' }]}
+            extra={
+              // 审核组为空时给出明确引导：否则用户只看到「暂无数据」，
+              // 会以为系统坏了（测试问题清单第 15 条）
+              teamMembers.length === 0 ? (
+                <span style={{ color: '#d46b08' }}>
+                  当前项目还没有审核组成员，请先到「审核组」页签添加审核员后再分配。
+                  {onGoToTeam && (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: '0 4px' }}
+                      onClick={onGoToTeam}
+                    >
+                      去添加审核员
+                    </Button>
+                  )}
+                </span>
+              ) : undefined
+            }
           >
-            <Select mode="multiple" placeholder="请选择审核员">
+            <Select
+              mode="multiple"
+              placeholder="请选择审核员"
+              notFoundContent={
+                <div style={{ padding: '8px 4px', color: '#8c8c8c', lineHeight: 1.8 }}>
+                  暂无审核组成员
+                  <br />
+                  请先到「审核组」页签添加审核员
+                  {onGoToTeam && (
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        type="link"
+                        size="small"
+                        style={{ padding: 0 }}
+                        onClick={onGoToTeam}
+                      >
+                        去添加审核员
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              }
+            >
               {teamMembers.map((member) => (
                 <Select.Option key={member.id} value={member.member_id}>
                   {getMemberName(member.member_id)}

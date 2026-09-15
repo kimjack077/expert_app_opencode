@@ -68,9 +68,17 @@ def test_formal_sync_rejects_task_without_completed_rows():
 def test_post_complete_route_runs_formal_sync_before_commit():
     user = SimpleNamespace(id=uuid4(), role="admin", username="admin")
     task = make_task(user.id)
-    plan = SimpleNamespace(id=uuid4())
+    # 完成任务必须带最终判定结论（测试问题 7 的新校验）
+    task.remarks = "最终判定:合格 | 判定说明:route test"
+    plan = SimpleNamespace(id=uuid4(), project_id=uuid4())
+    project = SimpleNamespace(status="planning", is_deleted=False, actual_end=None)
+    records_result = Mock()
+    records_result.scalars.return_value.all.return_value = []
+    count_result = Mock()
+    count_result.scalar.return_value = 0
     db = SimpleNamespace(
-        get=AsyncMock(return_value=task),
+        get=AsyncMock(side_effect=[task, project]),
+        execute=AsyncMock(side_effect=[records_result, count_result]),
         commit=AsyncMock(),
     )
 
@@ -88,13 +96,36 @@ def test_post_complete_route_runs_formal_sync_before_commit():
     assert result.code == 200
 
 
+def test_post_complete_without_final_judgment_is_rejected():
+    user = SimpleNamespace(id=uuid4(), role="admin", username="admin")
+    task = make_task(user.id)
+    task.remarks = "普通备注，没有最终判定标记"
+    records_result = Mock()
+    records_result.scalars.return_value.all.return_value = []
+    db = SimpleNamespace(
+        get=AsyncMock(return_value=task),
+        execute=AsyncMock(return_value=records_result),
+        commit=AsyncMock(),
+    )
+
+    import pytest as _pytest
+
+    with _pytest.raises(Exception) as exc_info:
+        asyncio.run(complete_task(str(task.id), db=db, current_user=user))
+    assert "最终判定" in str(exc_info.value.detail)
+    db.commit.assert_not_awaited()
+
+
 def test_put_completed_route_cannot_bypass_formal_sync():
     user = SimpleNamespace(id=uuid4(), role="expert", username="expert")
     task = make_task(user.id)
+    # 完成任务必须带最终判定结论（测试问题 7 的新校验）
+    task.remarks = "最终判定:合格 | 判定说明:route test"
     plan = SimpleNamespace(id=uuid4(), project_id=uuid4(), status="in_progress")
-    project = SimpleNamespace(status="planning")
+    project = SimpleNamespace(status="planning", is_deleted=False, actual_end=None)
     plan_result = Mock()
     plan_result.scalar_one_or_none.return_value = plan
+    plan_result.scalar.return_value = 0
     db = SimpleNamespace(
         get=AsyncMock(side_effect=[task, project]),
         execute=AsyncMock(return_value=plan_result),
@@ -120,6 +151,32 @@ def test_put_completed_route_cannot_bypass_formal_sync():
     db.commit.assert_awaited_once()
     assert task.status == "completed"
     assert result.code == 200
+
+
+def test_put_completed_without_final_judgment_is_rejected():
+    user = SimpleNamespace(id=uuid4(), role="expert", username="expert")
+    task = make_task(user.id)
+    task.remarks = None
+    db = SimpleNamespace(
+        get=AsyncMock(return_value=task),
+        execute=AsyncMock(),
+        commit=AsyncMock(),
+        refresh=AsyncMock(),
+    )
+
+    import pytest as _pytest
+
+    with _pytest.raises(Exception) as exc_info:
+        asyncio.run(
+            update_task(
+                str(task.id),
+                InspectionTaskUpdate(status="completed"),
+                db=db,
+                current_user=user,
+            )
+        )
+    assert "最终判定" in str(exc_info.value.detail)
+    db.commit.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

@@ -772,6 +772,97 @@ async def update_record(
     return make_response(data={"id": str(record.id)})
 
 
+def _has_value(value) -> bool:
+    """记录项字段是否算「已填写」。空字符串、空数组都不算。"""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    return True
+
+
+def _record_item_filled(item: InspectionRecordItem) -> bool:
+    return any(
+        _has_value(getattr(item, field, None))
+        for field in (
+            "radio_value",
+            "result",
+            "numeric_value",
+            "score_value",
+            "text_value",
+            "multi_value",
+        )
+    )
+
+
+async def _collect_submit_blockers(
+    db: AsyncSession, record: InspectionRecord
+) -> List[str]:
+    """提交前完整性校验：返回阻断项描述列表。
+
+    原实现完全依赖前端校验，而前端用的是 `!== undefined`，
+    接口返回 null 时判断恒真，等于没有校验，
+    结果落库了一批「已提交但没结论、检查项也没填」的记录。
+    """
+    blockers: List[str] = []
+
+    if not _has_value(record.overall_result):
+        blockers.append("尚未填写「最终判定结论」")
+
+    if not record.template_id:
+        return blockers
+
+    template_items = (
+        (
+            await db.execute(
+                select(TemplateItem).where(
+                    TemplateItem.template_id == record.template_id,
+                    TemplateItem.is_deleted == False,  # noqa: E712
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not template_items:
+        return blockers
+
+    parent_ids = await load_parent_ids(db, template_id=record.template_id)
+
+    record_items = (
+        (
+            await db.execute(
+                select(InspectionRecordItem).where(
+                    InspectionRecordItem.record_id == record.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    filled_template_ids = {
+        str(ri.template_item_id)
+        for ri in record_items
+        if ri.template_item_id and _record_item_filled(ri)
+    }
+
+    missing = [
+        (ti.title or "未命名检查项")
+        for ti in template_items
+        if not is_category_node(ti, parent_ids)
+        and ti.is_required is not False
+        and str(ti.id) not in filled_template_ids
+    ]
+    if missing:
+        preview = "、".join(missing[:5])
+        suffix = f" 等 {len(missing)} 项" if len(missing) > 5 else ""
+        blockers.append(f"以下必填检查项尚未填写：{preview}{suffix}")
+
+    return blockers
+
+
 @router.post("/{record_id}/submit", response_model=ApiResponse)
 async def submit_record(
     record_id: str,
@@ -792,6 +883,14 @@ async def submit_record(
     # BUG-12：已提交记录不允许重复提交
     if record.status == "submitted":
         raise HTTPException(status_code=409, detail="该检查记录已提交，请勿重复提交")
+
+    # 完整性校验：结论 + 必填检查项
+    blockers = await _collect_submit_blockers(db, record)
+    if blockers:
+        raise HTTPException(
+            status_code=422,
+            detail="；".join(blockers) + "，无法提交",
+        )
 
     record.status = "submitted"
     record.inspection_date = datetime.now(timezone.utc)

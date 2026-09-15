@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm, Typography } from 'antd'
 import { PlusOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
 import { formatTaskDisplay } from '@/utils/display'
 import dayjs from 'dayjs'
@@ -10,14 +10,29 @@ const { TextArea } = Input
 
 export default function Tasks() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tasks, setTasks] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [form] = Form.useForm()
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  // 初值取 URL 的 ?status=：工作台「待办/进行中」卡片是带参数跳进来的，
+  // 不解析的话列表不过滤，卡片数字与列表条数就会对不上。
+  const [statusFilter, setStatusFilter] = useState<string | null>(
+    searchParams.get('status')
+  )
   const [keyword, setKeyword] = useState('')
+
+  /** 切换状态筛选，并把条件同步回 URL，便于分享/刷新保持筛选 */
+  const handleStatusChange = (value?: string | null) => {
+    const next = value || null
+    setStatusFilter(next)
+    const params = new URLSearchParams(searchParams)
+    if (next) params.set('status', next)
+    else params.delete('status')
+    setSearchParams(params, { replace: true })
+  }
 
   useEffect(() => {
     fetchTasks()
@@ -128,7 +143,14 @@ export default function Tasks() {
         const d = formatTaskDisplay(record)
         return (
           <div>
-            <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{d.primary}</div>
+            {/* 标题做成链接，点击直接进任务详情，与「查看」按钮等效 */}
+            <Typography.Link
+              strong
+              onClick={() => navigate(`/tasks/${record.id}`)}
+              style={{ color: 'var(--text-main)' }}
+            >
+              {d.primary}
+            </Typography.Link>
             {d.secondary && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {d.secondary}
@@ -175,7 +197,7 @@ export default function Tasks() {
               icon={<PlayCircleOutlined />}
               onClick={() => navigate(`/inspection/${record.id}`)}
             >
-              继续检查
+              开始检查
             </Button>
           )}
           {record.status === 'in_progress' && (
@@ -243,7 +265,8 @@ export default function Tasks() {
             placeholder="状态"
             allowClear
             style={{ width: 120 }}
-            onChange={(value) => setStatusFilter(value)}
+            value={statusFilter}
+            onChange={(value) => handleStatusChange(value)}
             options={[
               { value: 'pending', label: '待开始' },
               { value: 'in_progress', label: '进行中' },
@@ -303,7 +326,8 @@ export default function Tasks() {
             <Input />
           </Form.Item>
           <Form.Item name="scheduled_at" label="计划时间">
-            <DatePicker showTime style={{ width: '100%' }} />
+            {/* 计划时间精确到分钟，不显示秒列 */}
+            <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="remarks" label="备注">
             <TextArea rows={3} />
