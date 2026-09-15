@@ -19,6 +19,7 @@ import {
   PieChartOutlined,
   ScheduleOutlined,
   DownOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
@@ -249,6 +250,17 @@ export default function MainLayout() {
                 className="header-icon-btn"
                 icon={<AuditOutlined style={{ fontSize: 15 }} />}
                 onClick={() => navigate('/audit-projects')}
+              />
+            </Tooltip>
+
+            {/* 在线文档与操作指南 */}
+            <Tooltip title="在线使用文档与操作指南 (新标签页查看)">
+              <Button
+                type="text"
+                className="header-icon-btn"
+                style={{ color: '#0284c7' }}
+                icon={<QuestionCircleOutlined style={{ fontSize: 16 }} />}
+                onClick={() => window.open('/docs', '_blank')}
               />
             </Tooltip>
 

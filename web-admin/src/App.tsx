@@ -27,6 +27,9 @@ import AuditItemDetail from '@/pages/AuditItemDetail'
 // 审核记录编辑
 import AuditRecordEdit from '@/pages/AuditRecordEdit'
 
+// 在线使用文档模块
+import DocsPage from '@/pages/Docs'
+
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
@@ -37,6 +40,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        {/* 在线文档中心 (全屏独立现代技术文档布局) */}
+        <Route path="/docs" element={<DocsPage />} />
+        <Route path="/docs/:docId" element={<DocsPage />} />
         <Route
           path="/"
           element={

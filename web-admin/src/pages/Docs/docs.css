@@ -1,0 +1,846 @@
+/* ==========================================================================
+   易审通 在线文档与使用指南专用样式表 (WorkBuddy / VitePress 风格)
+   ========================================================================== */
+
+.docs-root {
+  min-height: 100vh;
+  background-color: #f8fafc;
+  color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --------------------------------------------------------------------------
+   1. 顶部导航栏 (DocsHeader)
+   -------------------------------------------------------------------------- */
+.docs-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  transition: all 0.2s ease;
+}
+
+.docs-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.docs-brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.docs-brand-badge {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.docs-brand-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.docs-header-center {
+  flex: 1;
+  max-width: 460px;
+  margin: 0 32px;
+}
+
+.docs-search-trigger {
+  width: 100%;
+  height: 38px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.docs-search-trigger:hover {
+  background: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+  color: #334155;
+}
+
+.docs-search-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: monospace;
+  color: #64748b;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+}
+
+.docs-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.docs-btn-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0284c7;
+  color: #ffffff !important;
+  border: none;
+  font-weight: 600;
+  border-radius: 8px;
+  height: 36px;
+  padding: 0 14px;
+  transition: all 0.2s ease;
+}
+
+.docs-btn-back:hover {
+  background: #0369a1 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(2, 132, 199, 0.25);
+}
+
+/* --------------------------------------------------------------------------
+   2. 主体三栏布局容器 (DocsMainLayout)
+   -------------------------------------------------------------------------- */
+.docs-main-container {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  max-width: 1540px;
+  margin: 0 auto;
+  position: relative;
+}
+
+/* --------------------------------------------------------------------------
+   3. 左侧目录导航 (DocsSidebar)
+   -------------------------------------------------------------------------- */
+.docs-sidebar {
+  width: 290px;
+  flex-shrink: 0;
+  height: calc(100vh - 60px);
+  position: sticky;
+  top: 60px;
+  overflow-y: auto;
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+  padding: 20px 12px 40px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.docs-sidebar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.docs-sidebar::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+.docs-nav-group {
+  margin-bottom: 22px;
+}
+
+.docs-nav-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.docs-nav-group-header:hover {
+  background-color: #f1f5f9;
+  color: #0284c7;
+}
+
+.docs-nav-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.docs-nav-group-icon {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.docs-nav-group-caret {
+  font-size: 10px;
+  color: #94a3b8;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.docs-nav-group-caret.expanded {
+  transform: rotate(90deg);
+}
+
+.docs-nav-items-wrapper {
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 1px solid #f1f5f9;
+  margin-left: 12px;
+}
+
+.docs-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  margin-bottom: 3px;
+  font-size: 13.5px;
+  color: #475569;
+  text-decoration: none;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.docs-nav-item:hover {
+  background-color: #f8fafc;
+  color: #0284c7;
+}
+
+.docs-nav-item.active {
+  background-color: #eff6ff;
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.docs-nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -13px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background-color: #0284c7;
+  border-radius: 0 2px 2px 0;
+}
+
+.docs-nav-item-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   4. 中间正文内容区 (DocsContent)
+   -------------------------------------------------------------------------- */
+.docs-content-container {
+  flex: 1;
+  min-width: 0;
+  padding: 36px 48px 80px 48px;
+}
+
+.docs-article {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.docs-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 16px;
+}
+
+.docs-breadcrumb-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.docs-article-header {
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+}
+
+.docs-article-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.docs-article-h1 {
+  font-size: 32px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.docs-article-badge {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+  font-weight: 600;
+}
+
+.docs-article-meta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 12.5px;
+  color: #94a3b8;
+  margin-bottom: 16px;
+}
+
+.docs-article-intro {
+  font-size: 16px;
+  line-height: 1.7;
+  color: #334155;
+  background: #f8fafc;
+  border-left: 4px solid #0284c7;
+  padding: 14px 20px;
+  border-radius: 0 8px 8px 0;
+  margin-top: 12px;
+}
+
+.docs-btn-feature-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0284c7;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.docs-btn-feature-jump:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.25);
+}
+
+/* 章节小节排版 */
+.docs-section {
+  margin-bottom: 48px;
+}
+
+.docs-section-h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 36px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  scroll-margin-top: 80px;
+}
+
+.docs-section-h2::before {
+  content: '#';
+  color: #38bdf8;
+  font-weight: 400;
+  font-size: 20px;
+}
+
+.docs-section-desc {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #334155;
+  margin-bottom: 20px;
+}
+
+/* 核心要点列表 */
+.docs-keypoints-box {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 18px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.docs-keypoint-item {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.docs-keypoint-item:last-child {
+  margin-bottom: 0;
+}
+
+/* 步骤指示卡片 (Step Cards) */
+.docs-steps-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.docs-step-card {
+  display: flex;
+  gap: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+
+.docs-step-card:hover {
+  border-color: #bae6fd;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.08);
+  transform: translateY(-1px);
+}
+
+.docs-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.docs-step-body {
+  flex: 1;
+}
+
+.docs-step-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 6px;
+}
+
+.docs-step-desc {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #475569;
+}
+
+/* 截图容器 (Screenshot Mockup Window) */
+.docs-screenshot-frame {
+  margin: 24px 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
+  transition: transform 0.2s ease;
+}
+
+.docs-screenshot-frame:hover {
+  border-color: #0284c7;
+}
+
+.docs-screenshot-header {
+  height: 32px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+}
+
+.docs-window-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.docs-window-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.docs-window-dot.red { background-color: #ef4444; }
+.docs-window-dot.yellow { background-color: #f59e0b; }
+.docs-window-dot.green { background-color: #22c55e; }
+
+.docs-window-title {
+  font-size: 11px;
+  color: #64748b;
+  margin-left: 8px;
+  font-family: monospace;
+}
+
+.docs-screenshot-img-box {
+  background: #f1f5f9;
+  text-align: center;
+  padding: 4px;
+  cursor: zoom-in;
+}
+
+.docs-screenshot-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 0 auto;
+}
+
+.docs-screenshot-caption {
+  font-size: 12.5px;
+  color: #64748b;
+  text-align: center;
+  padding: 10px 14px;
+  background: #ffffff;
+  border-top: 1px solid #f1f5f9;
+  font-weight: 500;
+}
+
+/* 提示卡片 (Callout / Tip / Warning) */
+.docs-callout {
+  margin: 24px 0;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border-left: 4px solid;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.docs-callout.tip {
+  background-color: #f0fdf4;
+  border-color: #22c55e;
+  color: #166534;
+}
+
+.docs-callout.info {
+  background-color: #f0f9ff;
+  border-color: #0284c7;
+  color: #075985;
+}
+
+.docs-callout.warning {
+  background-color: #fffbeb;
+  border-color: #f59e0b;
+  color: #92400e;
+}
+
+.docs-callout-header {
+  font-weight: 700;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 底部前后篇导航 (Article Footer Nav) */
+.docs-article-footer {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.docs-footer-nav-card {
+  flex: 1;
+  padding: 16px 20px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+}
+
+.docs-footer-nav-card:hover {
+  border-color: #0284c7;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.08);
+  transform: translateY(-2px);
+}
+
+.docs-footer-nav-direction {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.docs-footer-nav-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0284c7;
+}
+
+/* --------------------------------------------------------------------------
+   5. 右侧本页大纲 (DocsToc / Outline)
+   -------------------------------------------------------------------------- */
+.docs-toc {
+  width: 230px;
+  flex-shrink: 0;
+  height: calc(100vh - 60px);
+  position: sticky;
+  top: 60px;
+  overflow-y: auto;
+  padding: 36px 16px 40px 16px;
+}
+
+.docs-toc-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.docs-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-left: 1px solid #e2e8f0;
+}
+
+.docs-toc-item {
+  margin-bottom: 6px;
+}
+
+.docs-toc-link {
+  display: block;
+  padding: 4px 0 4px 14px;
+  font-size: 13px;
+  color: #64748b;
+  text-decoration: none;
+  line-height: 1.45;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.docs-toc-link:hover {
+  color: #0284c7;
+}
+
+.docs-toc-link.active {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.docs-toc-link.active::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background-color: #0284c7;
+}
+
+.docs-toc-backtop {
+  margin-top: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.docs-toc-backtop:hover {
+  color: #0284c7;
+  background-color: #f1f5f9;
+}
+
+/* --------------------------------------------------------------------------
+   6. 搜索模态弹窗 (DocsSearchModal)
+   -------------------------------------------------------------------------- */
+.docs-search-modal .ant-modal-content {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+}
+
+.docs-search-input-wrapper {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  gap: 12px;
+}
+
+.docs-search-input {
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 16px;
+  color: #0f172a;
+  padding: 0;
+  width: 100%;
+}
+
+.docs-search-input:focus {
+  outline: none;
+}
+
+.docs-search-results-list {
+  max-height: 440px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.docs-search-item {
+  padding: 12px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-bottom: 4px;
+}
+
+.docs-search-item:hover,
+.docs-search-item.selected {
+  background-color: #eff6ff;
+}
+
+.docs-search-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.docs-search-item-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.docs-search-item.selected .docs-search-item-title,
+.docs-search-item:hover .docs-search-item-title {
+  color: #0284c7;
+}
+
+.docs-search-item-category {
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.docs-search-item-snippet {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.docs-search-highlight {
+  color: #0284c7;
+  font-weight: 700;
+  background-color: #dbeafe;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.docs-search-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.docs-search-footer {
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  padding: 10px 20px;
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 响应式断点适配 */
+@media (max-width: 1180px) {
+  .docs-toc {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .docs-sidebar {
+    display: none;
+  }
+  .docs-content-container {
+    padding: 20px 16px;
+  }
+  .docs-header-center {
+    display: none;
+  }
+}
