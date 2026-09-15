@@ -288,14 +288,21 @@ class TemplateRecommendationService:
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """Get most frequently used templates."""
-        # Query task counts by template
+        # Query task counts by template（模板与任务都排除软删除，已删任务不该撑高热度）
         stmt = (
             select(
                 InspectionTemplate,
                 func.count(InspectionTask.id).label("usage_count")
             )
-            .outerjoin(InspectionTask, InspectionTask.template_id == InspectionTemplate.id)
-            .where(InspectionTemplate.is_published == True)
+            .outerjoin(
+                InspectionTask,
+                (InspectionTask.template_id == InspectionTemplate.id)
+                & (InspectionTask.is_deleted == False),  # noqa: E712
+            )
+            .where(
+                InspectionTemplate.is_published == True,
+                InspectionTemplate.is_deleted == False,  # noqa: E712
+            )
             .group_by(InspectionTemplate.id)
             .order_by(func.count(InspectionTask.id).desc())
             .limit(limit)

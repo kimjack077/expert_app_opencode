@@ -392,6 +392,7 @@ async def get_enterprise_risk_profile(
         select(InspectionRecord)
         .where(InspectionRecord.enterprise_id == enterprise_id)
         .where(InspectionRecord.status == "submitted")
+        .where(InspectionRecord.is_deleted == False)  # noqa: E712
         .order_by(desc(InspectionRecord.inspection_date))
         .limit(5)
     )
@@ -458,6 +459,7 @@ async def get_enterprise_risk_profile(
         select(func.count(InspectionRecord.id))
         .where(InspectionRecord.enterprise_id == enterprise_id)
         .where(InspectionRecord.status == "submitted")
+        .where(InspectionRecord.is_deleted == False)  # noqa: E712
     )
     total_records = total_records_result.scalar() or 0
 
@@ -465,6 +467,7 @@ async def get_enterprise_risk_profile(
         select(func.count(InspectionRecord.id))
         .where(InspectionRecord.enterprise_id == enterprise_id)
         .where(InspectionRecord.status == "submitted")
+        .where(InspectionRecord.is_deleted == False)  # noqa: E712
         .where(InspectionRecord.overall_result == "fail")
     )
     fail_records = fail_records_result.scalar() or 0

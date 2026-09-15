@@ -97,8 +97,19 @@ async def get_dashboard(
             c for r, c in record_rows if r in ("na", "not_applicable")
         )
 
-    total_users = (await db.execute(select(func.count(User.id)))).scalar() or 0
-    total_enterprises = (await db.execute(select(func.count(Enterprise.id)))).scalar() or 0
+    # 用户/企业总数只统计未删除记录，与列表页口径一致
+    total_users = (
+        await db.execute(
+            select(func.count(User.id)).where(User.is_deleted == False)  # noqa: E712
+        )
+    ).scalar() or 0
+    total_enterprises = (
+        await db.execute(
+            select(func.count(Enterprise.id)).where(
+                Enterprise.is_deleted == False  # noqa: E712
+            )
+        )
+    ).scalar() or 0
 
     return make_response(
         data={
@@ -246,6 +257,7 @@ async def get_trends(
                 )
                 .where(
                     InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,  # noqa: E712
                     InspectionTask.created_at >= start,
                     InspectionTask.created_at < end,
                 )
@@ -263,6 +275,7 @@ async def get_trends(
                 .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
                 .where(
                     InspectionTask.assigned_to == current_user.id,
+                    InspectionTask.is_deleted == False,  # noqa: E712
                     InspectionTask.created_at >= start,
                     InspectionTask.created_at < end,
                     TaskItemRecord.result.in_(["pass", "fail"]),
@@ -280,6 +293,7 @@ async def get_trends(
                     func.count(InspectionTask.id),
                 )
                 .where(
+                    InspectionTask.is_deleted == False,  # noqa: E712
                     InspectionTask.created_at >= start,
                     InspectionTask.created_at < end,
                 )
@@ -293,7 +307,10 @@ async def get_trends(
                     TaskItemRecord.result,
                     func.count(TaskItemRecord.id),
                 )
+                .select_from(TaskItemRecord)
+                .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
                 .where(
+                    InspectionTask.is_deleted == False,  # noqa: E712
                     TaskItemRecord.result.in_(["pass", "fail"]),
                     TaskItemRecord.recorded_at >= start,
                     TaskItemRecord.recorded_at < end,
@@ -347,22 +364,30 @@ async def get_enterprise_risk(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 风险分布只统计未删除企业，与「企业总库」列表口径一致
+    #（曾有 93 家软删除企业把高风险 2 统计成 7、中风险 6 统计成 94）
+    active = Enterprise.is_deleted == False  # noqa: E712
     high_risk = (
         await db.execute(
-            select(func.count(Enterprise.id)).where(Enterprise.risk_level == "A")
+            select(func.count(Enterprise.id)).where(
+                active, Enterprise.risk_level == "A"
+            )
         )
     ).scalar() or 0
-    
+
     medium_risk = (
         await db.execute(
-            select(func.count(Enterprise.id)).where(Enterprise.risk_level == "B")
+            select(func.count(Enterprise.id)).where(
+                active, Enterprise.risk_level == "B"
+            )
         )
     ).scalar() or 0
-    
+
     low_risk = (
         await db.execute(
             select(func.count(Enterprise.id)).where(
-                Enterprise.risk_level.in_(["C", "D", None])
+                active,
+                Enterprise.risk_level.in_(["C", "D", None]),
             )
         )
     ).scalar() or 0

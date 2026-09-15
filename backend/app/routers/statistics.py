@@ -238,10 +238,19 @@ async def get_nc_distribution(
 
     返回：[{name, value}] 格式的分布数据
     """
-    # 构建基础查询
-    stmt = select(
-        Nonconformity.severity,
-        func.count(Nonconformity.id).label("count"),
+    # 构建基础查询（join 项目表排除软删除项目下的不符合项）
+    stmt = (
+        select(
+            Nonconformity.severity,
+            func.count(Nonconformity.id).label("count"),
+        )
+        .outerjoin(AuditProject, Nonconformity.project_id == AuditProject.id)
+        .where(
+            or_(
+                Nonconformity.project_id.is_(None),
+                AuditProject.is_deleted == False,  # noqa: E712
+            )
+        )
     )
 
     if project_id:
@@ -286,10 +295,19 @@ async def get_nc_by_system(
 
     返回：[{name, value}] 格式的分布数据
     """
-    # 构建基础查询
-    stmt = select(
-        Nonconformity.certification_system,
-        func.count(Nonconformity.id).label("count"),
+    # 构建基础查询（join 项目表排除软删除项目下的不符合项）
+    stmt = (
+        select(
+            Nonconformity.certification_system,
+            func.count(Nonconformity.id).label("count"),
+        )
+        .outerjoin(AuditProject, Nonconformity.project_id == AuditProject.id)
+        .where(
+            or_(
+                Nonconformity.project_id.is_(None),
+                AuditProject.is_deleted == False,  # noqa: E712
+            )
+        )
     )
 
     if project_id:
@@ -337,10 +355,19 @@ async def get_nc_by_clause(
 
     返回：[{clause_no, count}] 格式的排序数据
     """
-    # 构建基础查询
-    stmt = select(
-        Nonconformity.clause_no,
-        func.count(Nonconformity.id).label("count"),
+    # 构建基础查询（join 项目表排除软删除项目下的不符合项）
+    stmt = (
+        select(
+            Nonconformity.clause_no,
+            func.count(Nonconformity.id).label("count"),
+        )
+        .outerjoin(AuditProject, Nonconformity.project_id == AuditProject.id)
+        .where(
+            or_(
+                Nonconformity.project_id.is_(None),
+                AuditProject.is_deleted == False,  # noqa: E712
+            )
+        )
     )
 
     if project_id:
@@ -394,7 +421,7 @@ async def get_nc_trend(
         else:
             month_end = datetime(month_start.year, month_start.month + 1, 1)
 
-        # 查询该月各类不符合项数量
+        # 查询该月各类不符合项数量（join 项目表排除软删除项目下的不符合项）
         stmt = select(
             func.count(Nonconformity.id).label("total"),
             func.count(Nonconformity.id).filter(
@@ -406,10 +433,16 @@ async def get_nc_trend(
             func.count(Nonconformity.id).filter(
                 Nonconformity.severity == "observation"
             ).label("observation"),
+        ).outerjoin(
+            AuditProject, Nonconformity.project_id == AuditProject.id
         ).where(
             and_(
                 Nonconformity.created_at >= month_start,
                 Nonconformity.created_at < month_end,
+                or_(
+                    Nonconformity.project_id.is_(None),
+                    AuditProject.is_deleted == False,  # noqa: E712
+                ),
             )
         )
 
@@ -444,19 +477,34 @@ async def get_auditor_workload(
     # 查询审核员参与的项目数和区域数
     # 使用 CTE 或子查询来处理数组字段
 
-    # 第一步：获取所有审核员及其参与的项目（排除软删除的组员关系）
-    atm_stmt = select(
-        AuditTeamMember.member_id,
-        AuditTeamMember.project_id,
-    ).where(AuditTeamMember.is_deleted == False)  # noqa: E712
+    # 第一步：获取所有审核员及其参与的项目（排除软删除的组员关系与软删除的项目）
+    active_project_ids = select(AuditProject.id).where(
+        AuditProject.is_deleted == False  # noqa: E712
+    ).scalar_subquery()
+
+    atm_stmt = (
+        select(
+            AuditTeamMember.member_id,
+            AuditTeamMember.project_id,
+        )
+        .where(
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+            AuditTeamMember.project_id.in_(active_project_ids),
+        )
+    )
 
     if project_id:
         atm_stmt = atm_stmt.where(AuditTeamMember.project_id == project_id)
 
-    # 第二步：查询开具的不符合项数
+    # 第二步：查询开具的不符合项数（同样排除软删除项目）
     nc_stmt = select(
         Nonconformity.created_by,
         func.count(Nonconformity.id).label("nc_count"),
+    ).where(
+        or_(
+            Nonconformity.project_id.is_(None),
+            Nonconformity.project_id.in_(active_project_ids),
+        )
     )
 
     if project_id:
@@ -492,11 +540,17 @@ async def get_auditor_workload(
             user_areas[row.member_id] = set()
         user_projects[row.member_id].add(row.project_id)
 
-    # 查询审核区域分配（排除软删除的计划项）
-    api_stmt = select(
-        AuditPlanItem.assigned_member_ids,
-        AuditPlanItem.id,
-    ).where(AuditPlanItem.is_deleted == False)  # noqa: E712
+    # 查询审核区域分配（排除软删除的计划项与软删除的项目）
+    api_stmt = (
+        select(
+            AuditPlanItem.assigned_member_ids,
+            AuditPlanItem.id,
+        )
+        .where(
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+            AuditPlanItem.project_id.in_(active_project_ids),
+        )
+    )
 
     if project_id:
         api_stmt = api_stmt.where(AuditPlanItem.project_id == project_id)
@@ -556,19 +610,39 @@ async def get_auditor_ranking(
     users_result = await db.execute(users_stmt)
     users = users_result.scalars().all()
 
-    # 查询审核组成员关系（排除软删除的组员关系）
-    atm_stmt = select(
-        AuditTeamMember.member_id,
-        AuditTeamMember.project_id,
-    ).where(AuditTeamMember.is_deleted == False)  # noqa: E712
+    # 只统计未删除项目（与 workload 同一口径）
+    active_project_ids = select(AuditProject.id).where(
+        AuditProject.is_deleted == False  # noqa: E712
+    ).scalar_subquery()
+
+    # 查询审核组成员关系（排除软删除的组员关系与软删除的项目）
+    atm_stmt = (
+        select(
+            AuditTeamMember.member_id,
+            AuditTeamMember.project_id,
+        )
+        .where(
+            AuditTeamMember.is_deleted == False,  # noqa: E712
+            AuditTeamMember.project_id.in_(active_project_ids),
+        )
+    )
     atm_result = await db.execute(atm_stmt)
     atm_rows = atm_result.all()
 
-    # 查询不符合项开具情况
-    nc_stmt = select(
-        Nonconformity.created_by,
-        func.count(Nonconformity.id).label("nc_count"),
-    ).group_by(Nonconformity.created_by)
+    # 查询不符合项开具情况（同样排除软删除项目）
+    nc_stmt = (
+        select(
+            Nonconformity.created_by,
+            func.count(Nonconformity.id).label("nc_count"),
+        )
+        .where(
+            or_(
+                Nonconformity.project_id.is_(None),
+                Nonconformity.project_id.in_(active_project_ids),
+            )
+        )
+        .group_by(Nonconformity.created_by)
+    )
     nc_result = await db.execute(nc_stmt)
     nc_rows = nc_result.all()
     nc_dict = {row.created_by: row.nc_count for row in nc_rows}
@@ -583,11 +657,17 @@ async def get_auditor_ranking(
             user_areas[row.member_id] = set()
         user_projects[row.member_id].add(row.project_id)
 
-    # 查询审核区域分配（排除软删除的计划项）
-    api_stmt = select(
-        AuditPlanItem.assigned_member_ids,
-        AuditPlanItem.id,
-    ).where(AuditPlanItem.is_deleted == False)  # noqa: E712
+    # 查询审核区域分配（排除软删除的计划项与软删除的项目）
+    api_stmt = (
+        select(
+            AuditPlanItem.assigned_member_ids,
+            AuditPlanItem.id,
+        )
+        .where(
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+            AuditPlanItem.project_id.in_(active_project_ids),
+        )
+    )
     api_result = await db.execute(api_stmt)
     api_rows = api_result.all()
 
