@@ -251,3 +251,5 @@ export const DocsSearchModal: React.FC<DocsSearchModalProps> = ({
     </Modal>
   )
 }
+
+export default DocsSearchModal

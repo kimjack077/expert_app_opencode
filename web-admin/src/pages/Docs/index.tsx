@@ -94,7 +94,7 @@ export default function DocsPage() {
       <DocsSearchModal
         open={searchModalOpen}
         onClose={() => setSearchModalOpen(false)}
-        onSelectResult={(artId, secId) => handleSelectArticle(artId, secId)}
+        onSelectResult={(artId: string, secId?: string) => handleSelectArticle(artId, secId)}
       />
     </div>
   )
