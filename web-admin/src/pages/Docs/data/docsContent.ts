@@ -30,6 +30,13 @@ export const DOCS_CATEGORIES: DocCategory[] = [
     articles: [],
   },
   {
+    id: 'mobile-app',
+    title: '📱 H5 移动端现场实操',
+    icon: 'MobileOutlined',
+    description: '审核员手机端现场核查、AI 现场会话、证据拍照与弱网离线全攻略',
+    articles: [],
+  },
+  {
     id: 'reports-archive',
     title: '📑 报告生成与归档',
     icon: 'FileDoneOutlined',
@@ -51,13 +58,6 @@ export const DOCS_CATEGORIES: DocCategory[] = [
     articles: [],
   },
   {
-    id: 'mobile-app',
-    title: '📱 移动端 (H5) 现场协同',
-    icon: 'MobileOutlined',
-    description: '审核员手机端现场核查、拍照取证与移动端协同指引',
-    articles: [],
-  },
-  {
     id: 'faq-guide',
     title: '💡 常见问题与操作技巧',
     icon: 'QuestionCircleOutlined',
@@ -67,13 +67,15 @@ export const DOCS_CATEGORIES: DocCategory[] = [
 ]
 
 export const DOCS_ARTICLES: DocArticle[] = [
+  // =========================================================================
   // 1. 快速上手
+  // =========================================================================
   {
     id: 'overview',
     title: '平台概览与核心架构',
     category: 'get-started',
     order: 1,
-    description: '全面了解易审通（EasyAudit）平台定位、业务闭环与技术特点',
+    description: '全面了解易审通（EasyAudit）平台定位、业务闭环与技术架构',
     badge: '必读',
     routeLink: '/dashboard',
     actionText: '进入系统工作台',
@@ -93,8 +95,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
           '🔒 严谨的合规与留痕：严格遵循人在回路（Human-in-the-Loop）机制，所有审核判定与修改全程留痕、可溯源。',
         ],
         image: {
-          src: '/docs-assets/02_web_dashboard.png',
-          caption: '图 1-1：易审通管理后台工作台全局全景',
+          src: '/docs-assets/web_02_dashboard.png',
+          caption: '图 1-1：易审通管理后台工作台全局全景（含 KPI 看板与待办流水线）',
         },
       },
       {
@@ -104,11 +106,11 @@ export const DOCS_ARTICLES: DocArticle[] = [
         content: '系统围绕认证机构三大日常工作场景展开，分为以下核心业务板块：',
         steps: [
           {
-            title: '1. 现场工作域',
-            desc: '包括个人工作台、我的审核任务、日常检查任务执行以及检查记录与报告归档。专为一线审核人员提供聚焦、高效的操作视图。',
+            title: '1. 现场工作域 (PC + H5 手机端)',
+            desc: '包括个人工作台、我的审核任务、日常检查任务执行以及检查记录与报告归档。手机端支持单手核查、拍照取证与 AI 现场会话。',
           },
           {
-            title: '2. 项目管理域',
+            title: '2. 项目管理域 (PC 管理后台)',
             desc: '包括审核项目库（多阶段状态机）、受审核企业档案管理与审核质量大屏统计，满足审核部主任与项目经理把控全局。',
           },
           {
@@ -125,7 +127,7 @@ export const DOCS_ARTICLES: DocArticle[] = [
         callout: {
           type: 'tip',
           title: '推荐使用环境',
-          content: '管理端推荐使用 Google Chrome 110+、Edge 等现代浏览器以获得最佳的数据大屏与富文本编辑体验；现场检查端支持手机任意主流浏览器及微信直接打开。',
+          content: '管理端推荐使用 Google Chrome 110+、Edge 等现代浏览器；现场检查端支持手机微信、钉钉或自带浏览器直接扫码进入。',
         },
       },
     ],
@@ -148,19 +150,19 @@ export const DOCS_ARTICLES: DocArticle[] = [
         id: 'step1-login',
         title: '第 1 步：登录系统与角色选择',
         level: 2,
-        content: '打开系统登录入口，输入账号密码。系统支持管理员、审核组长、专职审核员与评审专家多种身份。不同身份自动适配专属菜单与数据权限。',
+        content: '打开系统登录入口，输入账号密码。系统支持管理员（admin）、专职审核员/评审专家（expert）等多种身份，提供快捷登录卡片：',
         image: {
-          src: '/docs-assets/01_web_login.png',
-          caption: '图 1-2：系统登录界面与快捷身份选择',
+          src: '/docs-assets/web_01_login.png',
+          caption: '图 1-2：系统登录界面与快捷身份选择卡片',
         },
         steps: [
           {
             title: '访问登录页面',
-            desc: '输入已分配的用户名和密码，或在体验环境点击下方的快速身份填充按钮。',
+            desc: '输入用户名和密码，或在体验环境点击「admin / admin123」或「expert / expert123」一键填入。',
           },
           {
-            title: '确认安全验证',
-            desc: '点击「登录」按钮，验证成功后将直接进入「工作台 (Dashboard)」。',
+            title: '点击登录进入系统',
+            desc: '验证成功后将直接进入「工作台 (Dashboard)」，显示您的待办项目与核心数据指标。',
           },
         ],
       },
@@ -170,8 +172,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '在左侧菜单点击「项目管理」➔「审核项目」，点击页面右上角「新建审核项目」：',
         image: {
-          src: '/docs-assets/07_web_audit_projects.png',
-          caption: '图 1-3：审核项目列表与状态概览',
+          src: '/docs-assets/web_04_audit_projects.png',
+          caption: '图 1-3：审核项目中心与多状态项目列表',
         },
         steps: [
           {
@@ -180,7 +182,7 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '设置审核基本参数',
-            desc: '选择审核类型（初审、监督审核、再认证或专项审查）、拟定审核起始日期与结束日期。',
+            desc: '选择审核类型（初审、监督审核、再认证或专项审查）、拟定审核起始日期与结束日期、填写审核工作量（人天）。',
           },
           {
             title: '指派审核组与检查模板',
@@ -194,8 +196,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '项目创建后，进入项目详情页，即可开启现场检查任务：',
         image: {
-          src: '/docs-assets/08_web_project_overview.png',
-          caption: '图 1-4：审核项目详情总览看板',
+          src: '/docs-assets/web_06_project_overview.png',
+          caption: '图 1-4：审核项目详情全景总览看板',
         },
         steps: [
           {
@@ -204,18 +206,13 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '上传实物取证',
-            desc: '点击附件上传按钮，上传现场拍摄的设备标牌、台账照片、检验记录等凭证文件。',
+            desc: '点击证据栏的「上传证据」，上传现场拍摄的设备标牌、台账照片、检验记录等凭证文件。',
           },
           {
             title: '生成并导出报告',
-            desc: '所有检查项完成后，点击「生成审核报告」，系统将自动汇总不符合项、统计得分，并支持导出为标准 Word/PDF 格式。',
+            desc: '所有检查项完成后，点击「生成审核报告」，系统自动汇总不符合项并支持导出为标准 Word/PDF 格式。',
           },
         ],
-        callout: {
-          type: 'tip',
-          title: 'AI 智审小妙招',
-          content: '在填写事实陈述时，若不确定某项违规对应的条款依据，可点击右侧「AI 智审助手」，输入现场情况，AI 将秒级为您匹配最精准的标准条款！',
-        },
       },
     ],
   },
@@ -241,29 +238,20 @@ export const DOCS_ARTICLES: DocArticle[] = [
         keyPoints: [
           '👑 系统超级管理员 (super_admin)：拥有全局最高权限，负责机构账号初始化、系统字典、行业分类、全局审计日志查询及底层配置。',
           '🛡️ 机构管理员 (admin)：负责受审核企业维护、检查模板审批、审核项目立项与人员指派、全机构统计报表查看。',
-          '📋 审核组长 (Lead Auditor)：全面负责指定审核项目的日程编制、审核组成员分工、首末次会议持召、不符合项最终签发与审核报告编制。',
+          '📋 审核组长 (Lead Auditor)：全面负责指定审核项目的日程编制、审核组成员分工、首末次会议主持、不符合项最终签发与审核报告编制。',
           '🔍 专职审核员 / 评审专家 (auditor / expert)：负责分配给自己的专业条款现场检查、事实采集、证据拍照上传、录入判定意见初稿。',
         ],
         image: {
-          src: '/docs-assets/03_web_users.png',
-          caption: '图 1-5：系统用户角色与账号状态管理',
-        },
-      },
-      {
-        id: 'role-switch',
-        title: '权限边界与数据隔离',
-        level: 2,
-        content: '系统实行严格的数据权限隔离机制：普通审核员仅能查看并填报自己被分配的项目与条款，无法擅自更改其他专业组成员的检查结论；审核组长与管理员可全局汇总。',
-        callout: {
-          type: 'info',
-          title: '人在回路审计追踪',
-          content: '所有人员对检查记录、不符合项及报告结论的修改，系统均在后端保留详细的时间戳与修改人日志，确保符合认证认可监督要求。',
+          src: '/docs-assets/web_18_users.png',
+          caption: '图 1-5：系统用户角色体系与账号权限管理',
         },
       },
     ],
   },
 
+  // =========================================================================
   // 2. 审核项目全流程
+  // =========================================================================
   {
     id: 'audit-projects',
     title: '审核项目全流程管理',
@@ -310,7 +298,7 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
         ],
         image: {
-          src: '/docs-assets/08_web_project_overview.png',
+          src: '/docs-assets/web_06_project_overview.png',
           caption: '图 2-1：项目详情总览页与全生命周期各模块导航',
         },
       },
@@ -318,23 +306,23 @@ export const DOCS_ARTICLES: DocArticle[] = [
         id: 'create-project-guide',
         title: '新建审核项目详细操作步骤',
         level: 2,
-        content: '点击页面右上角「新建审核项目」按钮，进入表单填写界面：',
+        content: '点击页面右上角「新建审核项目」按钮，进入项目创建表单：',
+        image: {
+          src: '/docs-assets/web_05_project_create.png',
+          caption: '图 2-2：新建审核项目表单与人天排期配置',
+        },
         steps: [
           {
             title: '填写基本信息',
-            desc: '输入项目编号（支持自动生成）、项目名称（如“2026年XX实业有限公司三体系再认证现场审核”）。',
+            desc: '输入项目名称（如“2026年XX实业有限公司质量体系再认证现场审核”）。',
           },
           {
-            title: '选择企业与认证体系',
-            desc: '选择受审核企业，系统自动联动该企业统一代码与地址；勾选认证类型（QMS质量/EMS环境/OHSMS职业健康安全等）。',
+            title: '选择受审核企业',
+            desc: '选择受审核企业，系统自动回填该企业统一社会信用代码与法定代表人。',
           },
           {
-            title: '设定审核日期与人日',
-            desc: '输入拟定现场审核起始日期、结束日期，设定计划人日数（Auditor-Days）。',
-          },
-          {
-            title: '指派人员与模板',
-            desc: '选择审核组长与参与审核员，选择本项目的基准检查表模板后点击「保存并进入配置」。',
+            title: '设定审核工作量与排期',
+            desc: '填写审核工作量（人天）、现场起止日期。系统严格校验起止时间的合理性。',
           },
         ],
       },
@@ -360,13 +348,13 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '审核计划支持按天、按时间段进行网格化拆解，包括首末次会议、最高管理层访谈、车间现场巡视及各职能部门审核：',
         image: {
-          src: '/docs-assets/09_web_project_plan.png',
-          caption: '图 2-2：审核计划编制与日程甘特视图',
+          src: '/docs-assets/web_08_project_plan.png',
+          caption: '图 2-3：审核计划编制与日程排期视图',
         },
         steps: [
           {
             title: '添加日程时间段',
-            desc: '设定日期（如第一天上午 09:00 - 11:30），选择受审核部门（如生产部、品质保证部、技术研发部）。',
+            desc: '设定日期与时段（如 09:00 - 11:30），选择受审核部门（如生产部、质保部、技术部）。',
           },
           {
             title: '明确审核内容与适用条款',
@@ -374,20 +362,9 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '指定执行审核员',
-            desc: '将该日程条目分配给对应专业的审核员，被分配审核员手机端将即时收到通知。',
+            desc: '将日程分配给对应专业的审核员，被指派审核员在手机端及个人工作台将即时收到任务。',
           },
         ],
-      },
-      {
-        id: 'ai-plan-generation',
-        title: '使用 AI 智能辅助生成计划',
-        level: 2,
-        content: '手动排期耗时费力？点击右上角「AI 辅助生成计划」，提供企业所属行业和认证体系，AI 助手将根据标准人日规范与行业特性，秒级生成符合 CNAS 准则的完整审核排期草案！',
-        callout: {
-          type: 'tip',
-          title: '计划下发提醒',
-          content: '计划编制完成后，点击「发布并通知审核组」，各审核人员在自己的工作台和手机端即可查阅自己的具体排班。',
-        },
       },
     ],
   },
@@ -403,16 +380,16 @@ export const DOCS_ARTICLES: DocArticle[] = [
     updatedAt: '2026-09-15',
     author: '易审通产品团队',
     keywords: ['审核组', '首末次会议', '签到表', '会议纪要', '专家分工'],
-    intro: '首次会议与末次会议是认证审核现场的重要法律与规范程序。易审通实现了会议签到、议程记录与纪要文档的一键归档。',
+    intro: '首次会议与末次会议是认证审核现场的重要法定与规范程序。易审通实现了会议签到、议程记录与纪要文档的一键归档。',
     sections: [
       {
         id: 'team-management',
         title: '审核组团队配置与资质确认',
         level: 2,
-        content: '进入项目「团队配置」标签页，可查看与维护审核组长、专职审核员、技术专家及实习审核员名单，系统自动校验专业代码覆盖合规性。',
+        content: '进入项目「团队配置」标签页，可查看与维护审核组长、专职审核员、技术专家及实习审核员名单：',
         image: {
-          src: '/docs-assets/09_web_project_team.png',
-          caption: '图 2-3：审核组成员名单与专业资质核验',
+          src: '/docs-assets/web_07_project_team.png',
+          caption: '图 2-4：审核组成员名单与专业分工',
         },
       },
       {
@@ -421,8 +398,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '进入「会议管理」板块，系统为首次会议与末次会议分别设立标准化卡片：',
         image: {
-          src: '/docs-assets/13_web_project_meetings.png',
-          caption: '图 2-4：首末次会议纪要与签到记录管理',
+          src: '/docs-assets/web_09_project_meetings.png',
+          caption: '图 2-5：首末次会议记录、参会名单与签到表存证',
         },
         steps: [
           {
@@ -435,7 +412,7 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '上传现场签到表与照片',
-            desc: '支持拍照上传双方亲笔签字的纸质签到表原件与会议全景照片，生成数字存证档案。',
+            desc: '拍照上传双方亲笔签字的纸质签到表原件与会议全景照片，生成数字存证档案。',
           },
         ],
       },
@@ -461,8 +438,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '每一份合规的不符合项报告都必须包含「三段论」原则：明确的不符合事实、违反的标准条款以及证据支撑。',
         image: {
-          src: '/docs-assets/14_web_project_nonconformities.png',
-          caption: '图 2-5：不符合项列表、等级分布与整改跟踪',
+          src: '/docs-assets/web_12_nonconformities.png',
+          caption: '图 2-6：不符合项列表、严重等级与整改关闭进度',
         },
         steps: [
           {
@@ -471,7 +448,7 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '规范陈述客观事实',
-            desc: '客观描述何时、何地、何部门抽查了何物，发现了具体什么偏差，避免主观臆测词汇。',
+            desc: '客观描述抽查时间、地点、抽样样本编号、具体偏差事实，避免主观推测。',
           },
           {
             title: '绑定判定标准条款',
@@ -479,16 +456,12 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
         ],
       },
-      {
-        id: 'nc-rectification',
-        title: '整改提交与验证关闭',
-        level: 2,
-        content: '受审核企业需在规定期限（通常为 30-90 天）内完成整改。审核组长在系统中查验企业上传的原因分析报告、纠正措施及整改后照片凭证，确认合格后点击「验证通过，关闭不符合项」。',
-      },
     ],
   },
 
-  // 3. 现场检查与记录采集
+  // =========================================================================
+  // 3. 现场检查与记录采集 (Web端视角)
+  // =========================================================================
   {
     id: 'field-records',
     title: '现场检查表填写与记录采集',
@@ -509,8 +482,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '进入项目的「现场检查记录」界面，左侧展示章节条款大纲树，右侧展示当前条款的具体检查要点与记录卡片：',
         image: {
-          src: '/docs-assets/12_web_project_field_records.png',
-          caption: '图 3-1：现场检查记录填报与条款判定工作台',
+          src: '/docs-assets/web_10_field_records.png',
+          caption: '图 3-1：现场检查记录填报与多媒体凭据库',
         },
         steps: [
           {
@@ -527,20 +500,9 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '挂接现场照片与证据',
-            desc: '点击证据栏的「上传证据」，上传拍摄的照片或扫描件，支持添加文字说明（如“现场危险化学品无MSDS标识”）。',
+            desc: '点击证据栏的「上传证据」，上传拍摄的照片或扫描件，支持添加文字说明。',
           },
         ],
-      },
-      {
-        id: 'offline-sync',
-        title: '自动保存与草稿恢复',
-        level: 2,
-        content: '系统具备前台防丢机制，每录入一段文字或修改判定状态，均会自动在后台与本地存储双向暂存，即使意外刷新或断网也不会丢失已填写的宝贵记录。',
-        callout: {
-          type: 'tip',
-          title: '事实描述规范小贴士',
-          content: '好的审核记录应当“有据可查、有数可考”：建议明确写出抽查的记录名称及编号（如《进货检验记录》Lot-20260312，抽查5批，合格5批）。',
-        },
       },
     ],
   },
@@ -564,28 +526,26 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '登录系统后，点击左侧菜单「现场工作」➔「我的审核任务」：',
         image: {
-          src: '/docs-assets/19_h5_tasks_list.png',
-          caption: '图 3-2：审核员专属待执行任务列表',
+          src: '/docs-assets/web_03_my_tasks.png',
+          caption: '图 3-2：审核员个人工作台与分配检查任务清单',
         },
         steps: [
           {
             title: '查看任务卡片',
-            desc: '清晰显示项目名称、受审核企业、审核日期区间、本人在项目中的角色（组长/组员）及待检查项进度（如 12/28 项）。',
+            desc: '清晰显示项目名称、受审核企业、审核日期区间、本人在项目中的角色及待检查项进度。',
           },
           {
             title: '一键「继续执行」',
-            desc: '点击任务卡片上的「开始现场检查」或「继续填报」，直接穿透定位到上次填写的最后一个未完成检查项。',
-          },
-          {
-            title: '提交审核初稿',
-            desc: '本人负责的所有条款检查完成后，点击「提交组长复核」，将记录合并入项目主报告。',
+            desc: '点击卡片上的操作按钮，直接穿透定位到上次填写的检查项位置。',
           },
         ],
       },
     ],
   },
 
+  // =========================================================================
   // 4. AI 智审助手
+  // =========================================================================
   {
     id: 'ai-agent',
     title: 'AI Agent 智审助手与智能协同',
@@ -602,47 +562,267 @@ export const DOCS_ARTICLES: DocArticle[] = [
     sections: [
       {
         id: 'agent-capabilities',
-        title: 'AI 智审助手的四大核心本领',
+        title: 'AI 智审助手的核心能力',
         level: 2,
-        content: '点击系统右上角或右侧悬浮的「AI 智审助手」展开侧边会话面板，支持以下专业能力：',
+        content: '点击系统右上角或右侧悬浮的「智审 Agent」展开侧边会话面板，支持全方位交互协同：',
         image: {
-          src: '/docs-assets/11_web_project_ai_agent.png',
-          caption: '图 4-1：AI 智审助手侧边协同工作台与上下文交互',
+          src: '/docs-assets/web_11_ai_agent.png',
+          caption: '图 4-1：智审 Agent 侧边栏交互面板与 Action Proposal 确认卡',
         },
         steps: [
           {
             title: '1. 标准与法规精准 RAG 检索',
-            desc: '输入自然语言问题（如“企业特种作业人员证书过期未复审违反哪个条款？”），AI 基于底层知识库秒级定位标准原文条款（如 GB/T 19001 7.2 及安全法规）。',
+            desc: '输入自然语言问题，AI 基于底层知识库秒级定位标准原文条款（带文档出处标注）。',
           },
           {
             title: '2. 现场事实智能润色与判词生成',
-            desc: '审核员输入口语化的现场记录，AI 自动重构为符合认证认可机构规范的合规陈述语言，消除主观感彩。',
+            desc: '审核员输入口语化的现场记录，AI 自动重构为符合认证认可机构规范的合规陈述语言。',
           },
           {
-            title: '3. 智能拆解审核大纲与日程',
-            desc: '根据企业生产工艺复杂度和行业危险度，智能推荐现场重点抽样部门与核查抽查样本量。',
-          },
-          {
-            title: '4. 审核报告初稿智能编撰',
-            desc: '一键提取项目全部符合项和不符合项记录，自动总结体系运行有效性评价结论。',
+            title: '3. 现场异常一键生成不符合项草稿',
+            desc: '智能提取事实与依据，生成标准的不符合项卡片，供组长确认签发。',
           },
         ],
-      },
-      {
-        id: 'human-in-the-loop',
-        title: '人在回路（Human-in-the-Loop）安全原则',
-        level: 2,
-        content: '易审通严格遵守国家认证监督法规，AI 绝不越俎代庖直接修改正式数据库。AI 的所有修改建议均以「操作建议卡 (Action Proposal)」的形式呈现，必须经由现场专业审核员点击「确认采纳」后，才正式生效落库。',
         callout: {
           type: 'warning',
-          title: '审核员终审原则',
-          content: 'AI 提供的建议仅作为参考辅助工具，现场审核事实的真实性、判定结论的有效性最终由持证审核组长签署确认并负责。',
+          title: '人在回路（Human-in-the-Loop）安全原则',
+          content: 'AI 生成的所有写入数据库建议均以「操作确认卡 (Action Proposal)」呈现，必须经现场审核人员点击确认后才落库，杜绝大模型幻觉风险。',
         },
       },
     ],
   },
 
-  // 5. 报告生成与归档
+  // =========================================================================
+  // 5. H5 移动端现场实操 (重点扩充！回应用户痛点)
+  // =========================================================================
+  {
+    id: 'h5-overview',
+    title: 'H5 移动端定位与登录指引',
+    category: 'mobile-app',
+    order: 1,
+    description: '专为车间生产线穿梭打造的极简移动作业端',
+    badge: '移动入门',
+    routeLink: '/my-audit-tasks',
+    actionText: '查看我的任务',
+    updatedAt: '2026-09-15',
+    author: '易审通产品团队',
+    keywords: ['H5', '移动端', '手机登录', '车间巡检', '单手操作'],
+    intro: '现场审核往往需要在嘈杂、无电脑桌的车间生产线穿梭，携带笨重笔记本极为不便。易审通提供极致轻便的 H5 移动应用，审核员直接使用手机即可完成当天的所有现场检查任务。',
+    sections: [
+      {
+        id: 'h5-login-steps',
+        title: '手机端扫码与登录',
+        level: 2,
+        content: '使用手机浏览器或微信扫描系统二维码，进入移动端登录页面：',
+        image: {
+          src: '/docs-assets/h5_01_login.png',
+          caption: '图 5-1：H5 移动端登录界面（支持一键选择角色）',
+        },
+        steps: [
+          {
+            title: '进入移动端首页',
+            desc: '访问系统 H5 地址，界面专为手机竖屏比例深度定制，按钮尺寸适合大拇指触控。',
+          },
+          {
+            title: '选择专家身份登录',
+            desc: '输入审核员/专家账号密码，或点击「专家」卡片一键快速填入凭据，点击「登录」。',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'h5-today-audit',
+    title: '今日现场审核与待办看板',
+    category: 'mobile-app',
+    order: 2,
+    description: '手机端首页实时呈现当天现场审核任务卡片与项目信息',
+    badge: '每日现场',
+    routeLink: '/my-audit-tasks',
+    actionText: '查看今日任务',
+    updatedAt: '2026-09-15',
+    author: '易审通产品团队',
+    keywords: ['今日审核', '现场签到', '待办卡片', '审核进度'],
+    intro: '登录成功后，移动端首先呈现「今日审核」专属主页。该页面直观展示审核员当天需要实地奔赴的企业与审核任务。',
+    sections: [
+      {
+        id: 'today-card-breakdown',
+        title: '今日任务卡片要素详解',
+        level: 2,
+        content: '登录进入后的真实「今日现场审核」主页：',
+        image: {
+          src: '/docs-assets/h5_02_today_audit.png',
+          caption: '图 5-2：登录后真实的「今日现场审核」主页卡片',
+        },
+        keyPoints: [
+          '🏢 企业信息：醒目展示受审核企业全称（如“山东盛发焦化有限公司”）、所属行业与厂区位置。',
+          '⏱️ 审核排期：显示审核起始与结束日期、审核人日数以及当前项目状态。',
+          '📊 现场完成率：直观进度环呈现本人负责检查项的填报百分比（已评/总项）。',
+          '🚀 快捷进入：点击卡片底部的「开始现场检查」或「进入 AI 智审会话」，一键直达作业界面。',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'h5-tasks-detail',
+    title: '任务列表与条款大纲查看',
+    category: 'mobile-app',
+    order: 3,
+    description: '多状态任务切换、企业概况核对与检查条款大纲',
+    badge: '任务导航',
+    routeLink: '/my-audit-tasks',
+    actionText: '任务清单',
+    updatedAt: '2026-09-15',
+    author: '易审通产品团队',
+    keywords: ['任务列表', '进行中', '已完成', '任务详情', '大纲'],
+    intro: '审核员可能同时参与多个审核项目。移动端「任务」列表支持按阶段分类筛选，并可穿透查看任务详细信息。',
+    sections: [
+      {
+        id: 'tasks-tab-filter',
+        title: '任务列表多状态切换',
+        level: 2,
+        content: '点击底部导航栏「任务」，进入审核任务列表界面：',
+        image: {
+          src: '/docs-assets/h5_03_tasks_list.png',
+          caption: '图 5-3：移动端审核任务列表（支持全部/进行中/已完成筛选）',
+        },
+        steps: [
+          {
+            title: '查看任务卡片状态',
+            desc: '每个卡片清晰标明项目编号、企业名称、指派给本人的区域（如“焦化车间审核单”）与检查项数。',
+          },
+          {
+            title: '点击进入任务详情',
+            desc: '点击卡片即可展开该任务的详细信息视图。',
+          },
+        ],
+      },
+      {
+        id: 'task-detail-view',
+        title: '现场审核任务详情视图',
+        level: 2,
+        content: '任务详情页汇总了本次现场审查的核心信息：',
+        image: {
+          src: '/docs-assets/h5_04_task_detail.png',
+          caption: '图 5-4：现场审核任务详情页（含基本信息与快速执行入口）',
+        },
+        steps: [
+          {
+            title: '核对检查范围与要求',
+            desc: '确认受审核部门、适用体系标准、审核组长姓名及联系方式。',
+          },
+          {
+            title: '一键开始现场检查',
+            desc: '点击屏幕底部的蓝色「开始现场检查」大号按钮，直接进入逐项填报页。',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'h5-ai-session',
+    title: 'H5 现场 AI 智审会话 (重磅核心功能)',
+    category: 'mobile-app',
+    order: 4,
+    description: '现场语音/文字/拍照提交证据、AI 多条款分析、置信度展示与确认卡写入',
+    badge: '现场黑科技',
+    routeLink: '/my-audit-tasks',
+    actionText: '体验现场 AI 审核',
+    updatedAt: '2026-09-15',
+    author: '易审通产品团队',
+    keywords: ['AI 审核会话', '现场语音', '拍照取证', '置信度', '确认卡', 'NC草稿'],
+    intro: '这是易审通最具革命性的现场核查工具！审核员在车间无需手动翻阅几百页的标准规范，直接通过语音口述、输入现场情况或拍摄设备照片发给 AI，智审 Agent 现场完成多条款研判！',
+    sections: [
+      {
+        id: 'ai-session-interface',
+        title: '现场 AI 智审会话界面详解',
+        level: 2,
+        content: '在今日任务或任务详情点击「现场 AI 审核」进入会话交互界面：',
+        image: {
+          src: '/docs-assets/h5_07_ai_audit_session.png',
+          caption: '图 5-5：H5 现场 AI 智审会话（多条款分析、置信度、确认卡与 NC 生成）',
+        },
+        steps: [
+          {
+            title: '1. 提交现场证据 (语音 / 文字 / 照片)',
+            desc: '在底部输入框口述现场发现（如“抽查了配电室，发现 3 具干粉灭火器压力表处于红区，巡检记录未及时更新”），或直接拍照上传。',
+          },
+          {
+            title: '2. AI Agent 多条款智能拆解',
+            desc: 'AI 瞬间检索知识库与标准条款，列出候选条款（如 7.1.3 基础设施、8.1 运行策划和控制），展示证据充分性与置信度百分比（如“置信度 92%”）。',
+          },
+          {
+            title: '3. 审核员查看「人工确认卡」',
+            desc: 'AI 绝不擅自落库。AI 将整理出合规的事实陈述草稿，生成「操作确认卡」。审核员核实无误后点击「确认采纳并写入记录」。',
+          },
+          {
+            title: '4. 现场异常一键生成 NC 草稿',
+            desc: '如果判定为不符合项，点击卡片上的「生成 NC 草稿」，系统自动填写事实与依据，直接推送至审核组长待办中！',
+          },
+        ],
+        callout: {
+          type: 'tip',
+          title: '现场提效秘籍',
+          content: '在噪音较大的车间环境，可使用手机输入法的语音转文字功能快速输入，AI Agent 会自动去除口语杂词，润色为极其严谨专业的标准审核判词！',
+        },
+      },
+    ],
+  },
+  {
+    id: 'h5-records-offline',
+    title: '已填记录追溯与离线弱网指南',
+    category: 'mobile-app',
+    order: 5,
+    description: '审核记录历史版本追溯、离线本地缓存机制与个人中心',
+    badge: '弱网保障',
+    routeLink: '/my-audit-tasks',
+    actionText: '查看记录',
+    updatedAt: '2026-09-15',
+    author: '易审通产品团队',
+    keywords: ['审核记录', '历史版本', '只读保护', '离线存储', '断网可用', '个人中心'],
+    intro: '现场审查结束后，数据需要可靠归档存证。同时，针对钢厂、矿山、密闭车间等信号不良区域，移动端具备完备的弱网离线缓存保障。',
+    sections: [
+      {
+        id: 'records-archive-view',
+        title: '现场审核记录追溯与只读存证',
+        level: 2,
+        content: '点击底部导航栏「记录」，可查阅已完成的现场检查记录单：',
+        image: {
+          src: '/docs-assets/h5_09_records_list.png',
+          caption: '图 5-6：移动端现场检查记录列表与历史版本查询',
+        },
+        steps: [
+          {
+            title: '只读防篡改视图',
+            desc: '已提交的记录进入正式只读保护状态，完整保留当时的填报人、提交时间、客观证据与照片附件。',
+          },
+          {
+            title: '版本演进追溯',
+            desc: '若组长提出复核修改意见，系统保留 V1、V2 演进历史，符合认证认可监督评审要求。',
+          },
+        ],
+      },
+      {
+        id: 'profile-offline-settings',
+        title: '个人中心与离线缓存管理',
+        level: 2,
+        content: '点击底部导航「我的」，进入个人中心：',
+        image: {
+          src: '/docs-assets/h5_12_profile_offline.png',
+          caption: '图 5-7：移动端个人中心与离线缓存/账号设置',
+        },
+        keyPoints: [
+          '📴 离线本地缓存：现场断网时，您填写的客观事实会自动安全保存在手机 LocalStorage 中，页面顶部显示“离线暂存”黄色警示灯。',
+          '🔄 一键批量同步：走出厂房网络恢复后，页面提示“检测到网络，是否同步本地草稿”，点击即可一次性全部同步至云端。',
+          '👤 账号与资质信息：查看当前登录审核员姓名、工号、持证体系与所属认证机构。',
+        ],
+      },
+    ],
+  },
+
+  // =========================================================================
+  // 6. 报告生成与归档
+  // =========================================================================
   {
     id: 'records-reports',
     title: '检查记录汇总与报告导出',
@@ -661,10 +841,10 @@ export const DOCS_ARTICLES: DocArticle[] = [
         id: 'generate-report',
         title: '一键自动生成审核报告',
         level: 2,
-        content: '当所有审核员完成各自的检查条款并提交后，审核组长进入项目详情页：',
+        content: '当所有审核员完成各自的检查条款并提交后，审核组长在「检查记录与报告」模块进行审查：',
         image: {
-          src: '/docs-assets/21_h5_records.png',
-          caption: '图 5-1：检查记录汇总与报告详情预览',
+          src: '/docs-assets/web_13_records_reports.png',
+          caption: '图 6-1：检查记录汇总、报告编制与多格式导出',
         },
         steps: [
           {
@@ -677,14 +857,16 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '预览与多格式导出',
-            desc: '点击「导出报告」，支持导出为精美排版的 PDF 文件或可二次编辑的 DOCX Word 文件，内置标准公文版头与签章区域。',
+            desc: '支持一键导出为精美排版的 PDF 文件或可二次编辑的 DOCX Word 文件，内置标准公文版头与签章区域。',
           },
         ],
       },
     ],
   },
 
-  // 6. 统计分析与看板
+  // =========================================================================
+  // 7. 统计分析与看板
+  // =========================================================================
   {
     id: 'dashboard-guide',
     title: '工作台操作指南与待办中心',
@@ -705,8 +887,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '工作台采用卡片化自适应设计，清晰划分四大视觉区：',
         image: {
-          src: '/docs-assets/02_web_dashboard.png',
-          caption: '图 6-1：易审通管理后台工作台全局布局',
+          src: '/docs-assets/web_02_dashboard.png',
+          caption: '图 7-1：易审通管理后台工作台全局布局与待办流水线',
         },
         steps: [
           {
@@ -715,15 +897,11 @@ export const DOCS_ARTICLES: DocArticle[] = [
           },
           {
             title: '待办事项流水线',
-            desc: '列出急需当前用户处理的节点（如“待您确认的现场检查表”、“待批复的整改报告”），点击直接穿透处理。',
+            desc: '列出急需当前用户处理的节点（如待确认的检查表、待批复的整改报告），点击直接穿透处理。',
           },
           {
-            title: '审核项目状态分布与进度',
-            desc: '以饼图与漏斗图直观呈现各阶段项目数量分布，便于项目经理掌握排期瓶颈。',
-          },
-          {
-            title: '近期审核日历与快捷入口',
-            desc: '日历标出本周至下月的现场审核日程，右侧提供新建项目、新建模板、检索标准的快捷操作按钮。',
+            title: '严格合规率口径说明',
+            desc: '界面显式标注合规率对账口径（已填报合格项 / 已填报项），分子分母剔除不适用与未评项。',
           },
         ],
       },
@@ -749,8 +927,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '进入左侧菜单「基础配置」➔「数据分析」：',
         image: {
-          src: '/docs-assets/16_web_analytics.png',
-          caption: '图 6-2：审核大数据多维统计图表全览',
+          src: '/docs-assets/web_19_analytics.png',
+          caption: '图 7-2：审核大数据多维统计看板与不符合项雷达图',
         },
         steps: [
           {
@@ -770,29 +948,31 @@ export const DOCS_ARTICLES: DocArticle[] = [
     ],
   },
 
-  // 7. 基础配置与知识库
+  // =========================================================================
+  // 8. 基础配置与知识库
+  // =========================================================================
   {
     id: 'templates-guide',
     title: '检查模板设计中心',
     category: 'base-config',
     order: 1,
-    description: '灵活定制多级树状检查表、评分规则与适用行业准则',
+    description: '灵活定制多级树状检查表、评分规则与分类目录防呆机制',
     badge: '标准利器',
     routeLink: '/templates',
     actionText: '前往检查模板',
     updatedAt: '2026-09-15',
     author: '易审通产品团队',
-    keywords: ['检查模板', '模板库', '条款配置', '检查要点', '打分规则'],
+    keywords: ['检查模板', '模板库', '条款配置', '分类目录', '防呆编辑器'],
     intro: '检查模板是现场检查的规范基石。机构管理员可在模板中心创建并维护通用的质量、环境、职业健康体系模板，也可针对特殊行业定制专项评审表。',
     sections: [
       {
         id: 'templates-list',
-        title: '模板库管理与版本控制',
+        title: '模板库管理与条目对账',
         level: 2,
         content: '进入「基础配置」➔「检查模板」，可查看系统内所有通用模板与自定义模板：',
         image: {
-          src: '/docs-assets/04_web_templates.png',
-          caption: '图 7-1：检查模板管理库与设计界面',
+          src: '/docs-assets/web_14_templates.png',
+          caption: '图 8-1：检查模板管理库与条目统计对账列',
         },
         steps: [
           {
@@ -804,12 +984,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
             desc: '支持无限级目录树结构（如第一章：管理职责 ➔ 1.1 方针目标 ➔ 1.1.1 考核落实）。',
           },
           {
-            title: '配置检查要点与判定指南',
-            desc: '为每个条款配置「核查要点」、「推荐抽样方法」、「常见缺陷表象」及对应分值权重。',
-          },
-          {
-            title: '发布与引用',
-            desc: '模板经审核发布后，新建审核项目时即可一键引用并实例化为该项目的现场检查表。',
+            title: '分类目录防呆锁定',
+            desc: '有子项的节点在编辑器中强制锁定为分类目录，隐藏打分项，确保只为活跃叶子项生成填报单。',
           },
         ],
       },
@@ -835,21 +1011,17 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '进入「基础配置」➔「知识库」，界面支持关键词全文检索与分类筛选：',
         image: {
-          src: '/docs-assets/05_web_knowledge.png',
-          caption: '图 7-2：知识库标准检索与文档预览',
+          src: '/docs-assets/web_16_knowledge.png',
+          caption: '图 8-2：知识库标准法规检索与多维度分类筛选',
         },
         steps: [
           {
             title: '快速搜索标准条文',
-            desc: '在顶部搜索栏输入标准号（如“GB/T 19001-2016”）或业务关键词，秒级列出对应条文原文。',
+            desc: '输入标准号（如“GB/T 19001-2016”）或业务关键词，秒级列出对应条文原文。',
           },
           {
             title: '上传机构专属规范',
             desc: '支持上传 PDF、Word、TXT 格式文件，系统后台智能切片并提取关键词索引。',
-          },
-          {
-            title: '直接关联项目审核',
-            desc: '在项目审核过程中，可通过右侧快捷按钮一键从知识库中引用标准原文到事实依据栏。',
           },
         ],
       },
@@ -873,10 +1045,10 @@ export const DOCS_ARTICLES: DocArticle[] = [
         id: 'enterprises-list',
         title: '企业列表与详细档案维护',
         level: 2,
-        content: '进入「项目管理」➔「企业管理」，支持搜索、筛选与批量导入企业数据：',
+        content: '进入「项目管理」➔「企业管理」，支持搜索、筛选与维护企业数据：',
         image: {
-          src: '/docs-assets/06_web_enterprises.png',
-          caption: '图 7-3：受审核企业数据库与客户档案卡片',
+          src: '/docs-assets/web_17_enterprises.png',
+          caption: '图 8-3：受审核企业数据库与客户档案库',
         },
         steps: [
           {
@@ -886,10 +1058,6 @@ export const DOCS_ARTICLES: DocArticle[] = [
           {
             title: '维护生产经营场所信息',
             desc: '若企业存在多个分支厂区或多场所（Multi-site），可在档案中逐一添加多场所地址。',
-          },
-          {
-            title: '穿透查看历史审核记录',
-            desc: '点击任意企业卡片，可一览该企业历年的初审、监督、再认证项目及历史不符合项复查记录。',
           },
         ],
       },
@@ -915,8 +1083,8 @@ export const DOCS_ARTICLES: DocArticle[] = [
         level: 2,
         content: '进入「基础配置」➔「用户管理」，列表支持按姓名、手机号、角色分类检索：',
         image: {
-          src: '/docs-assets/03_web_users.png',
-          caption: '图 7-4：用户账号管理列表与操作弹窗',
+          src: '/docs-assets/web_18_users.png',
+          caption: '图 8-4：用户账号管理列表与操作弹窗',
         },
         steps: [
           {
@@ -927,78 +1095,14 @@ export const DOCS_ARTICLES: DocArticle[] = [
             title: '指派系统角色',
             desc: '选择用户角色（管理员、审核组长、专职审核员或技术专家）。',
           },
-          {
-            title: '账号状态控制',
-            desc: '支持一键启用、冻结或停用离职人员账号，确保认证数据安全。',
-          },
         ],
       },
     ],
   },
 
-  // 8. 移动端 (H5) 现场协同
-  {
-    id: 'h5-mobile',
-    title: '移动端 (H5) 现场审核执行指引',
-    category: 'mobile-app',
-    order: 1,
-    description: '审核员手机端现场核查、拍照取证、今日任务查看全解析',
-    badge: '移动利器',
-    routeLink: '/my-audit-tasks',
-    actionText: '查看我的任务',
-    updatedAt: '2026-09-15',
-    author: '易审通产品团队',
-    keywords: ['移动端', 'H5', '手机审核', '拍照取证', '现场打分'],
-    intro: '现场审核往往需要在车间生产线穿梭，携带笨重笔记本极为不便。易审通提供极致轻便的 H5 移动应用，审核员直接使用手机即可完成当天的所有检查任务。',
-    sections: [
-      {
-        id: 'h5-daily-tasks',
-        title: '手机端「今日审核」与个人任务',
-        level: 2,
-        content: '手机扫描系统二维码或在移动端浏览器访问，登录后直接呈现极简的现场作业界面：',
-        image: {
-          src: '/docs-assets/17_h5_today_audit.png',
-          caption: '图 8-1：移动端「今日审核」任务与待执行项目卡片',
-        },
-        steps: [
-          {
-            title: '查看今日待办',
-            desc: '首页卡片展示今天正在审核的项目名称、企业厂区定位与时间进度。',
-          },
-          {
-            title: '直达检查清单',
-            desc: '点击卡片直接加载分配给本人的检查项列表，支持按条款编号快速检索。',
-          },
-        ],
-      },
-      {
-        id: 'h5-execution',
-        title: '现场拍照与即时判定',
-        level: 2,
-        content: '进入具体检查项后，手机端专为单手操作优化：',
-        image: {
-          src: '/docs-assets/20_h5_inspection_execution.png',
-          caption: '图 8-2：移动端检查项填报与相机实时取证上传',
-        },
-        steps: [
-          {
-            title: '一键选择判定状态',
-            desc: '大号触控按钮快速选择「符合」或「不符合」。',
-          },
-          {
-            title: '调用手机摄像头拍照',
-            desc: '点击相机图标可直接调用手机摄像头拍照取证，支持现场添加文字水印。',
-          },
-          {
-            title: '实时与 PC 端同步',
-            desc: '手机端保存后，办公室或主会场的审核组长在 PC 端可实时刷新看到最新进展，无需等待人工交接。',
-          },
-        ],
-      },
-    ],
-  },
-
+  // =========================================================================
   // 9. 常见问题与操作技巧
+  // =========================================================================
   {
     id: 'faq',
     title: '常见问题答疑与高效使用技巧',
@@ -1014,13 +1118,23 @@ export const DOCS_ARTICLES: DocArticle[] = [
     intro: '汇集审核员与管理专家在使用易审通时最常遇到的疑问与高效操作秘籍，助您快速成为系统熟手。',
     sections: [
       {
+        id: 'online-docs-guide',
+        title: '关于系统内置在线文档的使用',
+        level: 2,
+        content: '随时在系统右上角点击「?」帮助图标或访问 /docs 即可进入本中心：',
+        image: {
+          src: '/docs-assets/web_20_online_docs.png',
+          caption: '图 9-1：系统内置在线文档与操作指南中心全景',
+        },
+      },
+      {
         id: 'faq-troubleshoot',
         title: '高频操作疑难排查',
         level: 2,
         steps: [
           {
             title: 'Q1: 现场网络信号弱或断网，填写的检查数据会丢失吗？',
-            desc: '答：不会。易审通前端具备完善的本地缓存机制。在无网环境下，系统会自动将您填写的客观事实和判定暂存在浏览器本地存储中，并提示“离线暂存中”；网络恢复后点击同步即可无缝上传云端。',
+            desc: '答：绝对不会。易审通前端具备完善的本地缓存机制。在无网环境下，系统会自动将您填写的客观事实和判定暂存在浏览器本地存储中，并提示“离线暂存中”；网络恢复后点击同步即可无缝上传云端。',
           },
           {
             title: 'Q2: 审核报告导出为 Word 或 PDF 格式时出现排版错乱怎么办？',
@@ -1047,11 +1161,6 @@ export const DOCS_ARTICLES: DocArticle[] = [
           '⌨️ 快速唤起 AI 助手：在任意审核页面按下 Alt + A 快速展开 AI 智审侧边栏。',
           '⌨️ 上下条款切换：在检查表填报时，使用 Alt + 方向键 上/下 可快速切换前后检查条款。',
         ],
-        callout: {
-          type: 'tip',
-          title: '需要更多帮助？',
-          content: '如遇到系统 Bug 或有功能改进建议，欢迎随时联系系统管理员或在工作台右下角反馈通道提交工单。',
-        },
       },
     ],
   },
