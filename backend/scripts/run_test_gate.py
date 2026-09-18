@@ -108,6 +108,10 @@ def _run_level(marker: str, verbose: bool) -> tuple[int, float, str]:
 
     # 流式输出：接口层要跑十几分钟，必须能实时看到进度。
     # 同时把全文收进 collected，供后续判定是否基础设施抖动。
+    #
+    # PYTHONUNBUFFERED=1 是必需的：pytest 的进度点输出到管道时会被**块缓冲**，
+    # 不加这个变量就只能等整层跑完才一次性吐出来，流式输出形同虚设。
+    child_env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen(
         cmd,
         cwd=str(BACKEND_DIR),
@@ -116,6 +120,7 @@ def _run_level(marker: str, verbose: bool) -> tuple[int, float, str]:
         stderr=subprocess.STDOUT,
         encoding="utf-8",
         errors="replace",
+        env=child_env,
     )
     assert proc.stdout is not None
     for line in proc.stdout:
