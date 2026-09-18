@@ -60,8 +60,8 @@ export default function RecordInspection() {
       if (res.data?.overall_result) {
         setFinalJudgment(prev => ({ ...prev, result: res.data.overall_result }))
       }
-      if (res.data?.remarks) {
-        setFinalJudgment(prev => ({ ...prev, remarks: res.data.remarks }))
+      if (res.data?.judgment_note) {
+        setFinalJudgment(prev => ({ ...prev, remarks: res.data.judgment_note }))
       }
     } catch (error) {
       console.error('Failed to fetch record:', error)
@@ -92,10 +92,14 @@ export default function RecordInspection() {
       const valueToSend = (field === 'numeric_value' || field === 'score_value') && typeof value === 'number'
         ? String(value)
         : value
-      const res: any = await recordApi.createRecordItem(id, {
+      const payload: any = {
         template_item_id: currentItem.template_item_id,
         [field]: valueToSend,
-      })
+      }
+      if (currentItem.photos && currentItem.photos.length > 0) {
+        payload.photos = currentItem.photos
+      }
+      const res: any = await recordApi.createRecordItem(id, payload)
       const updatedItems = flatItems.map((item, idx) => {
         if (idx === currentIndex) {
           return { ...item, [field]: valueToSend, id: res.data?.id || item.id }
@@ -136,7 +140,7 @@ export default function RecordInspection() {
     try {
       await recordApi.updateRecord(id, {
         overall_result: finalJudgment.result,
-        remarks: finalJudgment.remarks,
+        judgment_note: finalJudgment.remarks,
       })
       message.success('最终判定已保存')
     } catch (error) {
@@ -333,7 +337,7 @@ export default function RecordInspection() {
           // 先保存最终判定
           await recordApi.updateRecord(id, {
             overall_result: finalJudgment.result,
-            remarks: finalJudgment.remarks,
+            judgment_note: finalJudgment.remarks,
           })
           // 再提交
           await recordApi.submitRecord(id)
@@ -455,7 +459,7 @@ export default function RecordInspection() {
             <span style={{ fontSize: 18, fontWeight: 600 }}>{record.enterprise_name}</span>
             <Tag color="blue">{record.template?.name}</Tag>
             <Tag color={record.status === 'submitted' ? 'success' : 'warning'}>
-              {record.status === 'submitted' ? '已提交' : '草稿'}
+              {record.status === 'submitted' ? '已检查' : '草稿'}
             </Tag>
           </Space>
           <Progress

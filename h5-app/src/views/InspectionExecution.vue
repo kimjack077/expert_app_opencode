@@ -340,7 +340,7 @@
           </div>
 
           <van-field
-            v-model="finalJudgment.remarks"
+            v-model="finalJudgment.judgmentNote"
             type="textarea"
             rows="4"
             placeholder="请输入判定说明（如有问题请详细描述）..."
@@ -472,7 +472,7 @@ let offlineWriteWarned = false
 
 const finalJudgment = reactive({
   result: '',
-  remarks: ''
+  judgmentNote: ''
 })
 
 const defaultMultiOptions = [
@@ -507,7 +507,7 @@ const resetState = () => {
   quickInputs.value = {}
   loading.value = true
   finalJudgment.result = ''
-  finalJudgment.remarks = ''
+  finalJudgment.judgmentNote = ''
   offlineMode.value = false
   cachedEntry.value = null
   offlineWriteWarned = false
@@ -674,7 +674,7 @@ const isReadonlyMode = computed(() => {
 })
 
 const readonlyStateText = computed(() =>
-  executionMode.value === 'task' ? '该任务已完成' : '该记录已提交'
+  executionMode.value === 'task' ? '该任务已完成' : '该记录已检查'
 )
 
 const canSubmit = computed(() => {
@@ -948,8 +948,11 @@ const applyRecordData = async (data, recordId) => {
   if (data.overall_result) {
     finalJudgment.result = data.overall_result
   }
-  if (data.remarks) {
-    finalJudgment.remarks = data.remarks
+  // 判定说明与「检查备注」是两个字段：判定说明写 judgment_note，
+  // 检查备注（任务/记录创建时填的备注）写 remarks。两者混用会让
+  // H5 填的判定说明显示到 PC 的「检查备注」里，PC 的「判定说明」永远为空。
+  if (data.judgment_note) {
+    finalJudgment.judgmentNote = data.judgment_note
   }
   initExpandedItems()
 
@@ -982,11 +985,11 @@ const onAgentResultApplied = ({ itemId, result, problemDescription }) => {
 
 const onAgentVerdictApplied = ({ verdict, comment }) => {
   finalJudgment.result = verdict
-  finalJudgment.remarks = comment || ''
+  finalJudgment.judgmentNote = comment || ''
 
   if (record.value) {
     record.value.overall_result = verdict
-    record.value.remarks = comment || ''
+    record.value.judgment_note = comment || ''
   }
 }
 
@@ -1649,7 +1652,7 @@ const completeInspection = async () => {
     // 再保存最终判定
     await updateRecord(currentRecordId.value, {
       overall_result: finalJudgment.result,
-      remarks: finalJudgment.remarks,
+      judgment_note: finalJudgment.judgmentNote,
       total_score: totalScore.value
     })
 
@@ -1687,8 +1690,8 @@ const updateTaskStatusAndRemarks = async () => {
             : finalJudgment.result
     remarksParts.push(`最终判定: ${verdictCn}`)
   }
-  if (finalJudgment.remarks) {
-    remarksParts.push(finalJudgment.remarks)
+  if (finalJudgment.judgmentNote) {
+    remarksParts.push(finalJudgment.judgmentNote)
   }
   if (remarksParts.length) {
     await updateTask(currentTaskId.value, {
@@ -1801,7 +1804,7 @@ const acceptAIJudgment = () => {
     finalJudgment.result = aiJudgmentResultType.value
   }
   if (aiJudgmentResult.value) {
-    finalJudgment.remarks = aiJudgmentResult.value
+    finalJudgment.judgmentNote = aiJudgmentResult.value
   }
   clearAIJudgment()
   showSuccessToast('已采纳 AI 建议')

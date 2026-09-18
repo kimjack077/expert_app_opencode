@@ -403,3 +403,100 @@ def test_submitted_record_rejects_item_write(client, auth_headers, guard_fixture
     assert resp.status_code == 409, (
         f"已提交记录仍可写入条目，BUG-12 回归：HTTP {resp.status_code} {resp.text[:200]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 2. 附件持久性 —— 「上传的附件保存后丢失」的直接防线
+# ---------------------------------------------------------------------------
+
+
+def test_saving_result_without_photos_keeps_existing_photos(
+    client, auth_headers, guard_fixture
+):
+    """只提交结果、不带 ``photos`` 字段时，已有附件**必须保留**。
+
+    历史缺陷：``InspectionRecordItemBase.photos`` 原为
+    ``Field(default_factory=list)`` —— 前端省略该字段时 Pydantic 补成 ``[]``，
+    而端点用 ``if value is not None: setattr(...)`` 判空，``[] is not None`` 成立，
+    于是把库里已有附件**覆盖成空**。
+
+    用户看到的是「我每个题目都传了附件，刷新后前两个没了」。
+    实测生产记录：4 个检查项只有 2 个留下附件，正是这个覆盖时序造成的。
+
+    修复方式：写侧 schema 的 ``photos`` 默认值改为 ``None``，
+    让「未提供」与「显式清空」在语义上分开。
+    """
+    record_id = guard_fixture["record_id"]
+    item_id = guard_fixture["radio_item"]
+    photo = "/uploads/inspections/E2E_TEST_keep_me.jpg"
+
+    _post_item(
+        client,
+        auth_headers,
+        record_id,
+        {"template_item_id": item_id, "photos": [photo]},
+    )
+
+    # ★ 关键动作：只提交结果，完全不带 photos（旧客户端的真实行为）
+    _post_item(
+        client,
+        auth_headers,
+        record_id,
+        {"template_item_id": item_id, "radio_value": "pass"},
+    )
+
+    data = _data(
+        client.get(f"/api/records/{record_id}", headers=auth_headers)
+    )
+    item = next(i for i in data["items"] if i["template_item_id"] == item_id)
+    assert item["photos"] == [photo], (
+        "省略 photos 字段的写入把已有附件清空了 —— "
+        "这是「上传附件后丢失」的根因回归。"
+        f"当前 photos={item['photos']!r}"
+    )
+
+
+def test_explicit_empty_photos_still_clears(client, auth_headers, guard_fixture):
+    """显式传 ``photos: []`` 仍然要能清空 —— 修默认值时不能把「用户删除附件」堵死。
+
+    与上一条是一对：``None`` = 不改动，``[]`` = 清空。两者语义必须分开。
+    """
+    record_id = guard_fixture["record_id"]
+    item_id = guard_fixture["radio_item"]
+
+    _post_item(
+        client,
+        auth_headers,
+        record_id,
+        {"template_item_id": item_id, "photos": ["/uploads/inspections/E2E_TEST_a.jpg"]},
+    )
+    _post_item(
+        client,
+        auth_headers,
+        record_id,
+        {"template_item_id": item_id, "photos": []},
+    )
+
+    data = _data(client.get(f"/api/records/{record_id}", headers=auth_headers))
+    item = next(i for i in data["items"] if i["template_item_id"] == item_id)
+    assert not item["photos"], (
+        f"显式传 photos=[] 未能清空附件，用户删不掉已上传的附件：{item['photos']!r}"
+    )
+
+
+def test_record_detail_exposes_photos_for_every_item(client, auth_headers, guard_fixture):
+    """``GET /records/{id}`` 必须为每个检查项返回 ``photos`` 字段。
+
+    前端据此渲染附件缩略图，并用 ``item.photos`` 做「必传附件」提交校验。
+    字段缺失时两者同时失效：缩略图不显示，且校验恒报"缺附件"。
+    """
+    data = _data(
+        client.get(f"/api/records/{guard_fixture['record_id']}", headers=auth_headers)
+    )
+    assert data["items"], "记录没有任何检查项，用例前提不成立"
+    for item in data["items"]:
+        assert "photos" in item, f"检查项 {item.get('item_title')!r} 未返回 photos 字段"
+        assert isinstance(item["photos"], list), (
+            f"photos 应为列表，实际为 {type(item['photos']).__name__} —— "
+            "前端 .length 判断会失效"
+        )

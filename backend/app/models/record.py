@@ -55,6 +55,7 @@ class InspectionRecord(Base, SoftDeleteMixin):
     overall_result = Column(String(20), comment="总体结论")
     total_score = Column(Numeric, comment="检查总分")
     remarks = Column(Text, comment="备注")
+    judgment_note = Column(Text, nullable=True, comment="判定说明")
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

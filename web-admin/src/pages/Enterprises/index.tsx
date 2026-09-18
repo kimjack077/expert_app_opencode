@@ -64,19 +64,39 @@ export default function Enterprises() {
 
   const handleCreate = async (values: any) => {
     try {
+      // 清理表单数据：将所有空字符串或全是空白的字段转换为 undefined，避免传给后端导致 422 或 409
+      const cleanedValues: any = {}
+      for (const [key, val] of Object.entries(values)) {
+        if (typeof val === 'string') {
+          const trimmed = val.trim()
+          cleanedValues[key] = trimmed !== '' ? trimmed : undefined
+        } else {
+          cleanedValues[key] = val
+        }
+      }
+      if (cleanedValues.longitude !== undefined && cleanedValues.longitude !== null) {
+        const num = parseFloat(cleanedValues.longitude)
+        cleanedValues.longitude = isNaN(num) ? undefined : num
+      }
+      if (cleanedValues.latitude !== undefined && cleanedValues.latitude !== null) {
+        const num = parseFloat(cleanedValues.latitude)
+        cleanedValues.latitude = isNaN(num) ? undefined : num
+      }
+
       if (editingEnterprise) {
-        await enterpriseApi.updateEnterprise(editingEnterprise.id, values)
+        await enterpriseApi.updateEnterprise(editingEnterprise.id, cleanedValues)
         message.success('企业更新成功')
       } else {
-        await enterpriseApi.createEnterprise(values)
+        await enterpriseApi.createEnterprise(cleanedValues)
         message.success('企业创建成功')
       }
       setModalVisible(false)
       setEditingEnterprise(null)
       form.resetFields()
       fetchEnterprises()
-    } catch (error) {
-      message.error(editingEnterprise ? '更新失败' : '创建失败')
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.detail || (editingEnterprise ? '更新失败' : '创建失败')
+      message.error(typeof errorMsg === 'string' ? errorMsg : (editingEnterprise ? '更新失败' : '创建失败'))
     }
   }
 
@@ -426,12 +446,12 @@ export default function Enterprises() {
             </Col>
             <Col span={12}>
               <Form.Item name="longitude" label="经度">
-                <Input placeholder="请输入经度" />
+                <InputNumber style={{ width: '100%' }} step={0.000001} placeholder="请输入经度" />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="latitude" label="纬度">
-                <Input placeholder="请输入纬度" />
+                <InputNumber style={{ width: '100%' }} step={0.000001} placeholder="请输入纬度" />
               </Form.Item>
             </Col>
             <Col span={24}>

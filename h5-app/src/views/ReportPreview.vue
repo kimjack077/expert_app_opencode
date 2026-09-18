@@ -74,7 +74,7 @@
         </div>
         <div class="pass-rate">
           <span>合格率</span>
-          <van-progress :percentage="reportData.statistics.pass_rate" :color="getProgressColor" />
+          <van-progress :percentage="reportData.statistics.pass_rate" :show-pivot="false" :color="getProgressColor" />
           <span class="rate-value">{{ reportData.statistics.pass_rate }}%</span>
         </div>
         <div v-if="reportData.inspection.total_score" class="total-score">
@@ -166,10 +166,7 @@
           <van-icon name="edit" color="#1e40af" />
           {{ reportData.fail_items && reportData.fail_items.length > 0 ? '五' : '四' }}、整改建议
         </div>
-        <div v-if="reportData.inspection.remarks" class="remarks-content">
-          {{ reportData.inspection.remarks }}
-        </div>
-        <div v-else-if="reportData.fail_items && reportData.fail_items.length > 0" class="remarks-content">
+        <div v-if="reportData.fail_items && reportData.fail_items.length > 0" class="remarks-content">
           <template v-if="hasRectificationSuggestions">
             <div v-for="(item, idx) in reportData.fail_items" :key="item.id">
               <div v-if="item.rectification_suggestion" class="rectification-item">
@@ -177,9 +174,7 @@
               </div>
             </div>
           </template>
-          <!-- 有不合格项但未逐项填写整改建议时，必须给默认引导文案。
-               原实现会让区块渲染成空白，用户以为「H5 没有整改建议」（PC 端有兜底文案）。 -->
-          <span v-else>请依据检查发现的不合格项，制定相应整改措施。</span>
+          <span v-else>请依据检查发现的不合格项，制定相应整改措施并按期完成整改复查。</span>
         </div>
         <div v-else class="no-remarks">
           本次检查未发现需要整改的问题。
@@ -198,9 +193,13 @@
               {{ reportData.inspection.overall_result_text }}
             </span>
           </div>
-          <div class="conclusion-row">
-            <span class="conclusion-label">检查日期</span>
-            <span class="conclusion-value">{{ formatDate(reportData.inspection.date) }}</span>
+          <div v-if="reportData.inspection.judgment_note" class="conclusion-row">
+            <span class="conclusion-label">判定说明</span>
+            <span class="conclusion-value">{{ reportData.inspection.judgment_note }}</span>
+          </div>
+          <div v-if="reportData.inspection.remarks" class="conclusion-row">
+            <span class="conclusion-label">检查备注</span>
+            <span class="conclusion-value">{{ reportData.inspection.remarks }}</span>
           </div>
           <div class="conclusion-row">
             <span class="conclusion-label">检查员</span>
@@ -245,7 +244,12 @@ const getProgressColor = computed(() => {
 const formatDate = (dateStr) => {
   if (!dateStr) return '-'
   const date = new Date(dateStr)
-  return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月${String(date.getDate()).padStart(2, '0')}日`
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${d} ${hh}:${mm}`
 }
 
 const formatDateTime = (dateStr) => {
@@ -282,9 +286,7 @@ const getRadioText = (value) => {
 /**
  * 检查项结论的展示文本。
  *
- * 与 PC 端 InspectionReport 同构的三级兜底：判定值 → 数值 → 文本描述。
- * 原实现只读 radio_value，导致「判定型检查项被写入数值/文本」的历史数据
- * 在 H5 上显示为 "-"，而 PC 端能正常显示数值或"已描述"。
+ * 优先判定值 → 数值（带单位）→ 真实文本内容。
  */
 const getItemResultText = (item) => {
   if (item.radio_value) {
@@ -295,7 +297,7 @@ const getItemResultText = (item) => {
     return `${numeric}${item.unit ? ' ' + item.unit : ''}`
   }
   if (item.text_value) {
-    return '已描述'
+    return item.text_value
   }
   return '—'
 }
@@ -525,6 +527,11 @@ onMounted(() => {
   font-size: 13px;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+.pass-rate .van-progress {
+  flex: 1;
+  min-width: 80px;
 }
 
 .rate-value {

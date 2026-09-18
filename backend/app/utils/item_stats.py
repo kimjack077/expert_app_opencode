@@ -156,11 +156,13 @@ def calculate_item_stats(items: Optional[Iterable[Any]]) -> dict:
 
 
 def compliance_rate(stats: dict) -> float:
-    """合规率 = 合格项 /（合格项 + 不合格项）。
+    """合规率 = 合格项 /（总项数 - 不适用项）。
 
-    分子分母均排除「不适用」与「未填写」，与工作台 /api/analytics/dashboard 口径一致。
+    排除「不适用项」，文本/数值等有效项均计入分母，与用户业务规则定义保持一致。
     """
-    rated = stats.get("pass", 0) + stats.get("fail", 0)
-    if rated <= 0:
+    total = stats.get("total", 0)
+    na = stats.get("na", 0)
+    denom = total - na
+    if denom <= 0:
         return 0.0
-    return round(stats["pass"] / rated * 100, 1)
+    return round(stats.get("pass", 0) / denom * 100, 1)

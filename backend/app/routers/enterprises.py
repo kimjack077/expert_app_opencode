@@ -73,10 +73,6 @@ async def get_enterprises(
     if status:
         query = query.where(Enterprise.status == status)
 
-    query = query.order_by(Enterprise.created_at.desc()).offset(skip).limit(limit)
-    result = await db.execute(query)
-    enterprises = result.scalars().all()
-
     total_query = select(func.count(Enterprise.id)).where(Enterprise.is_deleted == False)  # noqa: E712
     if name:
         total_query = total_query.where(Enterprise.name.ilike(f"%{name}%"))
@@ -89,7 +85,20 @@ async def get_enterprises(
     if status:
         total_query = total_query.where(Enterprise.status == status)
 
-    total = (await db.execute(total_query)).scalar()
+    base_query = query.order_by(Enterprise.created_at.desc())
+    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
+    if skip == 0:
+        result = await db.execute(base_query.offset(0).limit(limit + 1))
+        enterprises = list(result.scalars().all())
+        if len(enterprises) <= limit:
+            total = len(enterprises)
+        else:
+            enterprises = enterprises[:limit]
+            total = (await db.execute(total_query)).scalar() or 0
+    else:
+        total = (await db.execute(total_query)).scalar() or 0
+        result = await db.execute(base_query.offset(skip).limit(limit))
+        enterprises = list(result.scalars().all())
 
     return make_response(
         data={

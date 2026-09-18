@@ -172,13 +172,11 @@ export default function NewInspection() {
             <Input placeholder="输入联系人姓名" />
           </Form.Item>
 
-          <Divider orientation="left" orientationMargin="0">备注</Divider>
-
           <Form.Item
             name="remarks"
-            label="备注"
+            label="检查备注"
           >
-            <TextArea rows={3} placeholder="输入备注信息（可选）" />
+            <TextArea rows={3} placeholder="输入检查备注信息（可选）" />
           </Form.Item>
 
           <Form.Item style={{ marginTop: 32 }}>

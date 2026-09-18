@@ -90,6 +90,8 @@ export default function InspectionReport({ open, record, onClose }: Props) {
     )
     const passItems = allCheckItems.filter((item: any) => item.radio_value === 'pass')
     const naItems = allCheckItems.filter((item: any) => item.radio_value === 'na' || item.radio_value === 'not_applicable')
+    const validCount = allCheckItems.length - naItems.length
+    const passRate = validCount > 0 ? Math.round((passItems.length / validCount) * 1000) / 10 : 0
 
     const inspectionDate = record.inspection_date
         ? dayjs(record.inspection_date).format('YYYY年MM月DD日')
@@ -245,17 +247,20 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                         <tbody>
                             {[
                                 ['企业名称', record.enterprise_name || record.enterprise?.name],
-                                ['企业地址', record.enterprise?.address],
+                                ['企业地址', record.enterprise_address || record.enterprise?.address],
                                 ['法定代表人', record.enterprise?.legal_person],
-                                ['联系人', record.enterprise?.contact_person],
-                                ['联系电话', record.enterprise?.contact_phone],
+                                ['联系人', record.contact_person || record.enterprise?.contact_person],
+                                ['联系电话', record.contact_phone || record.enterprise?.contact_phone],
                                 ['行业类型', record.enterprise?.enterprise_type],
                                 ['风险等级', record.enterprise?.risk_level],
                                 ['统一社会信用代码', record.enterprise?.credit_code],
-                            ].filter(([, v]) => v).map(([label, val]) => (
+                            // 企业基本信息是固定字段集，不按空值过滤：
+                            // 过滤掉整行会让「字段缺失」和「字段为空」看起来一样，
+                            // 也与 H5 报告（固定 7 行、空值显示 -）不一致。
+                            ].map(([label, val]) => (
                                 <tr key={label as string}>
-                                    <th style={{ width: '25%', background: '#f0f4ff', border: '1px solid #ccc', padding: '6px 10px', fontWeight: 600, textAlign: 'left' }}>{label}</th>
-                                    <td style={{ border: '1px solid #ccc', padding: '6px 10px' }}>{val || '—'}</td>
+                                     <th style={{ width: '25%', background: '#f0f4ff', border: '1px solid #ccc', padding: '6px 10px', fontWeight: 600, textAlign: 'left' }}>{label}</th>
+                                     <td style={{ border: '1px solid #ccc', padding: '6px 10px' }}>{val || '—'}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -274,9 +279,11 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                 ['模板版本', record.template?.version],
                                 ['检查时间', record.inspection_date ? dayjs(record.inspection_date).format('YYYY-MM-DD HH:mm') : '—'],
                                 ['检查员', inspectorName],
-                                ['记录状态', record.status === 'submitted' ? '已提交' : '草稿'],
+                                ['记录状态', record.status === 'submitted' ? '已检查' : '草稿'],
+                                ['判定说明', record.judgment_note],
+                                ['检查备注', record.remarks],
                                 ['总检查项', `${allCheckItems.length} 项`],
-                            ].map(([label, val]) => (
+                            ].filter(([, v]) => v).map(([label, val]) => (
                                 <tr key={label as string}>
                                     <th style={{ width: '25%', background: '#f0f9ff', border: '1px solid #ccc', padding: '6px 10px', fontWeight: 600, textAlign: 'left' }}>{label}</th>
                                     <td style={{ border: '1px solid #ccc', padding: '6px 10px' }}>{val || '—'}</td>
@@ -292,12 +299,13 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                         三、各检查项结果汇总
                     </div>
                     {/* 统计卡片 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
                         {[
                             { label: '合格', value: passItems.length, color: '#16a34a', bg: '#dcfce7' },
                             { label: '不合格', value: failItems.length, color: '#dc2626', bg: '#fee2e2' },
                             { label: '不适用', value: naItems.length, color: '#6b7280', bg: '#f3f4f6' },
                             { label: '总计', value: allCheckItems.length, color: '#1e40af', bg: '#eff6ff' },
+                            { label: '合格率', value: `${passRate}%`, color: '#7c3aed', bg: '#f5f3ff' },
                         ].map(stat => (
                             <div key={stat.label} style={{ textAlign: 'center', padding: '12px 8px', background: stat.bg, borderRadius: 8 }}>
                                 <div style={{ fontSize: 28, fontWeight: 700, color: stat.color }}>{stat.value}</div>
@@ -366,7 +374,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                                 ) : item.numeric_value !== undefined && item.numeric_value !== null ? (
                                                     <span>{item.numeric_value} {item.unit || ''}</span>
                                                 ) : item.text_value ? (
-                                                    <span style={{ color: '#555' }}>已描述</span>
+                                                    <span style={{ color: '#333' }}>{item.text_value}</span>
                                                 ) : (
                                                     <span style={{ color: '#bbb' }}>—</span>
                                                 )}
@@ -378,6 +386,22 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                             )}
                                             <td style={{ border: '1px solid #dde3ed', padding: '6px 8px', color: '#555', fontSize: 11 }}>
                                                 {item.problem_description || '—'}
+                                                {item.photos && item.photos.length > 0 && radioVal !== 'fail' && (
+                                                    <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                                                        {item.photos.map((url: string, pi: number) => {
+                                                            const src = normalizeUrl(url)
+                                                            return (
+                                                                <img
+                                                                    key={pi}
+                                                                    src={src}
+                                                                    alt={`附件照片-${pi + 1}`}
+                                                                    style={{ width: 28, height: 28, objectFit: 'cover', borderRadius: 4, border: '1px solid #ddd', cursor: 'pointer' }}
+                                                                    onClick={() => window.open(src, '_blank')}
+                                                                />
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
                                             </td>
                                         </tr>
                                     </Fragment>
@@ -442,11 +466,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                     <div className="section-title" style={{ fontSize: 15, fontWeight: 700, borderLeft: '4px solid #d97706', paddingLeft: 10, marginBottom: 12, color: '#d97706' }}>
                         {failItems.length > 0 ? '五' : '四'}、整改建议
                     </div>
-                    {record.remarks ? (
-                        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', fontSize: 13, color: '#78350f', lineHeight: 1.8 }}>
-                            {record.remarks}
-                        </div>
-                    ) : failItems.length > 0 ? (
+                    {failItems.length > 0 ? (
                         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '12px 14px', fontSize: 13, color: '#78350f', lineHeight: 1.8 }}>
                             {failItems.map((item: any, idx: number) => (
                                 item.rectification_suggestion && (
@@ -456,7 +476,7 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                                 )
                             ))}
                             {failItems.every((item: any) => !item.rectification_suggestion) && (
-                                <span style={{ color: '#9ca3af' }}>请依据检查发现的不合格项，制定相应整改措施。</span>
+                                <span style={{ color: '#9ca3af' }}>请依据检查发现的不合格项，制定相应整改措施并按期完成整改复查。</span>
                             )}
                         </div>
                     ) : (

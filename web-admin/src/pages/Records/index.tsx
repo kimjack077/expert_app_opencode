@@ -316,7 +316,7 @@ export default function Records() {
   const getStatusTag = (status: string) => {
     const statusMap: Record<string, { color: string; text: string }> = {
       draft: { color: 'default', text: '草稿' },
-      submitted: { color: 'success', text: '已提交' },
+      submitted: { color: 'success', text: '已检查' },
     }
     const item = statusMap[status] || { color: 'default', text: status }
     return <Tag color={item.color}>{item.text}</Tag>
@@ -555,7 +555,7 @@ export default function Records() {
                       allowClear
                       options={[
                         { value: 'draft', label: '草稿' },
-                        { value: 'submitted', label: '已提交' },
+                        { value: 'submitted', label: '已检查' },
                       ]}
                     />
                   </Form.Item>
@@ -710,7 +710,7 @@ export default function Records() {
                 marginBottom: 16,
               }}>
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: '#333' }}>检查结果汇总</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
                   <div style={{ textAlign: 'center', padding: 12, background: '#f6ffed', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#52c41a' }}>{selectedRecord.stats.pass}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>符合项</div>
@@ -727,12 +727,20 @@ export default function Records() {
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#1890ff' }}>{selectedRecord.stats.total}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>总检查项</div>
                   </div>
+                  <div style={{ textAlign: 'center', padding: 12, background: '#f9f0ff', borderRadius: 8 }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#722ed1' }}>
+                      {selectedRecord.stats.total - selectedRecord.stats.na > 0
+                        ? `${Math.round((selectedRecord.stats.pass / (selectedRecord.stats.total - selectedRecord.stats.na)) * 1000) / 10}%`
+                        : '0%'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>合格率</div>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* 判定说明 - 如果有 */}
-            {selectedRecord.remarks && (
+            {selectedRecord.judgment_note && (
               <div style={{
                 background: '#fffbe6',
                 border: '1px solid #ffe58f',
@@ -742,6 +750,21 @@ export default function Records() {
                 fontSize: 13,
               }}>
                 <span style={{ color: '#d48806', fontWeight: 500, marginRight: 8 }}>判定说明：</span>
+                <span style={{ color: '#666' }}>{selectedRecord.judgment_note}</span>
+              </div>
+            )}
+
+            {/* 检查备注 - 如果有 */}
+            {selectedRecord.remarks && (
+              <div style={{
+                background: '#f0f5ff',
+                border: '1px solid #adc6ff',
+                padding: '8px 12px',
+                borderRadius: 6,
+                marginBottom: 16,
+                fontSize: 13,
+              }}>
+                <span style={{ color: '#1d39c4', fontWeight: 500, marginRight: 8 }}>检查备注：</span>
                 <span style={{ color: '#666' }}>{selectedRecord.remarks}</span>
               </div>
             )}

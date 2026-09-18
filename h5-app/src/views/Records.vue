@@ -181,7 +181,7 @@ const pageSize = 10
 const filterTabs = [
   { label: '全部', value: 'all' },
   { label: '草稿', value: 'draft' },
-  { label: '已提交', value: 'submitted' },
+  { label: '已检查', value: 'submitted' },
 ]
 
 const resultCounts = computed(() => {
@@ -211,7 +211,7 @@ const filteredRecords = computed(() => {
 const getStatusText = (status) => {
   const texts = {
     'draft': '草稿',
-    'submitted': '已提交',
+    'submitted': '已检查',
   }
   return texts[status] || status
 }

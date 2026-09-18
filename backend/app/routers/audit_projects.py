@@ -10,9 +10,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import select, and_, or_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from app.database import get_db
 from app.services.project_access_service import (
@@ -34,6 +34,7 @@ from app.models.audit_project import (
     CommunicationMeeting,
 )
 from app.models.task import InspectionTask, TaskItemRecord
+from app.models.record import InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.user import User
 from app.models.enterprise import Enterprise
@@ -127,6 +128,8 @@ def _task_progress_fields(
     record: AuditAreaRecord | None = None,
     nonconformities: list[Nonconformity] | None = None,
     template_item_count: int = 0,
+    confirmed_record_count: int | None = None,
+    record_exceptions: int | None = None,
 ) -> dict[str, Any]:
     """Build auditor-facing progress from the latest formal area record."""
 
@@ -139,8 +142,16 @@ def _task_progress_fields(
             clause_keys.add(clause)
     total_clause_count = int(template_item_count or 0) or len(clause_keys)
 
-    record_items = list(getattr(record, "items", None) or [])
-    confirmed_record_count = len(record_items)
+    if confirmed_record_count is None or record_exceptions is None:
+        record_items = list(getattr(record, "items", None) or [])
+        if confirmed_record_count is None:
+            confirmed_record_count = len(record_items)
+        if record_exceptions is None:
+            record_exceptions = sum(
+                1 for item in record_items
+                if str(getattr(item, "evaluation_3level", "") or "") == "3"
+            )
+
     completion_rate = (
         round(min(100, confirmed_record_count / total_clause_count * 100), 2)
         if total_clause_count
@@ -155,10 +166,6 @@ def _task_progress_fields(
         nc for nc in formal_ncs
         if str(getattr(nc, "status", "") or "") != "closed"
     ]
-    record_exceptions = sum(
-        1 for item in record_items
-        if str(getattr(item, "evaluation_3level", "") or "") == "3"
-    )
     return {
         "total_clause_count": total_clause_count,
         "confirmed_record_count": confirmed_record_count,
@@ -255,19 +262,37 @@ async def list_audit_projects(
             )
         )
 
-    total = (
-        await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
-    ).scalar() or 0
-
-    query = (
-        select(AuditProject)
-        .where(and_(*conditions))
-        .order_by(AuditProject.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
-    result = await db.execute(query)
-    projects = result.scalars().all()
+    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total = len(items)，免去额外的 COUNT(*) 往返
+    if skip == 0:
+        query = (
+            select(AuditProject)
+            .where(and_(*conditions))
+            .order_by(AuditProject.created_at.desc())
+            .offset(0)
+            .limit(limit + 1)
+        )
+        result = await db.execute(query)
+        projects = list(result.scalars().all())
+        if len(projects) <= limit:
+            total = len(projects)
+        else:
+            projects = projects[:limit]
+            total = (
+                await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
+            ).scalar() or 0
+    else:
+        total = (
+            await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
+        ).scalar() or 0
+        query = (
+            select(AuditProject)
+            .where(and_(*conditions))
+            .order_by(AuditProject.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await db.execute(query)
+        projects = list(result.scalars().all())
 
     return make_response(
         {"items": jsonable_encoder(projects), "total": total}
@@ -294,9 +319,13 @@ async def get_my_audit_tasks(
     （ensure_project_access → get_project_or_404，带 is_deleted 过滤）会返回 404，
     用户看到的是「查看结果报错」而不是「任务已归档」。
     """
+    # 优化：通过 joinedload 一次性加载关联的项目与企业，彻底消除后续两次额外查询
     query = (
         select(AuditPlanItem)
         .join(AuditProject, AuditProject.id == AuditPlanItem.project_id)
+        .options(
+            joinedload(AuditPlanItem.project).joinedload(AuditProject.enterprise)
+        )
         .where(
             AuditPlanItem.assigned_member_ids.contains([current_user.id]),
             AuditPlanItem.is_deleted == False,  # noqa: E712
@@ -316,38 +345,41 @@ async def get_my_audit_tasks(
     result = await db.execute(query)
     plan_items = result.scalars().all()
 
-    # 批量加载项目与企业，避免 N+1
-    project_ids = {item.project_id for item in plan_items if item.project_id}
-    projects_by_id = {}
-    enterprises_by_id = {}
-    if project_ids:
-        projects = (
-            await db.execute(select(AuditProject).where(AuditProject.id.in_(project_ids)))
-        ).scalars().all()
-        projects_by_id = {p.id: p for p in projects}
-        enterprise_ids = {p.enterprise_id for p in projects if p.enterprise_id}
-        if enterprise_ids:
-            enterprises = (
-                await db.execute(select(Enterprise).where(Enterprise.id.in_(enterprise_ids)))
-            ).scalars().all()
-            enterprises_by_id = {e.id: e for e in enterprises}
-
-    plan_item_ids = {item.id for item in plan_items}
+    plan_item_ids = [item.id for item in plan_items if item.id]
     latest_records_by_plan: dict[UUID, AuditAreaRecord] = {}
+    record_stats_by_id: dict[UUID, tuple[int, int]] = {}
     nonconformities_by_plan: dict[UUID, list[Nonconformity]] = {}
     template_item_counts: dict[UUID, int] = {}
+
     if plan_item_ids:
+        # 查询各计划项关联的最新区域记录（不级联加载海量 items 大字段）
         records = (
             await db.execute(
                 select(AuditAreaRecord)
                 .where(AuditAreaRecord.plan_item_id.in_(plan_item_ids))
-                .options(selectinload(AuditAreaRecord.items))
                 .order_by(AuditAreaRecord.created_at.desc())
             )
-        ).scalars().unique().all()
+        ).scalars().all()
         for record in records:
             if record.plan_item_id:
                 latest_records_by_plan.setdefault(record.plan_item_id, record)
+
+        latest_record_ids = [r.id for r in latest_records_by_plan.values() if r.id]
+        if latest_record_ids:
+            # 单个聚合查询统计各记录的已确认数和异常数，避免将 InspectionRecordItem 全部实例化
+            item_stats_rows = (
+                await db.execute(
+                    select(
+                        InspectionRecordItem.audit_area_record_id,
+                        func.count(InspectionRecordItem.id),
+                        func.count(case((InspectionRecordItem.evaluation_3level == "3", 1))),
+                    )
+                    .where(InspectionRecordItem.audit_area_record_id.in_(latest_record_ids))
+                    .group_by(InspectionRecordItem.audit_area_record_id)
+                )
+            ).all()
+            for r_id, total_cnt, exc_cnt in item_stats_rows:
+                record_stats_by_id[r_id] = (int(total_cnt or 0), int(exc_cnt or 0))
 
         nonconformities = (
             await db.execute(
@@ -361,30 +393,29 @@ async def get_my_audit_tasks(
         template_ids = {item.template_id for item in plan_items if item.template_id}
         if template_ids:
             parent_ids = await load_parent_ids(db, template_ids=template_ids)
-            template_items = (
-                await db.execute(
-                    select(TemplateItem).where(
-                        TemplateItem.template_id.in_(template_ids),
-                        TemplateItem.is_deleted == False,  # noqa: E712
-                        TemplateItem.is_category.is_not(True),
-                    )
+            item_count_query = (
+                select(TemplateItem.template_id, func.count(TemplateItem.id))
+                .where(
+                    TemplateItem.template_id.in_(template_ids),
+                    TemplateItem.is_deleted == False,  # noqa: E712
+                    TemplateItem.is_category.is_not(True),
                 )
-            ).scalars().all()
-            for template_item in template_items:
-                # 检查项数量 = 真正的叶子检查项数，分类目录不计入
-                if is_category_node(template_item, parent_ids):
-                    continue
-                template_item_counts[template_item.template_id] = (
-                    template_item_counts.get(template_item.template_id, 0) + 1
-                )
+            )
+            if parent_ids:
+                item_count_query = item_count_query.where(TemplateItem.id.not_in(parent_ids))
+            item_count_rows = (
+                await db.execute(item_count_query.group_by(TemplateItem.template_id))
+            ).all()
+            for tid, count in item_count_rows:
+                template_item_counts[tid] = int(count or 0)
 
     payload = []
     for item in plan_items:
-        project = projects_by_id.get(item.project_id)
-        enterprise = (
-            enterprises_by_id.get(project.enterprise_id)
-            if project and project.enterprise_id
-            else None
+        project = item.project
+        enterprise = project.enterprise if project else None
+        record = latest_records_by_plan.get(item.id)
+        confirmed_count, record_exceptions = (
+            record_stats_by_id.get(record.id, (0, 0)) if record else (0, 0)
         )
         row = jsonable_encoder(item)
         row.update(
@@ -398,9 +429,11 @@ async def get_my_audit_tasks(
                 ),
                 **_task_progress_fields(
                     item,
-                    latest_records_by_plan.get(item.id),
+                    record,
                     nonconformities_by_plan.get(item.id, []),
                     template_item_counts.get(item.template_id, 0) if item.template_id else 0,
+                    confirmed_record_count=confirmed_count,
+                    record_exceptions=record_exceptions,
                 ),
             }
         )

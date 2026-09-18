@@ -264,7 +264,16 @@ export default function MyAuditTasks() {
       {/* 统计卡片 */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
         <Card variant="borderless"
-          style={{ flex: 1, background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.1) 0%, rgba(100, 116, 139, 0.05) 100%)' }}
+          hoverable
+          onClick={() => setStatusFilter(undefined)}
+          style={{
+            flex: 1,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            border: statusFilter === undefined ? '2px solid var(--primary-color)' : '2px solid transparent',
+            boxShadow: statusFilter === undefined ? '0 4px 12px rgba(99, 102, 241, 0.15)' : undefined,
+            background: 'linear-gradient(135deg, rgba(100, 116, 139, 0.1) 0%, rgba(100, 116, 139, 0.05) 100%)'
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -282,13 +291,22 @@ export default function MyAuditTasks() {
               <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--primary-color)' }}>
                 {stats.total}
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>总任务数</div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>全部任务</div>
             </div>
           </div>
         </Card>
 
         <Card variant="borderless"
-          style={{ flex: 1, background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%)' }}
+          hoverable
+          onClick={() => setStatusFilter(prev => prev === 'pending' ? undefined : 'pending')}
+          style={{
+            flex: 1,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            border: statusFilter === 'pending' ? '2px solid #F59E0B' : '2px solid transparent',
+            boxShadow: statusFilter === 'pending' ? '0 4px 12px rgba(245, 158, 11, 0.2)' : undefined,
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%)'
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -312,7 +330,16 @@ export default function MyAuditTasks() {
         </Card>
 
         <Card variant="borderless"
-          style={{ flex: 1, background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%)' }}
+          hoverable
+          onClick={() => setStatusFilter(prev => prev === 'in_progress' ? undefined : 'in_progress')}
+          style={{
+            flex: 1,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            border: statusFilter === 'in_progress' ? '2px solid #3B82F6' : '2px solid transparent',
+            boxShadow: statusFilter === 'in_progress' ? '0 4px 12px rgba(59, 130, 246, 0.2)' : undefined,
+            background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%)'
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -336,7 +363,16 @@ export default function MyAuditTasks() {
         </Card>
 
         <Card variant="borderless"
-          style={{ flex: 1, background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)' }}
+          hoverable
+          onClick={() => setStatusFilter(prev => prev === 'completed' ? undefined : 'completed')}
+          style={{
+            flex: 1,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            border: statusFilter === 'completed' ? '2px solid #10B981' : '2px solid transparent',
+            boxShadow: statusFilter === 'completed' ? '0 4px 12px rgba(16, 185, 129, 0.2)' : undefined,
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)'
+          }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{

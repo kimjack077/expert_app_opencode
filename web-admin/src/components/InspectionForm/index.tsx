@@ -239,8 +239,10 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           if (res.data?.overall_result) {
             setFinalJudgment((prev) => ({ ...prev, result: res.data.overall_result }))
           }
-          if (res.data?.remarks) {
-            setFinalJudgment((prev) => ({ ...prev, remarks: res.data.remarks }))
+          if (res.data?.judgment_note) {
+            // 「判定说明」与「检查备注」是两个字段：这里必须读 judgment_note。
+            // 读 remarks 会把「新建检查任务时填的备注」灌进判定说明输入框。
+            setFinalJudgment((prev) => ({ ...prev, remarks: res.data.judgment_note }))
           }
           return
         }
@@ -429,7 +431,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       if (!recordId) return
       await recordApi.updateRecord(recordId, {
         overall_result: finalJudgment.result,
-        remarks: finalJudgment.remarks,
+        judgment_note: finalJudgment.remarks,
       })
       message.success('最终判定已保存')
     } catch (error: any) {
@@ -684,7 +686,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
           await recordApi.updateRecord(recordId, {
             overall_result: finalJudgment.result,
-            remarks: finalJudgment.remarks,
+            judgment_note: finalJudgment.remarks,
           })
           await recordApi.submitRecord(recordId)
           message.success('检查记录已提交')
@@ -841,7 +843,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
             <span style={{ fontSize: 18, fontWeight: 600 }}>{record.enterprise_name}</span>
             <Tag color="blue">{record.template?.name}</Tag>
             <Tag color={isCompleted ? 'success' : 'warning'}>
-              {isCompleted ? (isTaskMode ? '已完成（可修改）' : '已提交') : isTaskMode ? '进行中' : '草稿'}
+              {isCompleted ? (isTaskMode ? '已完成（可修改）' : '已检查') : isTaskMode ? '进行中' : '草稿'}
             </Tag>
             {isTaskMode && <Tag color="processing">任务检查</Tag>}
           </Space>

@@ -66,19 +66,29 @@ async def get_tasks(
     if status:
         conditions.append(InspectionTask.status == status)
 
-    query = (
+    base_query = (
         select(InspectionTask)
         .where(*conditions)
         .order_by(InspectionTask.created_at.desc())
-        .offset(skip)
-        .limit(limit)
     )
-    result = await db.execute(query)
-    tasks = result.scalars().all()
 
-    total = (
-        await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
-    ).scalar() or 0
+    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
+    if skip == 0:
+        result = await db.execute(base_query.offset(0).limit(limit + 1))
+        tasks = list(result.scalars().all())
+        if len(tasks) <= limit:
+            total = len(tasks)
+        else:
+            tasks = tasks[:limit]
+            total = (
+                await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
+            ).scalar() or 0
+    else:
+        total = (
+            await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
+        ).scalar() or 0
+        result = await db.execute(base_query.offset(skip).limit(limit))
+        tasks = list(result.scalars().all())
 
     # BUG-05：批量回填审核计划项关联字段（此前列表接口 plan_item_id/audit_project_id 恒为 null，
     # 与详情接口口径不一致），保证 Web / H5 任务卡片能展示所属项目与区域。

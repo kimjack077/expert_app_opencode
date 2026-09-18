@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Literal, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from uuid import UUID
 
 # 风险等级（与前端 Enterprises 表单选项一致）：A级低风险 / B级一般 / C级较高 / D级高风险
@@ -28,6 +28,25 @@ class EnterpriseBase(BaseModel):
     annual_tax: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
 
+    @field_validator(
+        "credit_code", "org_code", "address", "legal_person",
+        "contact_person", "contact_phone", "enterprise_type",
+        "economic_type", "district", "street", "remarks",
+        mode="before"
+    )
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("longitude", "latitude", "employee_count", "annual_output", "annual_tax", mode="before")
+    @classmethod
+    def empty_number_to_none(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
+
 
 class EnterpriseCreate(EnterpriseBase):
     pass
@@ -53,6 +72,25 @@ class EnterpriseUpdate(BaseModel):
     annual_output: Optional[float] = Field(None, ge=0)
     annual_tax: Optional[float] = Field(None, ge=0)
     remarks: Optional[str] = None
+
+    @field_validator(
+        "name", "credit_code", "org_code", "address", "legal_person",
+        "contact_person", "contact_phone", "enterprise_type",
+        "economic_type", "district", "street", "remarks", "risk_level", "status",
+        mode="before"
+    )
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("longitude", "latitude", "employee_count", "annual_output", "annual_tax", mode="before")
+    @classmethod
+    def empty_number_to_none(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
 
 
 class EnterpriseResponse(EnterpriseBase):

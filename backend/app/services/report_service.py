@@ -186,7 +186,70 @@ class ReportService:
           避免历史脏快照里的根节点被当成检查项列进报告；
         - 为每个叶子项注入 `category_name`（最近一级分类目录标题），
           供 PDF 表格分组、/report 接口输出与第三方集成使用（BUG-29）。
+        - 兼容扁平结构（数据库模板快照中的扁平 items，无 children 嵌套但带 parent_id）。
         """
+        # 检查是否全部无嵌套 children 且非空
+        has_nested_children = any(
+            bool(it.get('children') if isinstance(it, dict) else getattr(it, 'children', None))
+            for it in items
+        )
+        if not has_nested_children and items:
+            items_by_id = {}
+            parent_ids = set()
+            for it in items:
+                it_id = str(it.get('id', '') if isinstance(it, dict) else (getattr(it, 'id', '') or ''))
+                it_pid = str(it.get('parent_id', '') if isinstance(it, dict) else (getattr(it, 'parent_id', '') or ''))
+                if it_id:
+                    items_by_id[it_id] = it
+                if it_pid:
+                    parent_ids.add(it_pid)
+
+            result = []
+            for it in items:
+                is_cat = bool(it.get('is_category', False) if isinstance(it, dict) else getattr(it, 'is_category', False))
+                it_id = str(it.get('id', '') if isinstance(it, dict) else (getattr(it, 'id', '') or ''))
+                if is_cat or (it_id and it_id in parent_ids):
+                    continue
+
+                item_dict = it if isinstance(it, dict) else {
+                    'id': str(getattr(it, 'id', '')),
+                    'parent_id': str(getattr(it, 'parent_id', '')) if getattr(it, 'parent_id', None) else None,
+                    'title': getattr(it, 'title', '') or '',
+                    'description': getattr(it, 'description', None),
+                    'check_method': getattr(it, 'check_method', None),
+                    'legal_basis': getattr(it, 'legal_basis', None),
+                    'standard_ref': getattr(it, 'standard_ref', None),
+                    'check_type': getattr(it, 'check_type', None),
+                    'result_type': getattr(it, 'result_type', None),
+                    'result_options': getattr(it, 'result_options', None),
+                    'risk_level': getattr(it, 'risk_level', 'medium'),
+                    'is_category': False,
+                    'sort_order': getattr(it, 'sort_order', 0),
+                    'unit': getattr(it, 'unit', None),
+                    'radio_value': getattr(it, 'radio_value', None),
+                    'score_value': getattr(it, 'score_value', None),
+                    'numeric_value': getattr(it, 'numeric_value', None),
+                    'text_value': getattr(it, 'text_value', None),
+                    'multi_value': getattr(it, 'multi_value', None),
+                    'problem_description': getattr(it, 'problem_description', None),
+                    'rectification_suggestion': getattr(it, 'rectification_suggestion', None),
+                }
+
+                cat_name = ''
+                cur_pid = str(item_dict.get('parent_id') or '')
+                while cur_pid and cur_pid in items_by_id:
+                    parent = items_by_id[cur_pid]
+                    p_title = parent.get('title', '') if isinstance(parent, dict) else getattr(parent, 'title', '')
+                    if p_title:
+                        cat_name = p_title
+                        break
+                    cur_pid = str(parent.get('parent_id', '') if isinstance(parent, dict) else (getattr(parent, 'parent_id', '') or ''))
+
+                item_copy = dict(item_dict)
+                item_copy['category_name'] = cat_name
+                result.append(item_copy)
+            return result
+
         result = []
         for item in items:
             # 兼容字典和 SQLAlchemy 对象
@@ -211,7 +274,12 @@ class ReportService:
                     'risk_level': getattr(item, 'risk_level', 'medium'),
                     'is_category': is_category,
                     'sort_order': getattr(item, 'sort_order', 0),
+                    'unit': getattr(item, 'unit', None),
                     'radio_value': getattr(item, 'radio_value', None),
+                    'score_value': getattr(item, 'score_value', None),
+                    'numeric_value': getattr(item, 'numeric_value', None),
+                    'text_value': getattr(item, 'text_value', None),
+                    'multi_value': getattr(item, 'multi_value', None),
                     'problem_description': getattr(item, 'problem_description', None),
                     'rectification_suggestion': getattr(item, 'rectification_suggestion', None),
                 }
@@ -226,6 +294,64 @@ class ReportService:
                 result.extend(self._flatten_items(children, title or current_category))
         return result
 
+    def _get_merged_items(self, record: InspectionRecord) -> List[Dict[str, Any]]:
+        """获取并合并检查记录中的所有叶子项数据。"""
+        template_items = []
+        if record.template_snapshot and 'items' in record.template_snapshot:
+            template_items = record.template_snapshot['items']
+        elif record.template:
+            template_items = record.template.items if hasattr(record.template, 'items') else []
+        all_items = self._flatten_items(template_items)
+
+        record_items_map = {}
+        record_items = getattr(record, 'items', None) or []
+        for ri in record_items:
+            tid = str(getattr(ri, 'template_item_id', '') or '')
+            if tid:
+                record_items_map[tid] = {
+                    'radio_value': getattr(ri, 'radio_value', None),
+                    'result': getattr(ri, 'result', None),
+                    'result_text': getattr(ri, 'result_text', None),
+                    'problem_description': getattr(ri, 'problem_description', None),
+                    'rectification_suggestion': getattr(ri, 'rectification_suggestion', None),
+                    'score_value': getattr(ri, 'score_value', None),
+                    'numeric_value': getattr(ri, 'numeric_value', None),
+                    'text_value': getattr(ri, 'text_value', None),
+                    'multi_value': getattr(ri, 'multi_value', None),
+                    'audit_evidence': getattr(ri, 'audit_evidence', None),
+                    'audit_findings': getattr(ri, 'audit_findings', None),
+                    'photos': getattr(ri, 'photos', None) or [],
+                }
+
+        for item in all_items:
+            item_id = str(item.get('id', '') or '')
+            if item_id and item_id in record_items_map:
+                ri_data = record_items_map[item_id]
+                effective_result = ri_data.get('radio_value') or ri_data.get('result')
+                if effective_result:
+                    item['radio_value'] = effective_result
+                if ri_data.get('problem_description'):
+                    item['problem_description'] = ri_data['problem_description']
+                if ri_data.get('rectification_suggestion'):
+                    item['rectification_suggestion'] = ri_data['rectification_suggestion']
+                if ri_data.get('result_text'):
+                    item['result_text'] = ri_data['result_text']
+                if ri_data.get('score_value') is not None:
+                    item['score_value'] = ri_data['score_value']
+                if ri_data.get('numeric_value') is not None:
+                    item['numeric_value'] = ri_data['numeric_value']
+                if ri_data.get('text_value') is not None:
+                    item['text_value'] = ri_data['text_value']
+                if ri_data.get('multi_value') is not None:
+                    item['multi_value'] = ri_data['multi_value']
+                if ri_data.get('audit_evidence'):
+                    item['audit_evidence'] = ri_data['audit_evidence']
+                if ri_data.get('audit_findings'):
+                    item['audit_findings'] = ri_data['audit_findings']
+                if ri_data.get('photos'):
+                    item['photos'] = ri_data['photos']
+        return all_items
+
     def _build_cover_page(self, record: InspectionRecord, report_number: str) -> List:
         elements = []
         elements.append(Spacer(1, 60*mm))
@@ -233,7 +359,7 @@ class ReportService:
         elements.append(Spacer(1, 20*mm))
         cover_data = [
             ['报告编号', report_number],
-            ['企业名称', record.enterprise_name or record.enterprise.name if record.enterprise else '-'],
+            ['企业名称', record.enterprise_name or (record.enterprise.name if record.enterprise else '-')],
             ['检查日期', record.inspection_date.strftime('%Y年%m月%d日') if record.inspection_date else '-'],
             ['检查员', record.inspector.full_name or record.inspector.username if record.inspector else '-'],
             ['检查类型', '定期检查'],
@@ -271,27 +397,20 @@ class ReportService:
         elements.append(PageBreak())
         return elements
 
-    def _build_overview_section(self, record: InspectionRecord, template_items: List) -> List:
+    def _build_overview_section(self, record: InspectionRecord, all_items: List) -> List:
         elements = []
         elements.append(Paragraph("一、检查概况", self.styles['SectionTitle']))
-        all_items = self._flatten_items(template_items)
-        # 统计一律走 app.utils.item_stats（唯一口径来源）——
-        # 原先此处自算一套，且 fail 只认 'fail'，导致「导出 PDF」与
-        # 「网页查看报告」（generate_report_data）可能给出不同数字。
         _stats = calculate_item_stats(all_items)
         pass_count = _stats['pass']
         fail_count = _stats['fail']
         na_count = _stats['na']
         total = _stats['total']
         filled_count = _stats['filled']
-        # BUG-04：与报告数据口径一致——占比分母为「已填报项」（排除不适用与未填写）
-        rated_count = pass_count + fail_count
-        pass_rate = round(pass_count / rated_count * 100, 1) if rated_count > 0 else 0
-        fail_rate = round(fail_count / rated_count * 100, 1) if rated_count > 0 else 0
+        pass_rate = compliance_rate(_stats)
         overview_text = f"""
-        本次检查共 {total} 项，其中已填报 {filled_count} 项，未填写 {total - filled_count} 项，结果如下：
-        合格项：{pass_count} 项（占已填报 {pass_rate}%）
-        不合格项：{fail_count} 项（占已填报 {fail_rate}%）
+        本次检查共 {total} 项，其中已填报 {filled_count} 项，未填写 {total - filled_count} 项，合格率 {pass_rate}%。结果如下：
+        合格项：{pass_count} 项
+        不合格项：{fail_count} 项
         不适用项：{na_count} 项
         """
         elements.append(Paragraph(overview_text.replace('\n', '<br/>'), self.styles['CustomBodyText']))
@@ -307,8 +426,8 @@ class ReportService:
         enterprise_data = [
             ['企业名称', record.enterprise_name or (enterprise.name if enterprise else '-')],
             ['企业地址', record.enterprise_address or (enterprise.address if enterprise else '-')],
-            ['联系人', record.contact_person or '-'],
-            ['联系电话', record.contact_phone or '-'],
+            ['联系人', record.contact_person or (enterprise.contact_person if enterprise else None) or '-'],
+            ['联系电话', record.contact_phone or (enterprise.contact_phone if enterprise else None) or '-'],
         ]
         if enterprise:
             enterprise_data.extend([
@@ -331,12 +450,10 @@ class ReportService:
         elements.append(Spacer(1, 5*mm))
         return elements
 
-    def _build_results_section(self, record: InspectionRecord, template_items: List) -> List:
+    def _build_results_section(self, record: InspectionRecord, all_items: List) -> List:
         elements = []
         elements.append(Paragraph("三、检查内容及结果", self.styles['SectionTitle']))
-        all_items = self._flatten_items(template_items)
         table_data = [['序号', '检查项目', '检查结果', '备注']]
-        # BUG-29：按分类目录分组展示（与 Web 端报告预览一致），分类行合并 4 列
         category_rows: List[int] = []
         fail_rows: List[int] = []
         last_category = None
@@ -349,15 +466,27 @@ class ReportService:
                 last_category = category
             item_index += 1
             row_idx = len(table_data)
-            result = self._get_radio_text(item.get('radio_value'))
-            note = item.get('problem_description', '')[:30] if item.get('radio_value') == 'fail' else ''
+
+            res_type = item.get('result_type')
+            if res_type == 'text' or item.get('text_value'):
+                result = str(item.get('text_value') or '-')[:15]
+            elif res_type == 'numeric' or item.get('numeric_value') is not None:
+                val = item.get('numeric_value')
+                unit = item.get('unit') or ''
+                result = f"{val}{unit}" if val is not None else '-'
+            elif res_type == 'score' or item.get('score_value') is not None:
+                result = f"{item.get('score_value')}分" if item.get('score_value') is not None else '-'
+            else:
+                result = self._get_radio_text(item.get('radio_value'))
+
+            note = item.get('problem_description', '')[:30] if classify_result(item.get('radio_value')) == 'fail' else ''
             table_data.append([
                 str(item_index),
                 item.get('title', '-')[:25],
                 result,
                 note[:20] if note else '-',
             ])
-            if item.get('radio_value') == 'fail':
+            if classify_result(item.get('radio_value')) == 'fail':
                 fail_rows.append(row_idx)
 
         col_widths = [12*mm, 60*mm, 25*mm, 43*mm]
@@ -392,9 +521,8 @@ class ReportService:
         elements.append(Spacer(1, 5*mm))
         return elements
 
-    def _build_fail_items_section(self, template_items: List) -> List:
+    def _build_fail_items_section(self, all_items: List) -> List:
         elements = []
-        all_items = self._flatten_items(template_items)
         fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         elements.append(Paragraph("四、不符合项描述", self.styles['SectionTitle']))
         if not fail_items:
@@ -424,20 +552,21 @@ class ReportService:
         elements.append(Spacer(1, 5*mm))
         return elements
 
-    def _build_rectification_section(self, record: InspectionRecord, template_items: List) -> List:
+    def _build_rectification_section(self, record: InspectionRecord, all_items: List) -> List:
         elements = []
-        all_items = self._flatten_items(template_items)
         fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         elements.append(Paragraph("五、整改建议", self.styles['SectionTitle']))
-        if record.remarks:
-            elements.append(Paragraph(record.remarks, self.styles['CustomBodyText']))
-        elif fail_items:
+        has_items_with_suggestion = False
+        if fail_items:
             for idx, item in enumerate(fail_items, 1):
                 if item.get('rectification_suggestion'):
+                    has_items_with_suggestion = True
                     elements.append(Paragraph(
                         f"{idx}. {item.get('title', '')}：{item.get('rectification_suggestion', '')}",
                         self.styles['CustomBodyText']
                     ))
+            if not has_items_with_suggestion:
+                elements.append(Paragraph("请针对上述不符合项制定具体整改措施并按期完成整改复查。", self.styles['CustomBodyText']))
         else:
             elements.append(Paragraph("本次检查未发现需要整改的问题。", self.styles['CustomBodyText']))
         elements.append(Spacer(1, 5*mm))
@@ -450,10 +579,16 @@ class ReportService:
         result_color = self._get_result_color(record.overall_result)
         conclusion_data = [
             ['总体结论', result_text],
+        ]
+        if record.judgment_note:
+            conclusion_data.append(['判定说明', record.judgment_note])
+        if record.remarks:
+            conclusion_data.append(['检查备注', record.remarks])
+        conclusion_data.extend([
             ['检查日期', record.inspection_date.strftime('%Y年%m月%d日') if record.inspection_date else '-'],
             ['检查员', record.inspector.full_name or record.inspector.username if record.inspector else '-'],
             ['签名', ''],
-        ]
+        ])
         conclusion_table = Table(conclusion_data, colWidths=[40*mm, 100*mm])
         conclusion_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), self.font_name),
@@ -490,96 +625,37 @@ class ReportService:
             topMargin=20*mm,
             bottomMargin=20*mm,
         )
-        template_items = []
-        if record.template_snapshot and 'items' in record.template_snapshot:
-            template_items = record.template_snapshot['items']
-        elif record.template:
-            template_items = record.template.items if hasattr(record.template, 'items') else []
+        all_items = self._get_merged_items(record)
         report_number = self._generate_report_number(record)
         elements = []
         elements.extend(self._build_cover_page(record, report_number))
         elements.extend(self._build_toc())
-        elements.extend(self._build_overview_section(record, template_items))
+        elements.extend(self._build_overview_section(record, all_items))
         elements.extend(self._build_enterprise_section(record))
-        elements.extend(self._build_results_section(record, template_items))
-        elements.extend(self._build_fail_items_section(template_items))
-        elements.extend(self._build_rectification_section(record, template_items))
+        elements.extend(self._build_results_section(record, all_items))
+        elements.extend(self._build_fail_items_section(all_items))
+        elements.extend(self._build_rectification_section(record, all_items))
         elements.extend(self._build_conclusion_section(record))
         doc.build(elements)
         buffer.seek(0)
         return buffer.getvalue()
 
     def generate_report_data(self, record: InspectionRecord) -> Dict[str, Any]:
-        template_items = []
-        if record.template_snapshot and 'items' in record.template_snapshot:
-            template_items = record.template_snapshot['items']
-        elif record.template:
-            template_items = record.template.items if hasattr(record.template, 'items') else []
-        all_items = self._flatten_items(template_items)
+        all_items = self._get_merged_items(record)
 
-        # 合并检查记录项的实际结果（InspectionRecordItem）
-        # record.items 包含用户填写的实际检查结果（radio_value 等）
-        record_items_map = {}
-        record_items = getattr(record, 'items', None) or []
-        for ri in record_items:
-            tid = str(getattr(ri, 'template_item_id', '') or '')
-            if tid:
-                record_items_map[tid] = {
-                    'radio_value': getattr(ri, 'radio_value', None),
-                    'result': getattr(ri, 'result', None),
-                    'result_text': getattr(ri, 'result_text', None),
-                    'problem_description': getattr(ri, 'problem_description', None),
-                    'rectification_suggestion': getattr(ri, 'rectification_suggestion', None),
-                    'score_value': getattr(ri, 'score_value', None),
-                    'numeric_value': getattr(ri, 'numeric_value', None),
-                    'text_value': getattr(ri, 'text_value', None),
-                    'multi_value': getattr(ri, 'multi_value', None),
-                    'audit_evidence': getattr(ri, 'audit_evidence', None),
-                    'audit_findings': getattr(ri, 'audit_findings', None),
-                }
-
-        # 将实际检查结果合并到模板项中
-        for item in all_items:
-            item_id = str(item.get('id', '') or '')
-            if item_id and item_id in record_items_map:
-                ri_data = record_items_map[item_id]
-                # BUG-03：result 与 radio_value 字段归一——写入侧可能只填了 result，
-                # 报告侧必须同等对待，否则统计与 PDF 全部丢失判定。
-                effective_result = ri_data.get('radio_value') or ri_data.get('result')
-                if effective_result:
-                    item['radio_value'] = effective_result
-                if ri_data.get('problem_description'):
-                    item['problem_description'] = ri_data['problem_description']
-                if ri_data.get('rectification_suggestion'):
-                    item['rectification_suggestion'] = ri_data['rectification_suggestion']
-                if ri_data.get('result_text'):
-                    item['result_text'] = ri_data['result_text']
-                if ri_data.get('audit_evidence'):
-                    item['audit_evidence'] = ri_data['audit_evidence']
-                if ri_data.get('audit_findings'):
-                    item['audit_findings'] = ri_data['audit_findings']
-
-        # 统计一律走 app.utils.item_stats（唯一口径来源），
-        # 避免与「检查记录详情」接口（/records/{id}）的口径分叉——
-        # 历史上两处对「不适用」的枚举集合不一致，导致同一记录两个页面数字对不上。
+        # 统计一律走 app.utils.item_stats（唯一口径来源）
         _stats = calculate_item_stats(all_items)
         pass_count = _stats['pass']
         fail_count = _stats['fail']
         na_count = _stats['na']
         total = _stats['total']
         filled_count = _stats['filled']
-        # BUG-04：合规率 = 已填报合格项 / 已填报项（分子分母均排除「不适用」与「未填写」），
-        # 与工作台 /api/analytics/dashboard 口径保持一致。
         pass_rate = compliance_rate(_stats)
         fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         return {
             'report_number': self._generate_report_number(record),
             'generated_at': datetime.now().isoformat(),
             'enterprise': {
-                # 记录自身的快照字段优先，为空时回落到企业主数据。
-                # 注意：contact_person / contact_phone 原先只读记录自身字段、没有回落，
-                # 与 name / address 的处理方式不一致——记录已关联企业但这两个字段为空时，
-                # H5 会显示 "-"，而企业主数据里其实有值（PC 端直接读 enterprise 对象，不受影响）。
                 'name': record.enterprise_name or (record.enterprise.name if record.enterprise else '-'),
                 'address': record.enterprise_address or (record.enterprise.address if record.enterprise else '-'),
                 'contact_person': record.contact_person or (
@@ -601,6 +677,7 @@ class ReportService:
                 'overall_result_text': self._get_result_text(record.overall_result),
                 'total_score': float(record.total_score) if record.total_score else None,
                 'remarks': record.remarks,
+                'judgment_note': record.judgment_note,
             },
             'statistics': {
                 'total': total,

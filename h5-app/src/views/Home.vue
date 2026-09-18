@@ -298,7 +298,9 @@ const getStatusType = (status) => {
 const getStatusText = (status) => {
   const textMap = {
     draft: '草稿',
-    submitted: '已提交',
+    // 对用户而言「已检查」比「已提交」更贴近业务语义：
+    // 提交不等于检查完成，这里展示的是检查记录的状态而非提交流程的状态。
+    submitted: '已检查',
   }
   return textMap[status] || status
 }

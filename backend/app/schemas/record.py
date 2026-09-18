@@ -17,6 +17,7 @@ class InspectionRecordBase(BaseModel):
     contact_phone: Optional[str] = Field(None, max_length=20, description="联系电话（手动输入）")
     inspection_date: Optional[datetime] = Field(None, description="检查时间")
     remarks: Optional[str] = Field(None, description="备注")
+    judgment_note: Optional[str] = Field(None, description="判定说明")
     total_score: Optional[Decimal] = Field(None, description="检查总分")
 
 
@@ -32,6 +33,7 @@ class InspectionRecordUpdate(BaseModel):
     contact_phone: Optional[str] = None
     inspection_date: Optional[datetime] = None
     remarks: Optional[str] = None
+    judgment_note: Optional[str] = None
     overall_result: Optional[str] = None
     status: Optional[str] = None
     total_score: Optional[Decimal] = None
@@ -42,6 +44,7 @@ class InspectionRecordResponse(InspectionRecordBase):
     inspector_id: UUID
     status: str
     overall_result: Optional[str]
+    judgment_note: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -81,7 +84,7 @@ class InspectionRecordItemBase(BaseModel):
     # 新增：按检查类型存储结果
     score_value: Optional[str] = Field(None, description="打分类型结果")
     radio_value: Optional[str] = Field(None, description="单选类型结果")
-    multi_value: Optional[List[str]] = Field(default_factory=list, description="多选类型结果列表")
+    multi_value: Optional[List[str]] = Field(None, description="多选类型结果列表")
     numeric_value: Optional[str] = Field(None, description="数值类型结果")
     text_value: Optional[str] = Field(None, description="文本类型结果")
     # AI 相关
@@ -93,7 +96,7 @@ class InspectionRecordItemBase(BaseModel):
     rectification_suggestion: Optional[str] = Field(None, description="整改建议")
     # 其他
     inspector_note: Optional[str] = Field(None, description="检查员备注")
-    photos: Optional[List[str]] = Field(default_factory=list, description="照片 URL 列表")
+    photos: Optional[List[str]] = Field(None, description="照片 URL 列表")
 
 
 class InspectionRecordItemCreate(InspectionRecordItemBase):

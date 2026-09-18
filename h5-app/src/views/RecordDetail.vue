@@ -66,7 +66,7 @@
             <van-icon name="todo-list-o" size="20" />
           </div>
           <h3 class="section-title">检查项目</h3>
-          <div class="item-count">{{ record.template.items.length }} 项</div>
+          <div class="item-count">{{ totalItemsCount }} 项</div>
         </div>
         <div class="tree-container">
           <tree-item
@@ -86,10 +86,18 @@
 
       <van-empty v-else description="暂无检查项目" class="empty-container" />
 
-      <div v-if="record.remarks" class="remarks-card">
+      <div v-if="record.judgment_note" class="remarks-card">
         <div class="remarks-header">
-          <van-icon name="comment-o" size="16" />
+          <van-icon name="passed" size="16" color="#52c41a" />
           <span>判定说明</span>
+        </div>
+        <div class="remarks-text">{{ record.judgment_note }}</div>
+      </div>
+
+      <div v-if="record.remarks" class="remarks-card" style="margin-top: 12px;">
+        <div class="remarks-header">
+          <van-icon name="comment-o" size="16" color="#1890ff" />
+          <span>检查备注</span>
         </div>
         <div class="remarks-text">{{ record.remarks }}</div>
       </div>
@@ -108,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showToast, ImagePreview } from 'vant'
 import { getRecord } from '../api/records'
@@ -122,10 +130,29 @@ const recordId = route.params.id
 const record = ref(null)
 const loading = ref(true)
 
+const totalItemsCount = computed(() => {
+  if (record.value?.stats?.total) {
+    return record.value.stats.total
+  }
+  if (!record.value?.template?.items) return 0
+  let count = 0
+  const countLeaves = (items) => {
+    for (const it of items) {
+      if (!it.is_category && (!it.children || it.children.length === 0)) {
+        count++
+      } else if (it.children && it.children.length > 0) {
+        countLeaves(it.children)
+      }
+    }
+  }
+  countLeaves(record.value.template.items)
+  return count
+})
+
 const getStatusText = (status) => {
   const texts = {
     'draft': '草稿',
-    'submitted': '已提交',
+    'submitted': '已检查',
   }
   return texts[status] || status
 }

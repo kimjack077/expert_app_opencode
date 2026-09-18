@@ -115,19 +115,21 @@ async def get_dashboard(
         non_compliant_records = _s["fail"]
         not_applicable_records = _s["na"]
 
-    # 用户/企业总数只统计未删除记录，与列表页口径一致
-    total_users = (
+    # 用户/企业总数只统计未删除记录，与列表页口径一致（单次复合标量查询，减少 1 次网络往返）
+    counts_row = (
         await db.execute(
-            select(func.count(User.id)).where(User.is_deleted == False)  # noqa: E712
-        )
-    ).scalar() or 0
-    total_enterprises = (
-        await db.execute(
-            select(func.count(Enterprise.id)).where(
-                Enterprise.is_deleted == False  # noqa: E712
+            select(
+                select(func.count(User.id))
+                .where(User.is_deleted == False)  # noqa: E712
+                .scalar_subquery(),
+                select(func.count(Enterprise.id))
+                .where(Enterprise.is_deleted == False)  # noqa: E712
+                .scalar_subquery(),
             )
         )
-    ).scalar() or 0
+    ).first()
+    total_users = counts_row[0] or 0 if counts_row else 0
+    total_enterprises = counts_row[1] or 0 if counts_row else 0
 
     return make_response(
         data={
@@ -150,12 +152,12 @@ async def get_dashboard(
                 "compliant": compliant_records,
                 "non_compliant": non_compliant_records,
                 "not_applicable": not_applicable_records,
-                # 达标率口径：合格 ÷ 已填报项（不含不适用、不含未填报）
+                # 达标率口径：合格 ÷（总项 - 不适用项），与 item_stats.compliance_rate 及报告侧统一
                 "compliance_rate": round(
-                    compliant_records / filled_records * 100,
+                    compliant_records / (total_records - not_applicable_records) * 100,
                     2,
                 )
-                if filled_records > 0
+                if (total_records - not_applicable_records) > 0
                 else 0,
             },
             "users": {

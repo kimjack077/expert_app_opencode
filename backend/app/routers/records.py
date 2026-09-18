@@ -152,9 +152,6 @@ async def get_records(
     query = query.where(*conditions)
     count_query = count_query.where(*conditions)
 
-    count_result = await db.execute(count_query)
-    total = count_result.scalar() or 0
-
     # 排序
     sort_column = InspectionRecord.inspection_date
     if sort_by == "created_at":
@@ -167,11 +164,23 @@ async def get_records(
     else:
         query = query.order_by(sort_column.desc())
 
-    # 分页
-    query = query.offset(skip).limit(limit)
-
-    result = await db.execute(query)
-    records = result.scalars().all()
+    # 优化：skip == 0 时多取 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
+    if skip == 0:
+        paged_query = query.offset(0).limit(limit + 1)
+        result = await db.execute(paged_query)
+        records = list(result.scalars().all())
+        if len(records) <= limit:
+            total = len(records)
+        else:
+            records = records[:limit]
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+    else:
+        count_result = await db.execute(count_query)
+        total = count_result.scalar() or 0
+        paged_query = query.offset(skip).limit(limit)
+        result = await db.execute(paged_query)
+        records = list(result.scalars().all())
 
     record_list = []
     for r in records:
@@ -711,6 +720,7 @@ async def get_record(
         if record.total_score is not None
         else None,
         "remarks": record.remarks,
+        "judgment_note": record.judgment_note,
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         "template": template_data,
@@ -733,12 +743,26 @@ async def get_record(
                 "problem_description": i.problem_description,
                 "result": i.result,
                 "item_title": i.item_title,
+                "photos": i.photos or [],
             }
             for i in items
         ],
+        # 企业对象要带上「检查报告预览」用到的全部字段。
+        # 此前只返回 {id, name}，而 InspectionReport 读的是 enterprise.legal_person /
+        # credit_code / risk_level 等 → 恒为 undefined，再被前端 .filter(([, v]) => v)
+        # 过滤掉整行，用户看到的是「企业基本信息少了几行」而不是「显示 —」。
         "enterprise": {
             "id": str(record.enterprise.id),
             "name": record.enterprise.name,
+            "credit_code": record.enterprise.credit_code,
+            "org_code": record.enterprise.org_code,
+            "address": record.enterprise.address,
+            "legal_person": record.enterprise.legal_person,
+            "contact_person": record.enterprise.contact_person,
+            "contact_phone": record.enterprise.contact_phone,
+            "enterprise_type": record.enterprise.enterprise_type,
+            "economic_type": record.enterprise.economic_type,
+            "risk_level": record.enterprise.risk_level,
         }
         if record.enterprise
         else None,

@@ -17,18 +17,29 @@ class Settings(BaseSettings):
     PG_PASSWORD: str = "1234567890@sdtj"
 
     @property
+    def effective_pg_host(self) -> str:
+        host = self.PG_HOST
+        # 当部署在线上云服务器自身时，PostgreSQL 与 FastAPI 进程同机运行，
+        # 直接走 127.0.0.1 回环网络，消除公网 NAT loopback 延迟与丢包风险。
+        # 本地开发环境因不存在 /home/ubuntu/expert_app，依然安全连向远程 PG_HOST。
+        if host in ("49.232.213.79", "localhost", "127.0.0.1"):
+            if Path("/home/ubuntu/expert_app").exists():
+                return "127.0.0.1"
+        return host
+
+    @property
     def DATABASE_URL(self) -> str:
         from urllib.parse import quote_plus
 
         password = quote_plus(self.PG_PASSWORD)
-        return f"postgresql+asyncpg://{self.PG_USER}:{password}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
+        return f"postgresql+asyncpg://{self.PG_USER}:{password}@{self.effective_pg_host}:{self.PG_PORT}/{self.PG_DB}"
 
     @property
     def DATABASE_URL_SYNC(self) -> str:
         from urllib.parse import quote_plus
 
         password = quote_plus(self.PG_PASSWORD)
-        return f"postgresql://{self.PG_USER}:{password}@{self.PG_HOST}:{self.PG_PORT}/{self.PG_DB}"
+        return f"postgresql://{self.PG_USER}:{password}@{self.effective_pg_host}:{self.PG_PORT}/{self.PG_DB}"
 
     SECRET_KEY: str = "efis-secret-key-change-in-production-2024"
     ALGORITHM: str = "HS256"

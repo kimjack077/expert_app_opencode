@@ -223,3 +223,148 @@ def test_h5_base_path_is_declared():
         "h5-app/vite.config.ts 的 base 不是 '/h5/'。"
         "部署到 nginx 的 /h5/ 路径下会因资源路径不匹配而白屏。"
     )
+
+
+# ---------------------------------------------------------------------------
+# 4. 语义字段归属：「判定说明」与「检查备注」是两个字段
+# ---------------------------------------------------------------------------
+
+
+def test_judgment_note_is_a_real_backend_field():
+    """后端必须同时存在 ``judgment_note`` 与 ``remarks``，且语义不同。
+
+    历史缺陷：两个前端都把「判定说明」写进 ``remarks``，
+    于是「检查任务创建时填的备注」会显示成「判定说明」，
+    报告里的「整改建议」也拿备注当内容。用户质疑"这个字段是不是一一对应的"。
+    """
+    from app.schemas.record import InspectionRecordUpdate
+
+    fields = set(InspectionRecordUpdate.model_fields)
+    assert "judgment_note" in fields, "后端缺少 judgment_note 字段，「判定说明」无处安放"
+    assert "remarks" in fields, "后端缺少 remarks 字段，「检查备注」无处安放"
+
+
+def _payload_keys(src: str, call: str) -> list[set[str]]:
+    """抽出 ``call(`` 后第一个 ``{...}`` 对象字面量的顶层键名。
+
+    只做括号配对，不做语法分析——够用且不会误伤。嵌套对象的键也会被收集，
+    但本用例只关心 ``overall_result`` / ``remarks`` / ``judgment_note`` 三个键。
+    """
+    results: list[set[str]] = []
+    for match in re.finditer(re.escape(call) + r"\s*\(", src):
+        start = src.find("{", match.end())
+        if start < 0:
+            continue
+        depth = 0
+        end = start
+        while end < len(src):
+            if src[end] == "{":
+                depth += 1
+            elif src[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            end += 1
+        body = src[start + 1: end]
+        results.append(set(re.findall(r"(?:^|,)\s*([A-Za-z_]\w*)\s*:", body)))
+    return results
+
+
+def test_no_client_writes_judgment_into_the_remarks_field():
+    """保存「最终判定」的载荷里，判定说明必须走 ``judgment_note``，不得走 ``remarks``。
+
+    这是**跨端字段错位**的直接防线。实测事故：PC 已改读 ``judgment_note``，
+    H5 仍写 ``remarks`` —— 用户在 H5 填的判定说明出现在 PC 的「检查备注」里，
+    PC 的「判定说明」永远为空。两端各写各的，用户会认为"改了一半"。
+
+    注意：局部变量叫什么名字无所谓（PC 就叫 ``finalJudgment.remarks``），
+    这里只校验**发出去的字段名**。
+    """
+    offenders: list[str] = []
+
+    for path in _client_files((".vue", ".tsx", ".ts")):
+        src = _read(path)
+        for call in ("updateRecord", "updateRecordItem", "update_record"):
+            for keys in _payload_keys(src, call):
+                if "overall_result" not in keys:
+                    continue
+                if "remarks" in keys and "judgment_note" not in keys:
+                    offenders.append(
+                        f"  {path.relative_to(REPO_ROOT).as_posix()}  ->  载荷键 {sorted(keys)}"
+                    )
+
+    assert not offenders, (
+        "保存最终判定的载荷把「判定说明」写进了 remarks（检查备注）：\n"
+        + "\n".join(offenders)
+        + "\n\n处置：改为 `judgment_note: <判定说明值>`，与另一端保持一致。"
+    )
+
+
+def test_every_client_reads_judgment_note_from_backend():
+    """两端都必须真的读取后端返回的 ``judgment_note``。
+
+    只写不读 = 保存成功但界面永远空白，用户描述为"填了没反应"。
+    """
+    missing = [
+        name
+        for name, root in CLIENT_DIRS.items()
+        if root.exists()
+        and not any(
+            "judgment_note" in _read(p)
+            for p in root.rglob("*")
+            if p.suffix in (".ts", ".tsx", ".vue", ".js")
+        )
+    ]
+    assert not missing, (
+        f"这些前端完全没有引用 judgment_note：{missing} —— "
+        "「判定说明」字段未接入，保存后界面不会显示。"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5. 详情接口必须提供报告渲染所需的全部字段
+# ---------------------------------------------------------------------------
+
+
+def _record_detail_enterprise_keys() -> set[str]:
+    """从 ``get_record`` 的源码里抽出它返回的 enterprise 字段名。"""
+    src = _read(BACKEND_DIR / "app" / "routers" / "records.py")
+    marker = '"enterprise": {\n            "id": str(record.enterprise.id)'
+    start = src.find(marker)
+    if start < 0:
+        # 兜底：找 detail 端点里带 record.enterprise 的那一段
+        for m in re.finditer(r'"enterprise": \{', src):
+            seg = src[m.start(): m.start() + 1200]
+            if "record.enterprise" in seg:
+                start = m.start()
+                break
+    assert start >= 0, "未能在 records.py 中定位 get_record 的 enterprise 返回块"
+    block = src[start: src.find("if record.enterprise", start)]
+    return set(re.findall(r'"([a-z_]+)":', block))
+
+
+def test_record_detail_enterprise_exposes_fields_the_report_renders():
+    """PC 报告预览读的企业字段，``GET /records/{id}`` 必须都返回。
+
+    历史缺陷：该接口的 enterprise 只返回 ``{id, name}``，而
+    ``InspectionReport`` 读的是 ``enterprise.legal_person / credit_code /
+    risk_level / enterprise_type / address / contact_person / contact_phone``
+    → 全部 undefined，再被前端 ``.filter(([, v]) => v)`` 过滤掉整行。
+    用户看到的是「企业基本信息少了几行」，而不是「显示 —」，
+    比原来更难发现——因为少掉的字段完全不可见。
+    """
+    rendered = {
+        "address",
+        "legal_person",
+        "contact_person",
+        "contact_phone",
+        "enterprise_type",
+        "risk_level",
+        "credit_code",
+    }
+    provided = _record_detail_enterprise_keys()
+    missing = sorted(rendered - provided)
+    assert not missing, (
+        f"GET /records/{{id}} 的 enterprise 缺少报告要渲染的字段：{missing}\n"
+        f"当前返回：{sorted(provided)}"
+    )
