@@ -12,7 +12,10 @@ from app.database import get_db
 from app.models.user import User
 from app.utils.roles import is_admin, is_super_admin
 
-security = HTTPBearer()
+# BUG-34：auto_error=False + 手动抛 401。FastAPI HTTPBearer 默认在
+# 缺失 Authorization 头时抛 403，违背"未认证=401"的 HTTP 语义，
+# 且会导致前端只识别 401 跳登录的拦截器失效。
+security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -101,7 +104,7 @@ async def get_user_from_token(token: str, db: AsyncSession) -> User:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     credentials_exception = HTTPException(
@@ -109,6 +112,13 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    # 缺失 Authorization 头统一返回 401（而非 HTTPBearer 默认的 403）
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
     payload = decode_token(token)
     if payload is None:

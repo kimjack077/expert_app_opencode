@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Body, Query
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -83,11 +85,27 @@ async def logout(
     return make_response(message="Logged out successfully")
 
 
+class RefreshTokenBody(BaseModel):
+    """刷新令牌请求体（BUG-35：同时兼容 body 与 query 传参）"""
+
+    refresh_token: Optional[str] = None
+
+
 @router.post("/refresh", response_model=ApiResponse)
 async def refresh_token(
-    request: Request, refresh_token: str, db: AsyncSession = Depends(get_db)
+    request: Request,
+    body: Optional[RefreshTokenBody] = Body(None),
+    refresh_token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
 ):
-    payload = decode_token(refresh_token)
+    # 优先 body，兼容历史 query 传参（web-admin 现网实现使用 query）
+    token_value = (body.refresh_token if body and body.refresh_token else None) or refresh_token
+    if not token_value:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="refresh_token is required (JSON body or query parameter)",
+        )
+    payload = decode_token(token_value)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"

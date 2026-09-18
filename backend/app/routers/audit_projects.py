@@ -1055,6 +1055,14 @@ async def create_audit_report(
 ):
     """创建审核报告"""
     await ensure_project_access(db, project_id, current_user, require_manage=True)
+
+    # BUG-36：body 中的 project_id 已可选；若传入需与路径一致
+    if report.project_id and report.project_id != project_id:
+        raise HTTPException(
+            status_code=422,
+            detail="请求体中的 project_id 与 URL 路径不一致",
+        )
+
     # 生成报告编号
     report_no = f"REP-{datetime.now().strftime('%Y%m%d')}-{datetime.now().microsecond}"
 
@@ -1121,6 +1129,13 @@ async def create_meeting(
 ):
     """创建沟通会议记录"""
     await ensure_project_access(db, project_id, current_user, require_manage=True)
+
+    # BUG-36：body 中的 project_id 已可选；若传入需与路径一致
+    if meeting.project_id and meeting.project_id != project_id:
+        raise HTTPException(
+            status_code=422,
+            detail="请求体中的 project_id 与 URL 路径不一致",
+        )
 
     # 首/末次会议在同一项目内唯一（BUG-26）；阶段沟通/内部会议允许多次
     if meeting.meeting_type in ("opening", "closing"):

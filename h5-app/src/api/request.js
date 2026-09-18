@@ -61,15 +61,54 @@ const toFriendlyMessage = (status, detail) => {
 }
 
 // 响应拦截器
+// BUG-38：新增 401 自动刷新机制。此前 access_token 过期只会清 token 跳登录，
+// 现场审核员会被强制退出。现在先用 refresh_token 续期并重试原请求，失败才登出。
+let refreshingPromise = null
+
+async function tryRefreshToken() {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return null
+  try {
+    // 用原生 axios 避免递归经过本拦截器；后端同时支持 body 与 query 传参
+    const res = await axios.post(`${API_BASE_URL}/api/auth/refresh`, null, {
+      params: { refresh_token: refreshToken },
+      timeout: 15000,
+    })
+    const data = res.data?.data || {}
+    if (!data.access_token) return null
+    localStorage.setItem('token', data.access_token)
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token)
+    }
+    return data.access_token
+  } catch (e) {
+    return null
+  }
+}
+
 request.interceptors.response.use(
   (response) => {
     return response.data
   },
-  (error) => {
+  async (error) => {
     if (error.response) {
-      const { status, data } = error.response
+      const { status, data, config } = error.response
       if (status === 401) {
+        // 单飞刷新：并发 401 只触发一次刷新请求
+        if (!config?._retried) {
+          refreshingPromise = refreshingPromise || tryRefreshToken()
+          const newToken = await refreshingPromise.finally(() => {
+            refreshingPromise = null
+          })
+          if (newToken) {
+            config._retried = true
+            config.headers = config.headers || {}
+            config.headers.Authorization = `Bearer ${newToken}`
+            return request(config)
+          }
+        }
         localStorage.removeItem('token')
+        localStorage.removeItem('refresh_token')
         // 延迟跳转，避免在拦截器中直接操作DOM
         setTimeout(() => {
           window.location.href = '/h5/login'

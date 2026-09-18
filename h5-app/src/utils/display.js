@@ -36,10 +36,18 @@ export function formatTaskDisplay(task = {}) {
     }
   }
   if (parts.length === 2) {
+    // BUG-39：两段拆分仅在首段足够完整时生效，避免 "QA-H5执行任务"
+    // 这类含连字符的短前缀名称被割裂成 "QA" + 副标题的误导性展示。
+    if (parts[0].length >= 4) {
+      return {
+        primary: parts[0],
+        secondary: parts[1],
+        area: parts[1],
+      }
+    }
     return {
-      primary: parts[0],
-      secondary: parts[1],
-      area: parts[1],
+      primary: cleaned,
+      secondary: '',
     }
   }
   return {
