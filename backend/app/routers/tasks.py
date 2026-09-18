@@ -26,7 +26,7 @@ from app.schemas import (
     InspectionSummary,
 )
 from app.utils.security import get_current_user, get_current_admin_user
-from app.utils.roles import RECORD_VIEW_ALL_ROLES
+from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
 from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import classify_result
 from app.services import AuditService
@@ -47,6 +47,61 @@ def make_response(data=None, code=200, message="success"):
     return ApiResponse(
         code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
+
+
+async def _sync_reaudited_task_to_formal_record(
+    db: AsyncSession,
+    task: InspectionTask,
+    current_user: User,
+) -> None:
+    """已完成任务的填报被再次修改后（复审/再认证场景），同步回正式审核记录。
+
+    调用时机：**必须在记录本身的 commit 之后**。原因有二：
+
+    1. ``AsyncSessionLocal`` 配置了 ``autoflush=False``，若在 commit 前同步，
+       ``sync_task_to_formal_record`` 内部的 ``select(TaskItemRecord...)``
+       读到的是**旧值**，会把未提交的修改漏在正式记录之外；
+    2. 先落记录再同步，保证用户手上的填报不因同步失败而丢失——
+       同步失败以 409 显式报错，用户重试即可，不会出现"两边都丢了"。
+
+    错误语义（与 :func:`complete_task` 对齐，**绝不静默吞异常**）：
+
+    - ``ValueError`` 是 ``sync_task_to_formal_record`` 的**面向用户的业务校验失败**
+      （如"同一模板项存在重复检查记录"），转 409 抛给前端。
+      旧实现 ``except Exception: pass`` 会把这类失败吞掉，正式审核记录与任务记录
+      悄悄分叉，用户还以为同步成功了——这是本轮规范化要修的根问题；
+    - 其余异常（网络/约束冲突等）原样上抛，由全局异常处理归类。
+
+    未挂审核计划项的任务（普通巡检任务）没有"正式审核记录"可同步，直接返回。
+    """
+    if task.status != "completed":
+        return
+
+    plan_item = await get_linked_plan_item(db, task.id)
+    if plan_item is None:
+        return
+
+    try:
+        await sync_task_to_formal_record(db, task, plan_item, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"记录已保存，但同步到正式审核记录失败：{exc}",
+        ) from exc
+
+    # 审计留痕：复审同步是"改写已归档结论"的动作，必须可追溯。
+    # 注意 log_action 只 flush 不 commit，必须在这里显式提交，
+    # 否则随请求会话 close 一起回滚（complete_task 里的日志就有此问题）。
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "sync_reaudited_task_to_formal_record",
+        "task",
+        str(task.id),
+        detail={"plan_item_id": str(plan_item.id), "project_id": str(plan_item.project_id)},
+    )
+    await db.commit()
 
 
 @router.get("", response_model=ApiResponse)
@@ -777,8 +832,10 @@ async def create_or_update_record(
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
-    # BUG-11：已完成的任务填报记录为只读，防止事后篡改
-    if task.status == "completed":
+    # BUG-11：已完成的填报记录默认只读，防止事后篡改。
+    # 复审/再认证场景由管理角色显式放行（修改会留审计痕并同步正式审核记录，
+    # 见 _sync_reaudited_task_to_formal_record）；专家与普通用户一律拒绝。
+    if task.status == "completed" and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
 
     if record_data.template_item_id:
@@ -802,6 +859,10 @@ async def create_or_update_record(
             record.updated_at = datetime.now(timezone.utc)
             await db.commit()
             await db.refresh(record)
+
+            # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
+            await _sync_reaudited_task_to_formal_record(db, task, current_user)
+
             return make_response(
                 data=InspectionRecordResponse.model_validate(record).model_dump()
             )
@@ -818,6 +879,9 @@ async def create_or_update_record(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+
+    # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
+    await _sync_reaudited_task_to_formal_record(db, task, current_user)
 
     return make_response(
         data=InspectionRecordResponse.model_validate(record).model_dump()
@@ -842,8 +906,9 @@ async def update_record(
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    # BUG-11：已完成的填报记录为只读，防止事后篡改
-    if task.status == "completed":
+    # BUG-11：已完成的填报记录默认只读，防止事后篡改。
+    # 复审/再认证场景由管理角色显式放行，同 create_or_update_record 的口径。
+    if task.status == "completed" and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
 
     update_data = record_data.model_dump(exclude_unset=True)
@@ -853,6 +918,9 @@ async def update_record(
 
     await db.commit()
     await db.refresh(record)
+
+    # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
+    await _sync_reaudited_task_to_formal_record(db, task, current_user)
 
     return make_response(
         data=InspectionRecordResponse.model_validate(record).model_dump()

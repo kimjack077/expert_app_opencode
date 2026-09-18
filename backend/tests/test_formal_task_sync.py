@@ -195,7 +195,12 @@ def test_put_completed_without_final_judgment_is_rejected():
         ("na", None),
         ("不适用", None),
         ("partial_pass", "2"),
-        (None, "2"),
+        # 空/None（未填写）必须返回 None → 同步层落为 not_applicable，
+        # 绝不能映射成 "2"（基本符合）：否则漏填项会被算进合格档，
+        # 正式审核记录的合规率被虚增。旧用例期望 ("None", "2") 是错的。
+        ("", None),
+        (None, None),
+        ("  ", None),
     ],
 )
 def test_legacy_result_mapping_covers_all_client_values(legacy_result, expected):
