@@ -18,7 +18,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import InspectionTemplate, TemplateItem
-from app.utils.item_stats import calculate_item_stats, compliance_rate
+from app.utils.item_stats import calculate_item_stats, classify_result, compliance_rate
 from app.models.enterprise import Enterprise
 from app.models.user import User
 
@@ -275,11 +275,15 @@ class ReportService:
         elements = []
         elements.append(Paragraph("一、检查概况", self.styles['SectionTitle']))
         all_items = self._flatten_items(template_items)
-        pass_count = sum(1 for item in all_items if item.get('radio_value') == 'pass')
-        fail_count = sum(1 for item in all_items if item.get('radio_value') == 'fail')
-        na_count = sum(1 for item in all_items if item.get('radio_value') in ('na', 'not_applicable'))
-        total = len(all_items)
-        filled_count = pass_count + fail_count + na_count
+        # 统计一律走 app.utils.item_stats（唯一口径来源）——
+        # 原先此处自算一套，且 fail 只认 'fail'，导致「导出 PDF」与
+        # 「网页查看报告」（generate_report_data）可能给出不同数字。
+        _stats = calculate_item_stats(all_items)
+        pass_count = _stats['pass']
+        fail_count = _stats['fail']
+        na_count = _stats['na']
+        total = _stats['total']
+        filled_count = _stats['filled']
         # BUG-04：与报告数据口径一致——占比分母为「已填报项」（排除不适用与未填写）
         rated_count = pass_count + fail_count
         pass_rate = round(pass_count / rated_count * 100, 1) if rated_count > 0 else 0
@@ -391,7 +395,7 @@ class ReportService:
     def _build_fail_items_section(self, template_items: List) -> List:
         elements = []
         all_items = self._flatten_items(template_items)
-        fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
+        fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         elements.append(Paragraph("四、不符合项描述", self.styles['SectionTitle']))
         if not fail_items:
             elements.append(Paragraph("本次检查未发现不符合项。", self.styles['CustomBodyText']))
@@ -423,7 +427,7 @@ class ReportService:
     def _build_rectification_section(self, record: InspectionRecord, template_items: List) -> List:
         elements = []
         all_items = self._flatten_items(template_items)
-        fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
+        fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         elements.append(Paragraph("五、整改建议", self.styles['SectionTitle']))
         if record.remarks:
             elements.append(Paragraph(record.remarks, self.styles['CustomBodyText']))
@@ -567,7 +571,7 @@ class ReportService:
         # BUG-04：合规率 = 已填报合格项 / 已填报项（分子分母均排除「不适用」与「未填写」），
         # 与工作台 /api/analytics/dashboard 口径保持一致。
         pass_rate = compliance_rate(_stats)
-        fail_items = [item for item in all_items if item.get('radio_value') == 'fail']
+        fail_items = [item for item in all_items if classify_result(item.get('radio_value')) == 'fail']
         return {
             'report_number': self._generate_report_number(record),
             'generated_at': datetime.now().isoformat(),

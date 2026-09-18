@@ -28,6 +28,7 @@ from app.schemas import (
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import RECORD_VIEW_ALL_ROLES
 from app.utils.category import is_category_node, load_parent_ids
+from app.utils.item_stats import classify_result
 from app.services import AuditService
 from app.services.formal_audit_sync_service import (
     can_access_linked_task,
@@ -859,15 +860,10 @@ async def get_task_summary(
     )
     records = result.scalars().all()
 
-    def _is_pass(result: Optional[str]) -> bool:
-        return result in {"compliant", "pass", "qualified", "1"}
-
-    def _is_fail(result: Optional[str]) -> bool:
-        return result in {"non_compliant", "fail", "unqualified", "3", "pending_rectification"}
-
-    def _is_na(result: Optional[str]) -> bool:
-        return result in {"not_applicable", "na", "n/a", "不适用"}
-
+    # 判定口径统一走 app.utils.item_stats.classify_result，不再本地维护判定集合。
+    # 历史上此处把 pending_rectification 算作「不合格」，而检查报告/记录详情按
+    # 中间态处理，导致同一份数据在「任务汇总」与「检查报告」中数字不一致。
+    #
     # 排除分类节点：只要节点下挂着有效子项（或显式标记分类），一律不计入统计；
     # 模板条目已删除且未填写的孤儿记录同样剔除。统一走 app/utils/category。
     parent_ids = (
@@ -887,9 +883,9 @@ async def get_task_summary(
 
     total = len(countable)
     completed = sum(1 for r in countable if r.result)
-    compliant = sum(1 for r in countable if _is_pass(r.result))
-    non_compliant = sum(1 for r in countable if _is_fail(r.result))
-    not_applicable = sum(1 for r in countable if _is_na(r.result))
+    compliant = sum(1 for r in countable if classify_result(r.result) == "pass")
+    non_compliant = sum(1 for r in countable if classify_result(r.result) == "fail")
+    not_applicable = sum(1 for r in countable if classify_result(r.result) == "na")
 
     # 合规率分母仅计有效参评项（剔除不适用/未涉及项）
     applicable_evaluated = compliant + non_compliant

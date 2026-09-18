@@ -24,9 +24,11 @@ from app.schemas import (
     InspectionRecordListQuery,
 )
 from app.utils.security import get_current_user, get_current_admin_user
-from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
+from app.utils.roles import RECORD_VIEW_ALL_ROLES, can_view_all_records, is_admin
 from app.utils.category import is_category_node, load_parent_ids
-from app.utils.item_stats import calculate_item_stats
+from app.utils.item_stats import calculate_item_stats, classify_result
+from app.utils.business_time import business_day_bounds
+from app.utils.item_write_guard import validate_item_payload
 from app.services import AuditService
 from app.services.llm_service import llm_service
 
@@ -37,6 +39,35 @@ def make_response(data=None, code=200, message="success"):
     return ApiResponse(
         code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
+
+
+def _ensure_record_access(record: InspectionRecord, current_user: User, *, write: bool = False) -> None:
+    """检查记录访问授权 —— 详情级唯一入口。
+
+    授权规则（与列表级 :func:`get_records` 的口径**必须一致**）：
+
+    * 管理员 / 超管 —— 读写全量；
+    * 只读复核角色（``auditor``）—— 可读全量，不可写；
+    * 其余角色 —— 仅限本人作为检查员的记录。
+
+    ═══════════════════════════════════════════════════════════════════════
+    为什么需要这个函数
+    ═══════════════════════════════════════════════════════════════════════
+    原实现把这条规则在 13 个端点里**各写了一遍**，且写的是
+    ``current_user.role not in ("admin", "super_admin")`` ——
+    而列表接口用的是 ``RECORD_VIEW_ALL_ROLES``（含 ``auditor``）。
+    结果是：**审核员能在列表里看到记录，点进去却收到 403**。
+    用户描述为"系统报错/看不明白"，根因是同一语义的两处实现漂移。
+
+    现在读写两类语义都在这里定义一次，端点只调用，不再各自判断。
+    """
+    if is_admin(current_user.role):
+        return
+    if not write and can_view_all_records(current_user.role):
+        return
+    if str(record.inspector_id) == str(current_user.id):
+        return
+    raise HTTPException(status_code=403, detail="Not authorized")
 
 
 @router.get("", response_model=ApiResponse)
@@ -192,7 +223,6 @@ async def create_record(
     current_user: User = Depends(get_current_user),
 ):
     """创建检查记录（自动查找当天草稿）"""
-    from datetime import timedelta
 
     # 验证模板存在
     template = await db.get(InspectionTemplate, record_data.template_id)
@@ -205,10 +235,13 @@ async def create_record(
         if not enterprise:
             raise HTTPException(status_code=404, detail="Enterprise not found")
 
-    # 查找当天是否存在相同企业、相同模板的草稿（使用 UTC 时间）
-    now_utc = datetime.now(timezone.utc)
-    today_start = datetime(now_utc.year, now_utc.month, now_utc.day)
-    tomorrow_start = today_start + timedelta(days=1)
+    # 查找当天是否存在相同企业、相同模板的草稿。
+    #
+    # 边界必须按**业务时区**（UTC+8）划分并带时区信息：
+    # 原实现用 UTC 的朴素 datetime 与 timestamptz 列比较，窗口会落在
+    # 北京时间 08:00–次日 08:00，于是「早上 7 点建的草稿，9 点再进来又建一条」，
+    # 检查员看到两份待填记录。详见 app/utils/business_time.py。
+    today_start, tomorrow_start = business_day_bounds()
 
     query = select(InspectionRecord).where(
         InspectionRecord.inspector_id == current_user.id,
@@ -373,10 +406,9 @@ async def get_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     # 加载关联数据
     items_result = await db.execute(
@@ -743,10 +775,8 @@ async def update_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
+    _ensure_record_access(record, current_user, write=True)
 
     # 更新字段
     update_data = record_data.model_dump(exclude_unset=True)
@@ -862,10 +892,8 @@ async def submit_record(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
+    _ensure_record_access(record, current_user, write=True)
 
     # BUG-12：已提交记录不允许重复提交
     if record.status == "submitted":
@@ -901,17 +929,27 @@ async def delete_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """删除检查记录（仅管理员，软删除）"""
+    """删除检查记录（仅管理员，软删除）
+
+    级联：``inspection_record_items`` 是**硬删除表**（无 is_deleted 列），
+    记录软删后明细会变成永久孤儿——既不再展示、也不会被清理，
+    实测已有 189 条。ORM 上已声明 ``cascade="all, delete-orphan"``，
+    说明设计意图本就是随记录删除，只是软删路径没触发它。
+    现在由 ``FK_CASCADE_POLICY`` 统一接管。
+    """
     record = await db.get(InspectionRecord, record_id)
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    from app.utils.soft_delete import soft_delete
+    from app.utils.soft_delete import soft_delete_cascade
 
-    await soft_delete(db, record)
+    affected = await soft_delete_cascade(db, record)
     await db.commit()
 
-    return make_response(message="Record deleted")
+    return make_response(
+        message="Record deleted",
+        data={"cascaded": affected},
+    )
 
 
 # 检查记录项管理
@@ -928,10 +966,8 @@ async def create_or_update_record_item(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
+    _ensure_record_access(record, current_user, write=True)
 
     # BUG-12：已提交记录为只读，禁止再修改检查条目
     if record.status == "submitted":
@@ -955,6 +991,41 @@ async def create_or_update_record_item(
             )
         )
         record_item = result.scalar_one_or_none()
+
+    # ── 写入侧校验 ────────────────────────────────────────────────────────
+    # 原实现不做任何校验，导致两类第三方反复报出的问题：
+    #   ① 字段写错仍返回 200 —— H5 把单选结果写进 text_value，库里确有值，
+    #      但 PC 端与报告只读 radio_value，界面永远空白。用户看到的是
+    #      "填了没反应"，报上来就是「数据无法录入」。
+    #   ② 取值越界仍返回 200 —— radio_value 写入拼错的值，无法归类为
+    #      合格/不合格/不适用，报表既不计数也不报错，检查项变成「黑洞」。
+    # 这里在落库前拦下，并给出「该写哪个字段」的可操作提示。
+    #
+    # 模板解析放在既有条目查找之后：更新场景下请求体可能既不带
+    # template_item_id 也不带 check_type，只有既有条目知道它属于哪个模板。
+    template_item = None
+    template_item_id = item_data.template_item_id or (
+        record_item.template_item_id if record_item else None
+    )
+    if template_item_id:
+        template_item = await db.get(TemplateItem, template_item_id)
+
+    guard_errors = validate_item_payload(
+        check_type=item_data.check_type
+        or (template_item.check_type if template_item else None),
+        payload={
+            "score_value": item_data.score_value,
+            "radio_value": item_data.radio_value,
+            "multi_value": item_data.multi_value,
+            "numeric_value": item_data.numeric_value,
+            "text_value": item_data.text_value,
+        },
+        result_options=template_item.result_options if template_item else None,
+        min_value=template_item.min_value if template_item else None,
+        max_value=template_item.max_value if template_item else None,
+    )
+    if guard_errors:
+        raise HTTPException(status_code=422, detail=guard_errors)
 
     if record_item:
         # 更新现有记录
@@ -1026,10 +1097,9 @@ async def get_record_items(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1172,10 +1242,9 @@ async def get_record_item(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1342,10 +1411,8 @@ async def generate_ai_suggestion(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
+    _ensure_record_access(record, current_user, write=True)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1426,10 +1493,8 @@ async def accept_ai_suggestion(
         raise HTTPException(status_code=404, detail="Record not found")
 
     # 权限检查
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
+    _ensure_record_access(record, current_user, write=True)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1460,10 +1525,9 @@ async def generate_ai_suggestion_stream(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1533,10 +1597,9 @@ async def generate_final_judgment_stream(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     items_result = await db.execute(
         select(InspectionRecordItem)
@@ -1632,10 +1695,9 @@ async def get_item_history_stats(
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     result = await db.execute(
         select(InspectionRecordItem)
@@ -1687,19 +1749,16 @@ async def get_item_history_stats(
     history_items = history_result.scalars().all()
 
     total_inspections = len(history_items)
-    fail_count = 0
-    pass_count = 0
-    na_count = 0
+    # 判定归类统一走 app.utils.item_stats.classify_result。
+    # 原实现只认 "na"，而写入侧落库的是 "not_applicable"（全库 na 为 0 条），
+    # 导致该接口的「不适用」恒为 0。
+    pass_count = sum(1 for i in history_items if classify_result(i.radio_value) == "pass")
+    fail_count = sum(1 for i in history_items if classify_result(i.radio_value) == "fail")
+    na_count = sum(1 for i in history_items if classify_result(i.radio_value) == "na")
     history_records = []
 
     for idx, item in enumerate(history_items):
         radio_value = item.radio_value
-        if radio_value == "fail":
-            fail_count += 1
-        elif radio_value == "pass":
-            pass_count += 1
-        elif radio_value == "na":
-            na_count += 1
 
         history_records.append(
             {
@@ -1716,9 +1775,10 @@ async def get_item_history_stats(
             }
         )
 
-    fail_rate = (
-        round(fail_count / total_inspections * 100, 1) if total_inspections > 0 else 0
-    )
+    # 分母统一为「已评价项」（合格 + 不合格），与报告接口口径一致；
+    # 原先用「历史全部次数」（含未填写项），会把不合格率系统性拉低。
+    rated_count = pass_count + fail_count
+    fail_rate = round(fail_count / rated_count * 100, 1) if rated_count > 0 else 0
 
     last_result = None
     last_inspection_date = None
@@ -1776,10 +1836,9 @@ async def get_report_data(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     report_data = report_service.generate_report_data(record)
     return make_response(data=report_data)
@@ -1813,10 +1872,9 @@ async def download_report_pdf(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    if current_user.role not in ("admin", "super_admin") and str(
-        record.inspector_id
-    ) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Not authorized")
+    # 权限检查：与列表级口径一致（RECORD_VIEW_ALL_ROLES 含只读复核角色 auditor）。
+    # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
+    _ensure_record_access(record, current_user)
 
     pdf_bytes = report_service.generate_pdf(record)
 

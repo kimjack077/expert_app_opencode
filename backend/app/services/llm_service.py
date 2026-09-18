@@ -10,6 +10,7 @@ from app.models.record import InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.audit import LLMCallLog
 from app.utils.llm_fallback import create_main_llm_client
+from app.utils.item_stats import classify_result
 
 
 SUGGESTION_PROMPT = """
@@ -427,13 +428,13 @@ class LLMService:
         return '\n'.join(summary_lines)
 
     def _get_item_result_status(self, item: dict) -> str:
+        # 判定归类统一走 app.utils.item_stats，避免本地维护更窄的别名表
+        # （原实现只认 pass/compliant、fail/non_compliant、na/not_applicable，
+        #   会漏掉 qualified/unqualified/n/a 等历史写法）。
         radio_value = item.get('radio_value') or item.get('result')
-        if radio_value in ['pass', 'compliant']:
-            return 'pass'
-        if radio_value in ['fail', 'non_compliant']:
-            return 'fail'
-        if radio_value in ['na', 'not_applicable']:
-            return 'na'
+        bucket = classify_result(radio_value)
+        if bucket:
+            return bucket
 
         score_value = item.get('score_value')
         if score_value is not None and score_value != '' and score_value != 'null':

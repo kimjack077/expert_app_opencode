@@ -16,27 +16,28 @@ from app.models.audit_project import (
 from app.models.record import InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
 from app.models.user import User
+from app.utils.item_stats import FAIL_VALUES, NA_VALUES, PASS_VALUES
 
 
 def legacy_result_to_evaluation(result: str | None) -> str | None:
-    """Normalize result values used by every legacy task client."""
+    """把旧任务客户端的结果值映射为三级评价（1=合格 / 2=观察 / 3=不合格）。
+
+    判定集合统一取自 ``app.utils.item_stats``，不再本地维护别名表。
+
+    注意职责差异：本函数是**评价映射**（产出 1/2/3），
+    与 ``item_stats.classify_result`` 的**统计归类**（产出 pass/fail/na）不同——
+    ``pending_rectification`` 在此按不合格（3）处理，因为它意味着存在需要整改的
+    发现项；而在统计口径中它属中间态，不计入合格/不合格/不适用任一桶。
+    """
 
     normalized = str(result or "").strip().lower()
-    if normalized in {"n/a", "na", "not_applicable", "不适用"}:
+    if not normalized:
         return None
-    failure_values = {
-        "3",
-        "fail",
-        "failed",
-        "non_compliant",
-        "nonconformity",
-        "pending_rectification",
-        "unqualified",
-    }
-    pass_values = {"1", "compliant", "pass", "passed", "qualified"}
-    if normalized in failure_values:
+    if normalized in NA_VALUES:
+        return None
+    if normalized in FAIL_VALUES or normalized in {"failed", "nonconformity", "pending_rectification"}:
         return "3"
-    if normalized in pass_values:
+    if normalized in PASS_VALUES or normalized in {"passed"}:
         return "1"
     return "2"
 

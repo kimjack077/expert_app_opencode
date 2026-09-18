@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.utils.llm_fallback import create_main_llm_client
+from app.utils.item_stats import FAIL_VALUES, classify_item
 from app.models.user import User
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import TemplateItem
@@ -1640,7 +1641,7 @@ class AgentService:
                     "rectification": item.rectification_suggestion,
                 }
                 for item in record.items
-                if item.radio_value == "fail" or item.result == "fail"
+                if classify_item(item) == "fail"
             ]
             history.append({
                 "record_id": str(record.id),
@@ -1718,7 +1719,7 @@ class AgentService:
             items_result = await db.execute(
                 select(InspectionRecordItem)
                 .where(InspectionRecordItem.record_id == record.id)
-                .where(InspectionRecordItem.radio_value == "fail")
+                .where(InspectionRecordItem.radio_value.in_(sorted(FAIL_VALUES)))
             )
             for item in items_result.scalars().all():
                 outstanding_issues.append({

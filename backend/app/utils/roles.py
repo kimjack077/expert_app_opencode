@@ -8,6 +8,9 @@
 # 平台级管理角色：拥有跨组织的全局管理权
 ADMIN_ROLES = frozenset({"admin", "super_admin"})
 
+# 最高管理角色：可执行管理员无法执行的操作（如删除其他管理员、改系统配置）
+SUPER_ADMIN_ROLES = frozenset({"super_admin"})
+
 # 只读复核角色：可查看全部业务数据但不应执行写操作
 REVIEWER_ROLES = frozenset({"auditor"})
 
@@ -20,6 +23,10 @@ FIELD_ROLES = frozenset({"expert"})
 
 def is_admin(role: str | None) -> bool:
     return role in ADMIN_ROLES
+
+
+def is_super_admin(role: str | None) -> bool:
+    return role in SUPER_ADMIN_ROLES
 
 
 def can_view_all_records(role: str | None) -> bool:

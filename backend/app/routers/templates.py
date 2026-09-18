@@ -393,8 +393,14 @@ async def delete_template(
     - 采用软删除（is_deleted=True），保留模板及其检查项的原始数据
     - 历史检查记录、审核计划等引用此模板的记录仍可正常访问
     - 唯一字段 code 会被重命名以避免阻塞新模板创建
+
+    级联：走 ``soft_delete_cascade``，但 ``FK_CASCADE_POLICY`` 中所有指向
+    ``inspection_templates`` 的关系都登记为 **PRESERVE**——即此处**有意不级联**。
+    走统一入口是为了让策略表成为唯一权威：将来若某个关系需要改判，
+    改策略表即可，不必回来改这个端点。
+    ``test_history_preserving_relations_are_not_cascaded`` 守住这条约定。
     """
-    from app.utils.soft_delete import soft_delete
+    from app.utils.soft_delete import soft_delete_cascade
 
     template = await db.get(InspectionTemplate, template_id)
     if not template or template.is_deleted:
@@ -405,7 +411,7 @@ async def delete_template(
         raise HTTPException(status_code=403, detail="您没有权限删除此模板")
 
     # 软删除：设置标记并重命名唯一字段
-    await soft_delete(db, template, unique_fields=["code"])
+    affected = await soft_delete_cascade(db, template, unique_fields=["code"])
 
     await db.commit()
 
@@ -418,7 +424,7 @@ async def delete_template(
         str(template.id),
     )
 
-    return make_response(message="Template deleted")
+    return make_response(message="Template deleted", data={"cascaded": affected})
 
 
 

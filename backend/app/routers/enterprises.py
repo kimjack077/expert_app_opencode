@@ -17,6 +17,10 @@ from app.models.enterprise import (
 )
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.schemas import ApiResponse
+# 统计「不合格」必须用 FAIL_VALUES 全别名集合，不能写 radio_value == "fail"：
+# 外部集成可能写入 non_compliant / unqualified，历史数据存在 "3"（三级评价编码）。
+# 只认字面量 "fail" 会让这些记录从「历史不合格项」里消失，与详情页对不上。
+from app.utils.item_stats import FAIL_VALUES
 from app.schemas.enterprise import (
     EnterpriseCreate,
     EnterpriseUpdate,
@@ -403,7 +407,7 @@ async def get_enterprise_risk_profile(
         fail_count_result = await db.execute(
             select(func.count(InspectionRecordItem.id))
             .where(InspectionRecordItem.record_id == record.id)
-            .where(InspectionRecordItem.radio_value == "fail")
+            .where(InspectionRecordItem.radio_value.in_(sorted(FAIL_VALUES)))
         )
         fail_count = fail_count_result.scalar() or 0
 
@@ -426,7 +430,7 @@ async def get_enterprise_risk_profile(
         fail_items_result = await db.execute(
             select(InspectionRecordItem)
             .where(InspectionRecordItem.record_id == latest_record.id)
-            .where(InspectionRecordItem.radio_value == "fail")
+            .where(InspectionRecordItem.radio_value.in_(sorted(FAIL_VALUES)))
             .limit(3)
         )
         fail_items = fail_items_result.scalars().all()

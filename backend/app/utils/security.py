@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
+from app.utils.roles import is_admin, is_super_admin
 
 security = HTTPBearer()
 
@@ -134,7 +135,9 @@ async def get_current_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if current_user.role not in ["super_admin", "admin"]:
+    # 角色判断统一走 app/utils/roles.py —— 硬编码列表会让「谁是管理员」
+    # 在不同端点漂移（项目里已发生过：超管在记录列表看不到全部数据）。
+    if not is_admin(current_user.role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
         )
@@ -144,7 +147,7 @@ async def get_current_admin_user(
 async def get_current_super_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if current_user.role != "super_admin":
+    if not is_super_admin(current_user.role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin permission required",

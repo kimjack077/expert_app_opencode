@@ -11,8 +11,30 @@ from app.models.audit import AuditLog, LLMCallLog
 from app.models.enterprise import Enterprise
 from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
+from app.utils.item_stats import classify_result
 
 router = APIRouter()
+
+
+def _summarize_task_records(record_rows) -> dict:
+    """按统一口径汇总检查项结果分布（工作台专用）。
+
+    与「检查记录详情」「检查报告」共用 ``app.utils.item_stats.classify_result``，
+    避免同一批数据在工作台与详情页给出不同的「不适用」数字——
+    历史上工作台只认 ``("na","not_applicable")``、详情只认 ``"na"``，两处对不上。
+
+    ``filled`` 定义为 pass + fail + na，保证
+    「合格 + 不合格 + 不适用 + 未填报 = 总检查项」在页面上闭合
+    （``observe`` / ``pending_rectification`` 属中间态，不计入已填报）。
+    """
+    stats = {"total": 0, "pass": 0, "fail": 0, "na": 0, "filled": 0}
+    for result, count in record_rows:
+        stats["total"] += count
+        bucket = classify_result(result)
+        if bucket:
+            stats[bucket] += count
+            stats["filled"] += count
+    return stats
 
 
 def make_response(data=None, code=200, message="success"):
@@ -57,14 +79,12 @@ async def get_dashboard(
                 .group_by(TaskItemRecord.result)
             )
         ).all()
-        total_records = sum(c for _, c in record_rows)
-        # result 非空即为「已填报」，用于把达标率分母限定在已填报项上
-        filled_records = sum(c for r, c in record_rows if r)
-        compliant_records = sum(c for r, c in record_rows if r == "pass")
-        non_compliant_records = sum(c for r, c in record_rows if r == "fail")
-        not_applicable_records = sum(
-            c for r, c in record_rows if r in ("na", "not_applicable")
-        )
+        _s = _summarize_task_records(record_rows)
+        total_records = _s["total"]
+        filled_records = _s["filled"]
+        compliant_records = _s["pass"]
+        non_compliant_records = _s["fail"]
+        not_applicable_records = _s["na"]
     else:
         task_rows = (
             await db.execute(
@@ -88,14 +108,12 @@ async def get_dashboard(
                 .group_by(TaskItemRecord.result)
             )
         ).all()
-        total_records = sum(c for _, c in record_rows)
-        # result 非空即为「已填报」，用于把达标率分母限定在已填报项上
-        filled_records = sum(c for r, c in record_rows if r)
-        compliant_records = sum(c for r, c in record_rows if r == "pass")
-        non_compliant_records = sum(c for r, c in record_rows if r == "fail")
-        not_applicable_records = sum(
-            c for r, c in record_rows if r in ("na", "not_applicable")
-        )
+        _s = _summarize_task_records(record_rows)
+        total_records = _s["total"]
+        filled_records = _s["filled"]
+        compliant_records = _s["pass"]
+        non_compliant_records = _s["fail"]
+        not_applicable_records = _s["na"]
 
     # 用户/企业总数只统计未删除记录，与列表页口径一致
     total_users = (
@@ -327,9 +345,13 @@ async def get_trends(
     fail_map: dict = {}
     for d, result, cnt in rec_rows:
         key = _day_key(d)
-        if result == "pass":
+        # 判定归类统一走 classify_result：旧实现只认字面量 "pass"/"fail"，
+        # 会漏掉 compliant / qualified / non_compliant / unqualified 等历史与外部集成写法，
+        # 导致趋势图与工作台汇总数字对不上。
+        bucket = classify_result(result)
+        if bucket == "pass":
             pass_map[key] = cnt
-        elif result == "fail":
+        elif bucket == "fail":
             fail_map[key] = cnt
 
     inspection_trend = []
@@ -453,8 +475,10 @@ async def export_data(
         )
         records = records_query.scalars().all()
         
-        compliant = sum(1 for r in records if r.result == "pass")
-        non_compliant = sum(1 for r in records if r.result == "fail")
+        # 导出报表的合格/不合格计数必须与详情页同源，
+        # 不能只认字面量 "pass"/"fail"。
+        compliant = sum(1 for r in records if classify_result(r.result) == "pass")
+        non_compliant = sum(1 for r in records if classify_result(r.result) == "fail")
         
         export_data.append({
             "task_id": str(task.id),

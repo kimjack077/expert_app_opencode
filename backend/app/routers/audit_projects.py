@@ -67,6 +67,7 @@ from app.schemas.audit_project import (
     CommunicationMeetingResponse,
 )
 from app.utils.security import get_current_user, get_user_from_token
+from app.utils.item_stats import classify_item
 
 router = APIRouter(prefix="/api/audit-projects", tags=["audit-projects"])
 
@@ -109,8 +110,15 @@ def area_record_response(record: AuditAreaRecord) -> dict:
         }
     items = record.items or []
     value["items_count"] = len(items)
-    value["pass_count"] = sum(1 for i in items if i.result == "pass" or i.evaluation_3level in {"1", "2"})
-    value["fail_count"] = sum(1 for i in items if i.result == "fail" or i.evaluation_3level == "3")
+    # 原实现用 `result == "pass" or evaluation_3level in {"1","2"}` 的 `or` 组合，
+    # 存在两个缺陷：① 一个条目可能同时计入合格与不合格（双计）；
+    # ② 完全忽略 radio_value —— 而 PC/H5 主路径写的就是 radio_value，
+    # 导致审核项目列表的合格数远小于详情页。
+    # classify_item 按 radio_value → result → evaluation_3level 优先级取**唯一**归类。
+    buckets = [classify_item(i) for i in items]
+    value["pass_count"] = sum(1 for b in buckets if b == "pass")
+    value["fail_count"] = sum(1 for b in buckets if b == "fail")
+    value["na_count"] = sum(1 for b in buckets if b == "na")
     return value
 
 
@@ -455,7 +463,19 @@ async def delete_audit_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除审核项目（软删除）"""
+    """删除审核项目（软删除）
+
+    项目是**聚合根**：区域、组员、会议、不符合项、报告、证据、AI 会话
+    在项目消失后都失去归属与展示入口。删除项目即删除该项目下的全部项目级数据，
+    由 ``FK_CASCADE_POLICY`` 统一登记与执行。
+
+    关键修复（外部测试 P0-29）：``audit_plan_items`` 此前不随项目软删，
+    导致「我的审核任务」列出这些计划项、点进去必定 404。
+    现登记为 CASCADE_SOFT（可逆），计划项与项目状态保持一致。
+
+    响应中的 ``cascaded`` 给出各子表实际影响行数，供前端提示
+    「将删除 N 项关联数据」并写入审计日志。
+    """
     await ensure_project_access(db, project_id, current_user, require_manage=True)
     result = await db.execute(
         select(AuditProject).where(AuditProject.id == project_id)
@@ -464,12 +484,12 @@ async def delete_audit_project(
     if not project or project.is_deleted:
         raise HTTPException(status_code=404, detail="审核项目不存在")
 
-    from app.utils.soft_delete import soft_delete
+    from app.utils.soft_delete import soft_delete_cascade
 
-    # 软删除项目本身（project_no 唯一字段需追加后缀避免冲突）
-    await soft_delete(db, project, unique_fields=["project_no"])
+    # 软删除项目本身（project_no 唯一字段需追加后缀避免冲突）+ 按策略级联
+    affected = await soft_delete_cascade(db, project, unique_fields=["project_no"])
     await db.commit()
-    return make_response(message="审核项目已删除")
+    return make_response(message="审核项目已删除", data={"cascaded": affected})
 
 
 # ==================== AuditTeamMember Routes ====================
@@ -801,7 +821,17 @@ async def delete_plan_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """删除审核计划项（软删除），同时软删除关联的检查任务"""
+    """删除审核计划项（软删除），同时软删除关联的检查任务
+
+    级联说明：
+
+    * 关联检查任务走 ``soft_delete_cascade`` —— ``task_item_records`` 是硬删除表，
+      任务软删后其明细会成为永久孤儿（实测 186 条），必须随任务清除。
+    * 计划项自身仅级联 ``ai_draft_records``（可重生成的过程缓存）。
+      不符合项 / 证据提交 / 现场检查记录均登记为 **PRESERVE**：
+      移除一项检查任务是日常操作，不得销毁已判定的业务结论与证据
+      （见 ``test_plan_item_removal_must_not_destroy_business_conclusions``）。
+    """
     result = await db.execute(
         select(AuditPlanItem).where(
             AuditPlanItem.id == plan_item_id,
@@ -813,18 +843,28 @@ async def delete_plan_item(
         raise HTTPException(status_code=404, detail="审核计划项不存在")
     await ensure_project_access(db, plan_item.project_id, current_user, require_manage=True)
 
-    from app.utils.soft_delete import soft_delete
+    from app.utils.soft_delete import soft_delete_cascade
 
-    # 软删除关联的检查任务
+    affected: dict[str, int] = {}
+
+    # 软删除关联的检查任务（含其明细，见 FK_CASCADE_POLICY）
     if plan_item.inspection_task_id:
         inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
         if inspection_task and not inspection_task.is_deleted:
-            await soft_delete(db, inspection_task, unique_fields=["task_no"])
+            for table_name, count in (
+                await soft_delete_cascade(db, inspection_task, unique_fields=["task_no"])
+            ).items():
+                affected[table_name] = affected.get(table_name, 0) + count
 
     # 软删除计划项本身
-    await soft_delete(db, plan_item)
+    for table_name, count in (await soft_delete_cascade(db, plan_item)).items():
+        affected[table_name] = affected.get(table_name, 0) + count
+
     await db.commit()
-    return make_response(message="审核计划项及关联的检查任务已删除")
+    return make_response(
+        message="审核计划项及关联的检查任务已删除",
+        data={"cascaded": affected},
+    )
 
 
 # ==================== AuditAreaRecord Routes ====================
