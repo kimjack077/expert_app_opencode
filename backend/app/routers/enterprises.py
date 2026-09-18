@@ -21,6 +21,7 @@ from app.schemas import ApiResponse
 # 外部集成可能写入 non_compliant / unqualified，历史数据存在 "3"（三级评价编码）。
 # 只认字面量 "fail" 会让这些记录从「历史不合格项」里消失，与详情页对不上。
 from app.utils.item_stats import FAIL_VALUES
+from app.utils.risk_level import normalize_risk_bucket
 from app.schemas.enterprise import (
     EnterpriseCreate,
     EnterpriseUpdate,
@@ -447,19 +448,9 @@ async def get_enterprise_risk_profile(
             if item.item_title:
                 focus_points.append(f"上次\"{item.item_title}\"不合格")
 
-    def map_risk_level(level):
-        if not level:
-            return "low"
-        level_map = {
-            "A": "high",
-            "B": "medium",
-            "C": "low",
-            "D": "low",
-            "high": "high",
-            "medium": "medium",
-            "low": "low"
-        }
-        return level_map.get(level, "low")
+    # 风险等级归一统一走 app.utils.risk_level（A=低、B=中、C/D=高）。
+    # 此处曾自建一份映射且与前端标签倒挂，已收敛。
+    map_risk_level = normalize_risk_bucket
 
     mapped_risk_level = map_risk_level(enterprise.risk_level)
 

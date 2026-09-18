@@ -12,6 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { taskApi, templateApi } from '@/services/api'
 import { formatRemarksForDisplay } from '@/utils/display'
+import { isItemAssessed } from '@/utils/completion'
 import dayjs from 'dayjs'
 
 const PASS_RESULTS = new Set(['compliant', 'pass', 'qualified', '1'])
@@ -68,7 +69,8 @@ export default function TaskDetail() {
             ;(node.children || []).forEach(countLeaves)
           } else {
             totalLeaves++
-            if (node.result) completedLeaves++
+            // 统一判据：合格/不合格/不适用均算完成，描述型与数值型有内容也算完成
+            if (isItemAssessed(node)) completedLeaves++
           }
         }
         children.forEach(countLeaves)
@@ -92,7 +94,13 @@ export default function TaskDetail() {
           description: item.description,
           clause_no: item.clause_no,
           is_category: false,
+          // 检查项类型与结果字段：供统一判据 isItemAssessed 使用。
+          // check_type 与 result_type 需**都带上**——模板库里前者恒为默认 'radio'，
+          // 真实类型在 result_type，由 resolveCheckType 取非默认值判定。
+          check_type: item.check_type,
+          result_type: item.result_type,
           result: matched?.result || '',
+          result_value: matched?.result_value ?? null,
           result_text: matched?.result_text || '',
           inspector_note: matched?.inspector_note || '',
         }
@@ -114,6 +122,12 @@ export default function TaskDetail() {
         '未命名检查项',
       parent_id: r?.template_item?.parent_id || r?.check_item?.parent_id || null,
       is_category: !!(r?.template_item?.is_category || r?.check_item?.is_category),
+      // 检查项类型：供统一判据 isItemAssessed 使用（两个字段都带上）
+      check_type: r?.check_type || r?.template_item?.check_type || r?.check_item?.check_type,
+      result_type:
+        r?.result_type ||
+        r?.template_item?.result_type ||
+        r?.check_item?.result_type,
     }))
 
     const idMap = new Map<string, any>()
@@ -244,6 +258,25 @@ export default function TaskDetail() {
     return <Tag color={item.color}>{item.text}</Tag>
   }
 
+  // 叶子检查项的结果展示：判定型显示结论标签；描述型/数值型显示实际填写内容；
+  // 完全为空才显示「未评定」。与完成度判据 isItemAssessed 同口径——
+  // 历史上这里只读 result 字段，描述型/数值型项明明填了内容却显示「未评定」。
+  const getLeafResultDisplay = (record: any) => {
+    if (!isItemAssessed(record)) return getResultTag('')
+    if (record.result) return getResultTag(record.result)
+
+    const numeric = record.result_value
+    if (numeric !== null && numeric !== undefined && String(numeric).trim() !== '') {
+      return <Tag color="blue">{String(numeric)}</Tag>
+    }
+    if (record.result_text) {
+      return (
+        <span style={{ color: '#334155', fontSize: 13 }}>{record.result_text}</span>
+      )
+    }
+    return <Tag color="success">已填写</Tag>
+  }
+
   const handleComplete = async () => {
     try {
       await taskApi.completeTask(id!)
@@ -345,7 +378,7 @@ export default function TaskDetail() {
             </Tag>
           )
         }
-        return getResultTag(result)
+        return getLeafResultDisplay(record)
       },
     },
     {
@@ -373,7 +406,10 @@ export default function TaskDetail() {
       (r) => !(r.template_item?.is_category || r.check_item?.is_category)
     )
     const total = list.length
-    const completed = list.filter((r) => r.result).length
+    // 与后端 GET /tasks/{id}/summary、H5 现场端同口径（app.utils.item_completion）
+    const completed = list.filter((r) =>
+      isItemAssessed(r.template_item || r, r),
+    ).length
     const compliant = list.filter((r) => PASS_RESULTS.has(r.result)).length
     const non_compliant = list.filter((r) => FAIL_RESULTS.has(r.result)).length
     const not_applicable = list.filter((r) => NA_RESULTS.has(r.result)).length

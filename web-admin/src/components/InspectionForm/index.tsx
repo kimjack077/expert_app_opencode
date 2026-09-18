@@ -286,7 +286,26 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       payload.result = valueToSend
     } else if (field === 'score_value' || field === 'numeric_value') {
       payload.result_value = valueToSend == null ? null : String(valueToSend)
-      if (!item.radio_value && !item.result) payload.result = 'pass'
+      // BUG-11：数值/打分项按阈值自动判定；未配置阈值时不写 result，
+      // 该类项在统计口径中归入「其他项」，避免虚增合规率。
+      if (!item.radio_value && !item.result) {
+        const numVal = Number(valueToSend)
+        if (valueToSend !== null && valueToSend !== '' && !Number.isNaN(numVal)) {
+          if (field === 'score_value') {
+            if (item.pass_score !== null && item.pass_score !== undefined) {
+              payload.result = numVal >= Number(item.pass_score) ? 'pass' : 'fail'
+            }
+          } else {
+            const hasMin = item.min_value !== null && item.min_value !== undefined
+            const hasMax = item.max_value !== null && item.max_value !== undefined
+            if (hasMin || hasMax) {
+              const inRange = (!hasMin || numVal >= Number(item.min_value))
+                && (!hasMax || numVal <= Number(item.max_value))
+              payload.result = inRange ? 'pass' : 'fail'
+            }
+          }
+        }
+      }
     } else if (field === 'text_value') {
       payload.result_text = valueToSend
     } else if (field === 'inspector_note') {

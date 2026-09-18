@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any, AsyncGenerator, Optional
 from uuid import UUID
 
@@ -8,8 +9,13 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.utils.llm_fallback import create_main_llm_client
+from app.utils.llm_fallback import (
+    create_main_llm_client,
+    served_model as fb_served_model,
+    was_fallback as fb_was_fallback,
+)
 from app.utils.item_stats import FAIL_VALUES, classify_item
+from app.utils.business_time import BUSINESS_TZ, meeting_time_for_schedule
 from app.models.user import User
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.template import TemplateItem
@@ -22,6 +28,26 @@ from app.services.rag_service import rag_service
 from app.services.template_recommendation_service import template_recommendation_service
 from app.services.multimodal_service import multimodal_service
 from app.services.agent_memory_service import agent_memory_service
+
+
+def _parse_meeting_datetime(raw: str) -> Optional[datetime]:
+    """宽松解析 LLM 返回的会议时间字符串，失败返回 None（按业务时区解释）。"""
+    text = str(raw or "").strip().replace("T", " ").replace("/", "-")
+    if not text:
+        return None
+    # 注意切片宽度是「格式化输出长度」而非格式串长度（%Y 在串里只占 2 个字符位）。
+    formats = (
+        ("%Y-%m-%d %H:%M:%S", 19),
+        ("%Y-%m-%d %H:%M", 16),
+        ("%Y-%m-%d", 10),
+    )
+    for pattern, width in formats:
+        try:
+            parsed = datetime.strptime(text[:width], pattern)
+            return parsed.replace(tzinfo=BUSINESS_TZ)
+        except ValueError:
+            continue
+    return None
 
 
 AGENT_SYSTEM_PROMPT = """你是EFIS系统的智审Agent（审核员智能现场辅助助手）。你正在辅助审核员和评审专家完成现场审核、计划管理与合规判定工作。
@@ -763,6 +789,8 @@ class AgentService:
         knowledge_search_signatures: set[str] = set()
         knowledge_search_count = 0
         collected_tool_results: list[tuple[str, Any]] = []
+        # BUG-15：流式降级后 chunk.model 是真实服务模型，记账时用它而非请求模型名。
+        served_model_name: Optional[str] = None
 
         try:
             for round_idx in range(MAX_TOOL_ROUNDS):
@@ -802,6 +830,9 @@ class AgentService:
                 streamed_any_content = False
 
                 async for chunk in response:
+                    chunk_model = getattr(chunk, "model", None)
+                    if chunk_model:
+                        served_model_name = str(chunk_model)
                     if not chunk.choices:
                         if getattr(chunk, "usage", None):
                             total_tokens += chunk.usage.total_tokens or 0
@@ -981,6 +1012,9 @@ class AgentService:
 
         finally:
             duration_ms = int((time.monotonic() - start_time) * 1000)
+            logged_model = served_model_name or self.model
+            if served_model_name and served_model_name != self.model:
+                logged_model = f"{served_model_name}（备用通道）"
             try:
                 await self._log_call(
                     db=db,
@@ -991,6 +1025,7 @@ class AgentService:
                     tokens_used=total_tokens,
                     duration_ms=duration_ms,
                     error_text=error_text,
+                    model=logged_model,
                 )
             except Exception as log_err:
                 print(f"[Agent] Failed to write LLMCallLog: {log_err}")
@@ -1803,6 +1838,8 @@ class AgentService:
         briefing_text = ""
         tokens_used = 0
         error_text: Optional[str] = None
+        served_model_name: Optional[str] = None
+        used_fallback = False
         try:
             response = await client.chat.completions.create(
                 model=selected_model,
@@ -1810,6 +1847,8 @@ class AgentService:
                 max_tokens=max_tokens,
                 temperature=0.5,
             )
+            served_model_name = fb_served_model(response, selected_model)
+            used_fallback = fb_was_fallback(response)
             briefing_text = response.choices[0].message.content or ""
             tokens_used = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
             if not briefing_text.strip():
@@ -1826,6 +1865,9 @@ class AgentService:
                 "status_code": 502,
             }
         finally:
+            logged_model = served_model_name or selected_model
+            if used_fallback and served_model_name:
+                logged_model = f"{served_model_name}（备用通道）"
             try:
                 await self._log_call(
                     db=db,
@@ -1837,7 +1879,7 @@ class AgentService:
                     duration_ms=int((time.monotonic() - start_time) * 1000),
                     error_text=error_text,
                     call_type="agent_briefing",
-                    model=selected_model,
+                    model=logged_model,
                 )
             except Exception as log_err:
                 print(f"[Agent] Failed to write briefing LLMCallLog: {log_err}")
@@ -1887,6 +1929,7 @@ class AgentService:
         collected_text = ""
         stream_tokens = 0
         stream_error: Optional[str] = None
+        served_model_name: Optional[str] = None
         try:
             stream = await client.chat.completions.create(
                 model=selected_model,
@@ -1896,6 +1939,9 @@ class AgentService:
                 stream=True,
             )
             async for chunk in stream:
+                chunk_model = getattr(chunk, "model", None)
+                if chunk_model:
+                    served_model_name = str(chunk_model)
                 usage = getattr(chunk, "usage", None)
                 if usage and getattr(usage, "total_tokens", None):
                     stream_tokens = usage.total_tokens
@@ -1916,6 +1962,9 @@ class AgentService:
             }
             return
         finally:
+            logged_model = served_model_name or selected_model
+            if served_model_name and served_model_name != selected_model:
+                logged_model = f"{served_model_name}（备用通道）"
             try:
                 await self._log_call(
                     db=db,
@@ -1924,10 +1973,10 @@ class AgentService:
                     prompt=briefing["prompt"],
                     response=collected_text,
                     tokens_used=stream_tokens,
-                    duration_ms=int((time.monotonic() - start_time) * 1000),
+                    duration_ms=int(time.monotonic() - start_time) * 1000,
                     error_text=stream_error,
                     call_type="agent_briefing_stream",
-                    model=selected_model,
+                    model=logged_model,
                 )
             except Exception as log_err:
                 print(f"[Agent] Failed to write briefing LLMCallLog: {log_err}")
@@ -2794,7 +2843,6 @@ class AgentService:
         db: AsyncSession,
     ) -> dict:
         """为当前审核项目生成首末次会议或沟通会议记录确认卡片。"""
-        from datetime import date
         project_id = self._normalize_uuid(args.get("project_id")) or self._normalize_uuid(
             context.get("project_id")
         )
@@ -2840,9 +2888,22 @@ class AgentService:
             meeting_type_title = "沟通会议"
 
         meeting_time_str = str(args.get("meeting_time") or "").strip()
-        if not meeting_time_str:
-            base_date = project.scheduled_start or date.today()
-            meeting_time_str = f"{base_date} 08:30"
+        proposed_dt = None
+        if meeting_time_str:
+            parsed = _parse_meeting_datetime(meeting_time_str)
+            if parsed is not None:
+                proposed_dt = parsed
+            else:
+                meeting_time_str = ""
+
+        # BUG-09：LLM 给的时间可能偏离项目排期（实测提前一年），
+        # 在确认卡片阶段就收敛进排期窗口，并显式标注「已校正」。
+        meeting_dt, adjusted = meeting_time_for_schedule(
+            project, meeting_type, proposed_dt
+        )
+        meeting_time_str = meeting_dt.strftime("%Y-%m-%d %H:%M")
+        if proposed_dt is None:
+            adjusted = True
 
         # 整理参会审核员名单
         raw_names = args.get("participant_names") or args.get("auditor_names") or []
@@ -2874,6 +2935,12 @@ class AgentService:
                 "meeting_type": meeting_type,
                 "meeting_type_display": meeting_type_title,
                 "meeting_time": meeting_time_str,
+                "meeting_time_adjusted": bool(adjusted),
+                "meeting_time_hint": (
+                    "会议时间已按项目审核排期自动校正，请核对后再确认录入"
+                    if adjusted
+                    else ""
+                ),
                 "participants_enterprise": enterprise_participants,
                 "participant_names": assigned_names,
                 "participants_audit_team_desc": participants_desc or "、".join(assigned_names),

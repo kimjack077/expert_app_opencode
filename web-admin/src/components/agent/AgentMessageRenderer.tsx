@@ -147,7 +147,14 @@ export default function AgentMessageRenderer({ message }: Props) {
         <div className={`action-status ${message.actionConfirm.status}`} role="status">
           {message.actionConfirm.status === 'confirmed' && <><CheckCircleOutlined /> 已确认并写入</>}
           {message.actionConfirm.status === 'cancelled' && <><CloseCircleOutlined /> 已拒绝</>}
-          {message.actionConfirm.status === 'failed' && <><ExclamationCircleOutlined /> 写入失败，可重新向 Agent 发起操作</>}
+          {message.actionConfirm.status === 'failed' && (
+            <>
+              <ExclamationCircleOutlined /> 写入失败
+              {message.actionConfirm.data?.failure_reason
+                ? `：${String(message.actionConfirm.data.failure_reason)}`
+                : '，可重新向 Agent 发起操作'}
+            </>
+          )}
         </div>
       )}
     </div>

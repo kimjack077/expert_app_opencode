@@ -486,11 +486,20 @@ export default function AgentSidebar({ context }: Props) {
         }),
       )
     } catch (error) {
+      const reason = (error as Error)?.message || '确认操作失败'
       updateAssistant(messageId, (item) => ({
         ...item,
-        actionConfirm: item.actionConfirm ? { ...item.actionConfirm, status: 'failed' } : undefined,
+        actionConfirm: item.actionConfirm
+          ? {
+              ...item.actionConfirm,
+              status: 'failed',
+              // 把服务端具体原因（如「该项目已存在首次会议记录…」）带到卡片内联展示，
+              // 而不是只弹一个转瞬即逝的全局提示。
+              data: { ...item.actionConfirm.data, failure_reason: reason },
+            }
+          : undefined,
       }))
-      message.error((error as Error).message || '确认操作失败')
+      message.error(reason)
     } finally {
       setApplyingMessageId(undefined)
     }

@@ -857,28 +857,26 @@ export default function Templates() {
       title: '条目统计',
       key: 'stats',
       render: (_: any, record: any) => {
-        const stats = record.stats
-        if (!stats || stats.total_items === 0) {
-          return <span style={{ color: '#bfbfbf' }}>暂无条目</span>
-        }
+        // BUG-17：空模板也按统一格式展示 0 值（原「暂无条目」与 N 条 · M 目录 · K 检查项格式不一致）
+        const stats = record.stats || { total_items: 0, categories: 0, check_items: 0 }
         return (
           <Space size={8}>
             <Tooltip title="总条目数">
               <Tag color="blue" style={{ borderRadius: 4 }}>
                 <FolderOutlined style={{ marginRight: 4 }} />
-                {stats.total_items} 条
+                {stats.total_items ?? 0} 条
               </Tag>
             </Tooltip>
             <Tooltip title="分类目录数">
               <Tag color="cyan" style={{ borderRadius: 4 }}>
                 <FolderOutlined style={{ marginRight: 4 }} />
-                {stats.categories} 目录
+                {stats.categories ?? 0} 目录
               </Tag>
             </Tooltip>
             <Tooltip title="检查项数">
               <Tag color="green" style={{ borderRadius: 4 }}>
                 <FileTextOutlined style={{ marginRight: 4 }} />
-                {stats.check_items} 检查项
+                {stats.check_items ?? 0} 检查项
               </Tag>
             </Tooltip>
           </Space>

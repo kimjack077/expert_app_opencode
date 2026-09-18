@@ -233,9 +233,15 @@ const logout = async () => {
   }
 }
 
-onMounted(() => {
-  fetchUser()
-  fetchStats()
+onMounted(async () => {
+  // 顺序加载：冷启动后首次进入时，鉴权状态可能尚在恢复，
+  // 并行拉取偶发「未登录 + 0」瞬时态；用户信息失败时短暂等待重试一次再拉统计。
+  await fetchUser()
+  if (!user.value) {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await fetchUser()
+  }
+  await fetchStats()
 })
 </script>
 

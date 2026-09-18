@@ -213,6 +213,9 @@ export default function Dashboard() {
   // 此前页面文案写成「已填报合格项 / 已填报项」，与 50.59% 的实际取值互相矛盾，
   // 且与趋势图（旧式：合格 ÷(合格+不合格)）给出同一屏两个数字。
   const COMPLIANCE_FORMULA = '合格 ÷（总检查项 − 不适用项）'
+  // 把分母直接算出来展示，避免副标题只给「已填报 N 项」时读者自己拿它当分母，
+  // 算出与主数字不同的比例（实测 46÷70=65.7% vs 主数字 52.87%）。
+  const complianceDenominator = Math.max(totalItems - notApplicableItems, 0)
 
   // 趋势图展示区间跟随日期筛选，不再固定截断 14 天
   const trendDays = Math.max(dateRange[1].diff(dateRange[0], 'day') + 1, 1)
@@ -299,7 +302,7 @@ export default function Dashboard() {
           >
             <div>
               <div className="dashboard-kpi-header">
-                <span className="dashboard-kpi-title">待办 / 进行中任务</span>
+                <span className="dashboard-kpi-title">日常检查任务待办</span>
                 <div className="dashboard-kpi-icon" style={{ background: '#e0f2fe', color: '#0284c7' }}>
                   <ClockCircleOutlined />
                 </div>
@@ -377,7 +380,10 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="dashboard-kpi-footer">
-              <span>已填报 {filledItems} 项 · 合格 {compliantItems} · 不合格 {nonCompliantItems}</span>
+              <span>
+                合格 {compliantItems} ÷ 分母 {complianceDenominator} 项
+                （总 {totalItems} − 不适用 {notApplicableItems}）
+              </span>
               <span style={{ color: '#16a34a', fontWeight: 600 }}>查看任务 →</span>
             </div>
           </div>
@@ -558,7 +564,7 @@ export default function Dashboard() {
             title={
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <ClockCircleOutlined style={{ color: 'var(--primary-color)' }} />
-                <span>最近审核任务</span>
+                <span>最近日常检查任务</span>
               </div>
             }
             extra={
@@ -621,8 +627,8 @@ export default function Dashboard() {
                   <ScheduleOutlined />
                 </div>
                 <div>
-                  <div className="dashboard-tile-title">我的任务</div>
-                  <div className="dashboard-tile-desc">现场检查快捷录入</div>
+                  <div className="dashboard-tile-title">我的审核任务</div>
+                  <div className="dashboard-tile-desc">项目计划派发 · 现场录入</div>
                 </div>
               </div>
 

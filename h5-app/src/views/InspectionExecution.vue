@@ -792,7 +792,27 @@ const buildTaskItemPayload = (item, inputs = {}) => {
     const val = checkType === 'score' ? inputs.score_value : inputs.numeric_value
     if (val !== '' && val != null) {
       payload.result_value = String(val)
-      payload.result = inputs.radio_value || 'pass'
+      // BUG-11：数值/打分项必须按阈值自动判定，无阈值时不得默认 pass，
+      // 否则任何数值录入都会虚增合规率；无阈值项在统计中归入「其他项」。
+      const numVal = Number(val)
+      let autoResult = ''
+      if (!Number.isNaN(numVal)) {
+        if (checkType === 'score') {
+          if (item.pass_score !== null && item.pass_score !== undefined) {
+            autoResult = numVal >= Number(item.pass_score) ? 'pass' : 'fail'
+          }
+        } else {
+          const hasMin = item.min_value !== null && item.min_value !== undefined
+          const hasMax = item.max_value !== null && item.max_value !== undefined
+          if (hasMin || hasMax) {
+            const inRange = (!hasMin || numVal >= Number(item.min_value))
+              && (!hasMax || numVal <= Number(item.max_value))
+            autoResult = inRange ? 'pass' : 'fail'
+          }
+        }
+      }
+      if (inputs.radio_value) payload.result = inputs.radio_value
+      else if (autoResult) payload.result = autoResult
     }
   } else if (checkType === 'multi_check') {
     if (Array.isArray(inputs.multi_value) && inputs.multi_value.length) {
@@ -1092,7 +1112,13 @@ const fetchRecord = async () => {
       return
     }
 
-    const isTaskRoute = route.path.includes('/task/') && route.path.includes('/execute')
+    // 任务执行路由：直接走任务数据链（与 Web 一致）
+    // 注意：单项页保存后会跳到 /inspection/:taskId?mode=task 这类兼容路由，
+    // 必须连同 mode=task 一起识别，否则会先静默探测 /records/:taskId 打一条 404
+    // 再回退任务链，功能正常但控制台全程报红（UI-H-19）。
+    const isTaskRoute =
+      (route.path.includes('/task/') && route.path.includes('/execute'))
+      || route.query.mode === 'task'
 
     // 任务执行路由：直接走任务数据链（与 Web 一致）
     if (isTaskRoute) {

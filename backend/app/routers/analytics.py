@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
@@ -12,6 +12,7 @@ from app.models.enterprise import Enterprise
 from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.item_stats import classify_result, classify_result_ext
+from app.utils.risk_level import levels_in_bucket
 
 router = APIRouter()
 
@@ -404,32 +405,29 @@ async def get_enterprise_risk(
 ):
     # 风险分布只统计未删除企业，与「企业总库」列表口径一致
     #（曾有 93 家软删除企业把高风险 2 统计成 7、中风险 6 统计成 94）
+    #
+    # 等级语义：A=低风险、B=一般（中风险）、C=较高风险、D=高风险。
+    # 历史上此处把 A 归为 high、把 C/D 归为 low，与前端标签完全倒挂，
+    # 导致「风险预警企业」统计失真。现统一走 app.utils.risk_level。
     active = Enterprise.is_deleted == False  # noqa: E712
-    high_risk = (
-        await db.execute(
-            select(func.count(Enterprise.id)).where(
-                active, Enterprise.risk_level == "A"
-            )
-        )
-    ).scalar() or 0
 
-    medium_risk = (
-        await db.execute(
-            select(func.count(Enterprise.id)).where(
-                active, Enterprise.risk_level == "B"
+    async def _count_bucket(bucket: str) -> int:
+        levels = levels_in_bucket(bucket)
+        named = [lv for lv in levels if lv is not None]
+        # SQL 的 IN 永远不会命中 NULL，未评级需单独用 IS NULL 判定
+        conditions = [Enterprise.risk_level.in_(named)]
+        if any(lv is None for lv in levels):
+            conditions.append(Enterprise.risk_level.is_(None))
+        return (
+            await db.execute(
+                select(func.count(Enterprise.id)).where(active, or_(*conditions))
             )
-        )
-    ).scalar() or 0
+        ).scalar() or 0
 
-    low_risk = (
-        await db.execute(
-            select(func.count(Enterprise.id)).where(
-                active,
-                Enterprise.risk_level.in_(["C", "D", None]),
-            )
-        )
-    ).scalar() or 0
-    
+    high_risk = await _count_bucket("high")
+    medium_risk = await _count_bucket("medium")
+    low_risk = await _count_bucket("low")
+
     return make_response(
         data={
             "high": high_risk,

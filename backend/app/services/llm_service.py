@@ -9,7 +9,11 @@ from app.models.task import TaskItemRecord
 from app.models.record import InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.audit import LLMCallLog
-from app.utils.llm_fallback import create_main_llm_client
+from app.utils.llm_fallback import (
+    create_main_llm_client,
+    served_model as fb_served_model,
+    was_fallback as fb_was_fallback,
+)
 from app.utils.item_stats import classify_result
 
 
@@ -287,6 +291,8 @@ class LLMService:
         error_msg = None
         content = ""
         tokens_used = 0
+        served = self.model
+        used_fallback = False
 
         try:
             print(f"[LLM] Calling API with model={self.model}, prompt length={len(prompt)}")
@@ -297,9 +303,13 @@ class LLMService:
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
             )
+            # BUG-15：主模型 429/超时降级后，日志必须记录真实提供服务的模型，
+            # 而不是仍记主模型「成功」。
+            served = fb_served_model(response, self.model)
+            used_fallback = fb_was_fallback(response)
             content = response.choices[0].message.content or ""
             tokens_used = response.usage.total_tokens if response.usage else 0
-            print(f"[LLM] Response received: {content[:100]}...")
+            print(f"[LLM] Response received (model={served}, fallback={used_fallback}): {content[:100]}...")
         except Exception as e:
             error_msg = str(e)
             print(f"[LLM] Error: {error_msg}")
@@ -314,7 +324,8 @@ class LLMService:
             call_type=call_type,
             prompt=prompt,
             response=content,
-            model=self.model,
+            # 降级时显式标注真实模型，便于在 LLM 调用记录里区分主/备通道。
+            model=(f"{served}（备用通道）" if used_fallback else served),
             tokens_used=tokens_used,
             duration_ms=duration_ms,
             is_success="false" if error_msg else "true",

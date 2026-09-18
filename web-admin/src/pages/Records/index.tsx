@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import InspectionReport from './InspectionReport'
 import { hasQuantifiedItems, resultLabel, resultTagColor } from '@/utils/display'
+import { isItemAssessed } from '@/utils/completion'
 
 const { RangePicker } = DatePicker
 
@@ -843,13 +844,8 @@ function TreeItem({
         ;(node.children || []).forEach(count)
       } else {
         total++
-        if (
-          node.radio_value ||
-          (node.score_value !== null && node.score_value !== undefined && node.score_value !== '') ||
-          node.text_value ||
-          (node.numeric_value !== null && node.numeric_value !== undefined && node.numeric_value !== '') ||
-          node.result
-        ) {
+        // 统一判据：合格/不合格/不适用均算已评定；描述型/数值型/打分型有内容也算
+        if (isItemAssessed(node)) {
           completed++
         }
       }

@@ -29,6 +29,7 @@ from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import calculate_item_stats, classify_result
 from app.utils.business_time import business_day_bounds
 from app.utils.item_write_guard import validate_item_payload
+from app.utils.item_completion import resolve_check_type
 from app.services import AuditService
 from app.services.llm_service import llm_service
 
@@ -365,7 +366,11 @@ async def create_record(
                 item_legal_basis=item.legal_basis,
                 item_standard_ref=item.standard_ref,
                 item_risk_level=item.risk_level,
-                item_check_type=item.check_type,
+                # 快照必须落**真实类型**：template_items 上 check_type 恒为列默认值
+                # 'radio'，真实类型在 result_type（数值/文字描述项也一样）。
+                # 直接写 item.check_type 会让描述型/数值型检查项在快照里变成判定型，
+                # 后续「是否已评定」判定与报告展示全部失准。
+                item_check_type=resolve_check_type(item),
                 item_result_options=item.result_options,
                 item_min_value=item.min_value,
                 item_max_value=item.max_value,
@@ -1898,9 +1903,13 @@ async def download_report_pdf(
     result = await db.execute(
         select(InspectionRecord)
         .options(
-            selectinload(InspectionRecord.template),
+            # 必须与 /report 预览端点保持同一组预加载：generate_pdf 是同步方法，
+            # 内部访问 record.items / record.template.items 会触发异步懒加载，
+            # 在 async 接口里直接抛 MissingGreenlet（BUG-01：全量记录 PDF 500）。
+            selectinload(InspectionRecord.template).selectinload(InspectionTemplate.items),
             selectinload(InspectionRecord.enterprise),
             selectinload(InspectionRecord.inspector),
+            selectinload(InspectionRecord.items),
         )
         .where(
             InspectionRecord.id == record_id,

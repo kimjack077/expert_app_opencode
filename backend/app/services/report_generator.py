@@ -2,8 +2,11 @@
 审核报告生成服务
 Audit Report Generator Service
 """
+import logging
 from datetime import datetime
+from html import escape
 from io import BytesIO
+from pathlib import Path
 from typing import List, Dict, Any
 from uuid import UUID
 
@@ -12,9 +15,10 @@ from docx.shared import Pt, RGBColor, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy import select
@@ -29,6 +33,55 @@ from app.models.audit_project import (
 )
 from app.models.user import User
 from app.models.enterprise import Enterprise
+
+
+logger = logging.getLogger(__name__)
+
+_CJK_FONT_NAME = "Helvetica"
+
+
+def _ensure_cjk_font() -> str:
+    """注册仓库自带中文字体，返回供 reportlab 使用的字体名。
+
+    BUG-02：项目报告 PDF 原先全程使用内置 Helvetica，中文字形被静默丢弃，
+    导出文件只有 3.2KB 且无正文。字体注册策略与 report_service 保持一致：
+    仓库字体优先（随部署分发），系统字体兜底；进程内只注册一次。
+    """
+    global _CJK_FONT_NAME
+    if _CJK_FONT_NAME != "Helvetica":
+        return _CJK_FONT_NAME
+    if "ChineseFont" in pdfmetrics.getRegisteredFontNames():
+        _CJK_FONT_NAME = "ChineseFont"
+        return _CJK_FONT_NAME
+
+    repo_fonts = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+    candidates = [
+        repo_fonts / "NotoSansSC-Regular.ttf",
+        repo_fonts / "SourceHanSansSC-Regular.otf",
+        Path("C:/Windows/Fonts/simhei.ttf"),
+        Path("C:/Windows/Fonts/msyh.ttc"),
+        Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/System/Library/Fonts/PingFang.ttc"),
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            pdfmetrics.registerFont(TTFont("ChineseFont", str(path), subfontIndex=0))
+            _CJK_FONT_NAME = "ChineseFont"
+            logger.info("项目报告 PDF 使用中文字体：%s", path)
+            return _CJK_FONT_NAME
+        except Exception as exc:
+            logger.warning("注册中文字体失败，继续尝试下一个：%s (%s)", path, exc)
+
+    logger.error("项目报告 PDF 未找到可用中文字体，中文将无法正常显示：%s", repo_fonts)
+    return _CJK_FONT_NAME
+
+
+def _p(text: Any) -> str:
+    """动态文本转 Paragraph 安全 HTML：转义特殊字符并把换行转为 <br/>。"""
+    return escape(str(text if text is not None else "")).replace("\n", "<br/>")
 
 
 class AuditReportGenerator:
@@ -71,36 +124,64 @@ class AuditReportGenerator:
         """生成 PDF 格式审核报告"""
         # 获取项目数据
         project_data = await self._fetch_project_data(project_id)
-        
+
+        font_name = _ensure_cjk_font()
+
         # 创建 PDF 文档
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        
-        # 构建内容
-        story = []
-        styles = getSampleStyleSheet()
-        
-        # 添加标题
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#1a1a1a'),
-            spaceAfter=30,
-            alignment=1  # 居中
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=20 * mm,
+            rightMargin=20 * mm,
+            topMargin=20 * mm,
+            bottomMargin=20 * mm,
         )
-        story.append(Paragraph('审核报告', title_style))
-        story.append(Spacer(1, 0.3 * inch))
-        
+
+        # 构建内容（所有样式显式绑定中文字体，避免回退 Helvetica 丢字形）
+        story = []
+        base = getSampleStyleSheet()
+        styles = {
+            'Title': ParagraphStyle(
+                'PdfTitle', parent=base['Heading1'], fontName=font_name,
+                fontSize=22, leading=30, alignment=TA_CENTER, spaceAfter=10 * mm,
+            ),
+            'H1': ParagraphStyle(
+                'PdfH1', parent=base['Heading1'], fontName=font_name,
+                fontSize=15, leading=22, textColor=colors.HexColor('#1e40af'),
+                spaceBefore=6 * mm, spaceAfter=4 * mm,
+            ),
+            'H2': ParagraphStyle(
+                'PdfH2', parent=base['Heading2'], fontName=font_name,
+                fontSize=12, leading=18, spaceBefore=4 * mm, spaceAfter=2 * mm,
+            ),
+            'Normal': ParagraphStyle(
+                'PdfNormal', parent=base['Normal'], fontName=font_name,
+                fontSize=10.5, leading=18,
+            ),
+            'Cell': ParagraphStyle(
+                'PdfCell', parent=base['Normal'], fontName=font_name,
+                fontSize=9, leading=14,
+            ),
+            'Right': ParagraphStyle(
+                'PdfRight', parent=base['Normal'], fontName=font_name,
+                fontSize=10.5, leading=18, alignment=TA_RIGHT,
+            ),
+        }
+
+        # 添加标题
+        story.append(Paragraph('审核报告', styles['Title']))
+        story.append(Spacer(1, 0.2 * inch))
+
         # 第一章：审核过程综述
         self._add_pdf_chapter_1(story, styles, project_data)
-        
+
         # 第二章：管理体系综合评价
         self._add_pdf_chapter_2(story, styles, project_data)
-        
+
         # 第三章：审核结论
         self._add_pdf_chapter_3(story, styles, project_data)
-        
+
         # 生成 PDF
         doc.build(story)
         buffer.seek(0)
@@ -294,68 +375,164 @@ class AuditReportGenerator:
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     def _add_pdf_chapter_1(self, story: List, styles: Any, data: Dict[str, Any]):
-        """添加 PDF 第一章"""
-        story.append(Paragraph('一、审核过程综述', styles['Heading1']))
-        story.append(Spacer(1, 0.2 * inch))
-        
+        """添加 PDF 第一章（内容与 Word 版保持一致）"""
+        font_name = _ensure_cjk_font()
+        story.append(Paragraph('一、审核过程综述', styles['H1']))
+
         project = data['project']
         enterprise = data['enterprise']
-        
-        # 基本信息
-        story.append(Paragraph('1.1 受审核方基本信息', styles['Heading2']))
-        info_text = f"""
-        企业名称：{enterprise.name if enterprise else '未知'}<br/>
-        统一社会信用代码：{enterprise.credit_code if enterprise else '未知'}<br/>
-        地址：{enterprise.address if enterprise else '未知'}
-        """
-        story.append(Paragraph(info_text, styles['Normal']))
-        story.append(Spacer(1, 0.2 * inch))
+        team_members = data['team_members']
+
+        # 1.1 受审核方基本信息
+        story.append(Paragraph('1.1 受审核方基本信息', styles['H2']))
+        ent_name = enterprise.name if enterprise else '未知'
+        credit_code = enterprise.credit_code if enterprise else '未知'
+        address = enterprise.address if enterprise else '未知'
+        info_rows = [
+            ['企业名称', _p(ent_name)],
+            ['统一社会信用代码', _p(credit_code)],
+            ['地址', _p(address)],
+        ]
+        info_table = Table(
+            [[Paragraph(k, styles['Cell']), Paragraph(v, styles['Cell'])] for k, v in info_rows],
+            colWidths=[40 * mm, 120 * mm],
+        )
+        info_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f4ff')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        story.append(info_table)
+
+        # 1.2 审核类型和准则
+        story.append(Paragraph('1.2 审核类型和准则', styles['H2']))
+        audit_type_map = {
+            'initial': '初审',
+            'surveillance': '监督审核',
+            'recertification': '再认证审核',
+            'expansion': '扩项审核',
+        }
+        audit_type = audit_type_map.get(project.audit_type, project.audit_type)
+        systems = ', '.join(project.certification_systems or []) or '-'
+        criteria = ', '.join(project.audit_criteria or []) or '-'
+        story.append(Paragraph(f"审核类型：{_p(audit_type)}", styles['Normal']))
+        story.append(Paragraph(f"认证体系：{_p(systems)}", styles['Normal']))
+        story.append(Paragraph(f"审核准则：{_p(criteria)}", styles['Normal']))
+
+        # 1.3 审核组成员
+        story.append(Paragraph('1.3 审核组成员', styles['H2']))
+        member_rows = [['姓名', '角色', '注册编号', '注册级别', '负责体系']]
+        role_map = {'leader': '组长', 'member': '审核员', 'expert': '技术专家'}
+        for member, user in team_members:
+            member_rows.append([
+                _p(user.full_name or user.username),
+                _p(role_map.get(member.role, member.role or '-')),
+                _p(member.registration_no or '-'),
+                _p(member.registration_level or '-'),
+                _p(', '.join(member.responsible_systems or []) or '-'),
+            ])
+        if len(member_rows) == 1:
+            member_rows.append(['-', '-', '-', '-', '-'])
+        member_table = Table(
+            [[Paragraph(str(c), styles['Cell']) for c in row] for row in member_rows],
+            colWidths=[28 * mm, 24 * mm, 36 * mm, 32 * mm, 40 * mm],
+        )
+        member_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        story.append(member_table)
+
+        # 1.4 审核日期
+        story.append(Paragraph('1.4 审核日期', styles['H2']))
+        if project.actual_start:
+            start = project.actual_start.strftime('%Y年%m月%d日')
+            end = project.actual_end.strftime('%Y年%m月%d日') if project.actual_end else '进行中'
+            story.append(Paragraph(f"审核时间：{start} 至 {end}", styles['Normal']))
+        elif project.scheduled_start:
+            start = project.scheduled_start.strftime('%Y年%m月%d日')
+            end = project.scheduled_end.strftime('%Y年%m月%d日') if project.scheduled_end else '待定'
+            story.append(Paragraph(f"计划审核时间：{start} 至 {end}", styles['Normal']))
+        story.append(Paragraph(f"审核工作量（人天）：{project.audit_days or 0}", styles['Normal']))
 
     def _add_pdf_chapter_2(self, story: List, styles: Any, data: Dict[str, Any]):
-        """添加 PDF 第二章"""
+        """添加 PDF 第二章（内容与 Word 版保持一致）"""
+        font_name = _ensure_cjk_font()
         story.append(PageBreak())
-        story.append(Paragraph('二、管理体系综合评价', styles['Heading1']))
-        story.append(Spacer(1, 0.2 * inch))
-        
+        story.append(Paragraph('二、管理体系综合评价', styles['H1']))
+
         stats = data['statistics']
-        
-        # 统计表格
+
+        # 2.1 审核基本情况
+        story.append(Paragraph('2.1 审核基本情况', styles['H2']))
+        story.append(Paragraph(
+            f"本次审核共完成 {stats['total_records']} 个区域的审核，"
+            f"其中已审核完成 {stats['completed_records']} 个区域。",
+            styles['Normal'],
+        ))
+
+        # 2.2 不符合项统计
+        story.append(Paragraph('2.2 不符合项统计', styles['H2']))
+        total_nc = stats['major_nc'] + stats['minor_nc'] + stats['observations']
         table_data = [
             ['严重不符合', '一般不符合', '观察项', '合计'],
             [
                 str(stats['major_nc']),
                 str(stats['minor_nc']),
                 str(stats['observations']),
-                str(stats['major_nc'] + stats['minor_nc'] + stats['observations'])
-            ]
+                str(total_nc),
+            ],
         ]
-        
-        t = Table(table_data)
+        t = Table(
+            [[Paragraph(c, styles['Cell']) for c in row] for row in table_data],
+            colWidths=[40 * mm, 40 * mm, 40 * mm, 40 * mm],
+        )
         t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME', (0, 0), (-1, -1), font_name),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         story.append(t)
-        story.append(Spacer(1, 0.3 * inch))
+
+        # 2.3 不符合项详情
+        nonconformities = data['nonconformities']
+        if nonconformities:
+            story.append(Paragraph('2.3 不符合项详情', styles['H2']))
+            severity_map = {'major': '严重', 'minor': '一般', 'observation': '观察项'}
+            for nc in nonconformities:
+                severity = severity_map.get(nc.severity, nc.severity)
+                line = f"【{severity}】条款 {nc.clause_no or '-'}：{nc.description or ''}"
+                story.append(Paragraph(_p(line), styles['Normal']))
+                if nc.evidence:
+                    story.append(Paragraph(f"证据：{_p(nc.evidence)}", styles['Normal']))
+                story.append(Spacer(1, 2 * mm))
 
     def _add_pdf_chapter_3(self, story: List, styles: Any, data: Dict[str, Any]):
         """添加 PDF 第三章"""
         story.append(PageBreak())
-        story.append(Paragraph('三、审核结论', styles['Heading1']))
-        story.append(Spacer(1, 0.2 * inch))
-        
-        story.append(Paragraph(self._conclusion_text(data), styles['Normal']))
+        story.append(Paragraph('三、审核结论', styles['H1']))
+
+        story.append(Paragraph('3.1 综合评价', styles['H2']))
+        # _conclusion_text 内含换行，Paragraph 需转成 <br/> 才能正确分段
+        story.append(Paragraph(_p(self._conclusion_text(data)), styles['Normal']))
         story.append(Spacer(1, 0.5 * inch))
-        
+
         # 签字栏
         signature_text = "审核组长签字：________________    日期：________________"
-        story.append(Paragraph(signature_text, styles['Normal']))
+        story.append(Paragraph(signature_text, styles['Right']))
 
     @staticmethod
     def _conclusion_text(data: Dict[str, Any]) -> str:

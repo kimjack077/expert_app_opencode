@@ -89,6 +89,14 @@ class ProjectArtifactService:
         documents = (
             await db.execute(self._active_documents_statement(project_id))
         ).scalars().all()
+        artifacts = (
+            await db.execute(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project_id,
+                    ProjectArtifact.is_deleted.is_(False),
+                )
+            )
+        ).scalars().all()
         auditor_names = {
             str(item.member_id): self._member_display_name(item.member)
             for item in team_members
@@ -250,6 +258,22 @@ class ProjectArtifactService:
                 }
                 for item in documents
             ],
+            "artifacts": [
+                {
+                    "id": str(item.id),
+                    "name": item.filename,
+                    "type": item.artifact_type,
+                    "status": item.status,
+                    "version": item.version,
+                    # 与 artifact_dict 同一判据：status=ready 且实体文件确实在磁盘上。
+                    # 只信 status 会出现「门禁 100 分通过、成果下载 404」。
+                    "available": (
+                        item.status == "ready"
+                        and resolve_storage_path(item.path) is not None
+                    ),
+                }
+                for item in artifacts
+            ],
         }
 
     async def quality_check(self, db: AsyncSession, project_id: UUID) -> dict[str, Any]:
@@ -311,6 +335,15 @@ class ProjectArtifactService:
             item for item in drafts if item.get("status") == "draft"
         ]
         unclosed_ncs = [item for item in ncs if not cls._is_nc_closed(item)]
+
+        # 已登记但实体文件不在服务器上的成果（available=False）。
+        # 注意：只能作为「提醒」而非「阻断」——若判为阻断，generate_artifacts 会被
+        # 自己的门禁挡住，用户永远无法重新生成丢失的成果，形成死锁。
+        missing_artifacts = [
+            item
+            for item in (snapshot.get("artifacts") or [])
+            if item.get("type") != "generation_job" and not item.get("available")
+        ]
 
         planned_clauses = {
             clause
@@ -482,6 +515,19 @@ class ProjectArtifactService:
                 {
                     "code": "ARCHIVE_ONLY_DOCUMENTS",
                     "message": f"有 {len(archive_only_documents)} 份旧格式资料仅归档、不可检索",
+                }
+            )
+        if missing_artifacts:
+            warnings.append(
+                {
+                    "code": "ARTIFACT_FILES_MISSING",
+                    "message": (
+                        f"有 {len(missing_artifacts)} 份已登记成果的实体文件不在服务器上，"
+                        "下载会失败，请重新生成后再交付"
+                    ),
+                    "artifacts": [
+                        item.get("name") for item in missing_artifacts
+                    ][:10],
                 }
             )
 

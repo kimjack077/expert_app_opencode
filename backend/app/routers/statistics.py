@@ -8,6 +8,7 @@ Audit Statistics API Router
 - 不符合项分析
 - 审核员工作量统计
 """
+import re
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
@@ -29,6 +30,23 @@ from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
 
 router = APIRouter()
+
+# BUG-14：条款号必须是「数字开头的层级编码」（10.88 / 8.5.2 / 2.2a 等），
+# 含中文（如「把控1」）一律视为模板标题误写的脏数据，不进图表。
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_CLAUSE_TOKEN_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){0,5}[a-z]?(?:\s|$)", re.IGNORECASE)
+
+
+def _normalize_clause_no(value: object) -> Optional[str]:
+    """清洗条款号：去空白、全角点/间隔号归一化为半角点；非法返回 None。"""
+    if value is None:
+        return None
+    text = str(value).strip().replace("．", ".").replace("·", ".")
+    if not text or _CJK_RE.search(text):
+        return None
+    if not _CLAUSE_TOKEN_RE.match(text):
+        return None
+    return text
 
 
 def make_response(data=None, code: int = 200, message: str = "success") -> ApiResponse:
@@ -376,14 +394,25 @@ async def get_nc_by_clause(
     stmt = stmt.where(Nonconformity.clause_no.isnot(None))
     stmt = stmt.group_by(Nonconformity.clause_no)
     stmt = stmt.order_by(func.count(Nonconformity.id).desc())
-    stmt = stmt.limit(limit)
 
     result = await db.execute(stmt)
     rows = result.all()
 
+    # BUG-14：存量脏数据（如「把控1」「2·2」、空串）会直接进条款 TOP10 图表。
+    # 这里做展示层清洗：只保留「数字开头的条款号」、剔除含中文的误写值，
+    # 并把全角点/间隔号归一化后合并计数，保证图表可读且不重复。
+    merged: dict[str, int] = {}
+    for row in rows:
+        normalized = _normalize_clause_no(row.clause_no)
+        if not normalized:
+            continue
+        merged[normalized] = merged.get(normalized, 0) + int(row.count)
+
     data = [
-        {"clause_no": row.clause_no, "count": row.count}
-        for row in rows
+        {"clause_no": clause, "count": count}
+        for clause, count in sorted(
+            merged.items(), key=lambda kv: (-kv[1], kv[0])
+        )[:limit]
     ]
 
     return make_response(data=data)

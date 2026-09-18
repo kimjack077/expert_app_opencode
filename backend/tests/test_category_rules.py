@@ -226,9 +226,14 @@ def _make_update_item_env(children_count: int):
     item = SimpleNamespace(
         id=uuid4(),
         template_id=template_id,
+        parent_id=None,
         title="测试难度",
         is_category=False,
+        description=None,
         result_type="pass_fail",
+        check_type="radio",
+        risk_level="medium",
+        sort_order=0,
         result_options=None,
         min_value=None,
         max_value=None,
@@ -240,6 +245,7 @@ def _make_update_item_env(children_count: int):
         standard_ref=None,
         ai_prompt_template=None,
         use_ai=True,
+        allow_attachment=True,
         attachment_required=True,
         is_required=True,
     )

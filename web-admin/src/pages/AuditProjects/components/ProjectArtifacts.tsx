@@ -547,7 +547,11 @@ export default function ProjectArtifacts({ projectId }: Props) {
           <Card size="small"><Statistic title="已完成会话" value={completedSessions} suffix="个" /></Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card size="small"><Statistic title="可下载成果" value={artifacts.filter((item) => item.artifact_type !== 'generation_job' && ['completed', 'ready'].includes(item.status || '')).length} suffix="项" /></Card>
+          {/* 口径与表格「状态」列保持一致：一律以 available 判定能否下载。
+              历史上此处按 status ∈ (completed, ready) 计数，会把实体文件已丢失的
+              成果也算进来，出现「顶部说可下载 28 项、表格里 21 行写着文件缺失」
+              的同页自相矛盾。 */}
+          <Card size="small"><Statistic title="可下载成果" value={artifacts.filter((item) => item.artifact_type !== 'generation_job' && item.available === true).length} suffix="项" /></Card>
         </Col>
       </Row>
 

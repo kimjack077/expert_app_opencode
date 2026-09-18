@@ -69,6 +69,10 @@ from app.schemas.audit_project import (
 )
 from app.utils.security import get_current_user, get_user_from_token
 from app.utils.item_stats import classify_item
+from app.utils.meeting_guard import (
+    duplicate_meeting_message,
+    find_duplicate_meeting,
+)
 
 router = APIRouter(prefix="/api/audit-projects", tags=["audit-projects"])
 
@@ -1170,21 +1174,13 @@ async def create_meeting(
             detail="请求体中的 project_id 与 URL 路径不一致",
         )
 
-    # 首/末次会议在同一项目内唯一（BUG-26）；阶段沟通/内部会议允许多次
-    if meeting.meeting_type in ("opening", "closing"):
-        dup = await db.execute(
-            select(CommunicationMeeting.id)
-            .where(
-                CommunicationMeeting.project_id == project_id,
-                CommunicationMeeting.meeting_type == meeting.meeting_type,
-            )
-            .limit(1)
+    # 首/末次会议在同一项目内唯一（BUG-26）；阶段沟通/内部会议允许多次。
+    # 口径统一走 app.utils.meeting_guard，与 Agent 写入路径共用同一判据。
+    if await find_duplicate_meeting(db, project_id, meeting.meeting_type) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=duplicate_meeting_message(meeting.meeting_type),
         )
-        if dup.scalars().first() is not None:
-            raise HTTPException(
-                status_code=409,
-                detail="该项目已存在同类型会议记录，请编辑已有记录或选择其他会议类型",
-            )
 
     db_meeting = CommunicationMeeting(
         project_id=project_id,

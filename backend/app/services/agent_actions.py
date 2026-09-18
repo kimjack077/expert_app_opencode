@@ -44,6 +44,11 @@ from app.models.enterprise import Enterprise
 from app.models.audit_project import AuditProject, AuditTeamMember, AuditPlanItem, CommunicationMeeting
 from app.models.user import User
 from app.utils.roles import ADMIN_ROLES
+from app.utils.business_time import meeting_time_for_schedule
+from app.utils.meeting_guard import (
+    duplicate_meeting_message,
+    find_duplicate_meeting,
+)
 
 Handler = Callable[[AsyncSession, User, dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -534,22 +539,36 @@ async def _action_create_meeting_record(
     else:
         meeting_type = "interim"
 
+    # 首/末次会议在同一项目内唯一：与 REST 端点同口径（app.utils.meeting_guard）。
+    # 此前 Agent 写入路径缺此校验，同一项目会写出两条「首次会议」。
+    if await find_duplicate_meeting(db, project_id, meeting_type) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=duplicate_meeting_message(meeting_type),
+        )
+
     raw_time = data.get("meeting_time")
-    meeting_time = datetime.now()
-    if raw_time:
-        if isinstance(raw_time, datetime):
-            meeting_time = raw_time
-        elif isinstance(raw_time, str):
-            t_str = raw_time.strip().replace("T", " ")
+    proposed_time = None
+    if isinstance(raw_time, datetime):
+        proposed_time = raw_time
+    elif isinstance(raw_time, str):
+        t_str = raw_time.strip().replace("T", " ").replace("/", "-")
+        # 切片宽度是「格式化输出长度」，不能用格式串本身长度（%Y 只占 2 字符位）。
+        for fmt, width in (
+            ("%Y-%m-%d %H:%M:%S", 19),
+            ("%Y-%m-%d %H:%M", 16),
+            ("%Y-%m-%d", 10),
+        ):
             try:
-                if len(t_str) == 10:
-                    meeting_time = datetime.strptime(t_str, "%Y-%m-%d")
-                elif len(t_str) == 16:
-                    meeting_time = datetime.strptime(t_str, "%Y-%m-%d %H:%M")
-                elif len(t_str) >= 19:
-                    meeting_time = datetime.strptime(t_str[:19], "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                pass
+                proposed_time = datetime.strptime(t_str[:width], fmt)
+                break
+            except ValueError:
+                continue
+
+    # BUG-09：落库前再次收敛——确认卡片之外的直接调用也不允许写出排期外时间。
+    meeting_time, _adjusted = meeting_time_for_schedule(
+        project, meeting_type, proposed_time
+    )
 
     team_members_res = await db.execute(
         select(AuditTeamMember, User)

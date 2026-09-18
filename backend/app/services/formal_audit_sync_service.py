@@ -17,6 +17,7 @@ from app.models.record import InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
 from app.models.user import User
 from app.utils.item_stats import FAIL_VALUES, NA_VALUES, PASS_VALUES
+from app.utils.item_completion import resolve_check_type
 
 
 def legacy_result_to_evaluation(result: str | None) -> str | None:
@@ -195,7 +196,12 @@ async def sync_task_to_formal_record(
             if source.template_item_id:
                 existing_by_template[str(source.template_item_id)] = formal
 
-        check_type = getattr(template, "check_type", None) or "audit_3level"
+        # 快照类型必须取**真实类型**：template_items.check_type 恒为列默认值 'radio'，
+        # 真实类型在 result_type。下方 result_value/numeric_value/text_value 的路由
+        # 本就用 result_type，这里与它对齐，避免快照与结果字段互相矛盾。
+        check_type = (
+            resolve_check_type(template) if template is not None else "audit_3level"
+        )
         result_type = getattr(template, "result_type", None) or "pass_fail"
         formal.result = (
             "not_applicable"

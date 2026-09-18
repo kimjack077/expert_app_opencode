@@ -1167,7 +1167,26 @@ const saveItem = async () => {
         const val = checkType === 'score' ? formData.value.score_value : formData.value.numeric_value
         if (val !== '' && val != null) {
           payload.result_value = String(val)
-          payload.result = formData.value.radio_value || 'pass'
+          // BUG-11：与 InspectionExecution 同一口径——按阈值自动判定，无阈值不默认 pass。
+          const numVal = Number(val)
+          let autoResult = ''
+          if (!Number.isNaN(numVal)) {
+            if (checkType === 'score') {
+              if (itemData.value.pass_score !== null && itemData.value.pass_score !== undefined) {
+                autoResult = numVal >= Number(itemData.value.pass_score) ? 'pass' : 'fail'
+              }
+            } else {
+              const hasMin = itemData.value.min_value !== null && itemData.value.min_value !== undefined
+              const hasMax = itemData.value.max_value !== null && itemData.value.max_value !== undefined
+              if (hasMin || hasMax) {
+                const inRange = (!hasMin || numVal >= Number(itemData.value.min_value))
+                  && (!hasMax || numVal <= Number(itemData.value.max_value))
+                autoResult = inRange ? 'pass' : 'fail'
+              }
+            }
+          }
+          if (formData.value.radio_value) payload.result = formData.value.radio_value
+          else if (autoResult) payload.result = autoResult
         }
       } else if (checkType === 'multi_check') {
         if (Array.isArray(formData.value.multi_value) && formData.value.multi_value.length) {
@@ -1182,7 +1201,9 @@ const saveItem = async () => {
 
       await submitCheckRecord(recordId, payload)
       showSuccessToast('保存成功')
-      router.replace(`/inspection/${recordId}?t=${Date.now()}`)
+      // 任务模式回到任务执行页（旧跳转 /inspection/:id 不带 mode 会先打一条
+      // /records/:id 404 再回退任务链，污染控制台且多一次往返）。
+      router.replace(`/task/${recordId}/execute?t=${Date.now()}`)
       return
     }
 

@@ -664,9 +664,14 @@ def test_execute_action_create_meeting_record():
     db = AsyncMock()
     db.get.return_value = project
 
-    team_res = Mock()
-    team_res.all.return_value = []
-    db.execute.return_value = team_res
+    # db.execute 同时服务于「会议唯一性守卫」（.scalars().first() → None）
+    # 与「审核组成员查询」（.all() → []），mock 需同时兼容两种消费方式。
+    exec_result = Mock()
+    scalars_mock = Mock()
+    scalars_mock.first.return_value = None
+    exec_result.scalars.return_value = scalars_mock
+    exec_result.all.return_value = []
+    db.execute.return_value = exec_result
 
     result = asyncio.run(
         execute_action(

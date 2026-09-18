@@ -287,6 +287,13 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
         </Descriptions.Item>
         <Descriptions.Item label="会议时间">
           <Text strong>{timeStr}</Text>
+          {Boolean(action.data.meeting_time_adjusted) && (
+            <div style={{ marginTop: 4 }}>
+              <Tag color="orange" style={{ marginInlineEnd: 0 }}>
+                {String(action.data.meeting_time_hint || '会议时间已按项目审核排期自动校正，请核对')}
+              </Tag>
+            </div>
+          )}
         </Descriptions.Item>
         <Descriptions.Item label="参会审核员">
           <Text>{auditorDesc}</Text>

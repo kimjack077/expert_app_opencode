@@ -40,6 +40,45 @@ FALLBACK_EXC = (
     httpx.RemoteProtocolError,
 )
 
+# 标记属性：降级发生后盖在响应对象上，供调用方记账时识别真实服务模型（BUG-15）
+FALLBACK_FLAG = "_efis_fallback_used"
+ACTUAL_MODEL_ATTR = "_efis_actual_model"
+FALLBACK_REASON_ATTR = "_efis_fallback_reason"
+
+
+def mark_fallback_response(response: Any, backup_model: Optional[str], reason: str) -> Any:
+    """在（非流式）响应对象上记录「本次由备用模型提供服务」的痕迹。"""
+    actual = backup_model or getattr(response, "model", None)
+    for attr, value in (
+        (FALLBACK_FLAG, True),
+        (ACTUAL_MODEL_ATTR, actual),
+        (FALLBACK_REASON_ATTR, reason[:500]),
+    ):
+        try:
+            setattr(response, attr, value)
+        except Exception:  # pragma: no cover - 个别 SDK 模型可能冻结属性
+            logger.debug("无法在响应对象上写入 %s", attr, exc_info=True)
+    return response
+
+
+def was_fallback(response: Any) -> bool:
+    return bool(getattr(response, FALLBACK_FLAG, False))
+
+
+def served_model(response: Any, requested: Optional[str] = None) -> str:
+    """取本次调用真实服务模型名：优先降级标记，其次响应体 model，最后请求时的模型名。"""
+    marked = getattr(response, ACTUAL_MODEL_ATTR, None)
+    if marked:
+        return str(marked)
+    body_model = getattr(response, "model", None)
+    if body_model:
+        return str(body_model)
+    return str(requested or "")
+
+
+def fallback_reason(response: Any) -> str:
+    return str(getattr(response, FALLBACK_REASON_ATTR, "") or "")
+
 
 class _CompletionsProxy:
     """代理 completions.create，主模型失败或异常时自动切换备用 client 并替换 model 名。"""
@@ -78,15 +117,17 @@ class _CompletionsProxy:
             return await self._primary.chat.completions.create(*args, **kwargs)
         except Exception as e:
             backup_kwargs = self._prepare_backup_kwargs(kwargs)
+            reason = f"{type(e).__name__}: {e}"
             logger.warning(
-                f"[{self._tag}] 主模型调用失败 ({type(e).__name__}: {e}); "
+                f"[{self._tag}] 主模型调用失败 ({reason}); "
                 f"正在自动切换至备用模型: {self._backup_model}"
             )
             print(
                 f"[{self._tag}] primary failed ({type(e).__name__}: {e}); "
                 f"switching to backup model={self._backup_model}"
             )
-            return await self._backup.chat.completions.create(*args, **backup_kwargs)
+            response = await self._backup.chat.completions.create(*args, **backup_kwargs)
+            return mark_fallback_response(response, self._backup_model, reason)
 
     async def _stream_with_fallback(self, *args: Any, **kwargs: Any) -> AsyncGenerator:
         """流式 fallback 生成器：在建连或首包阶段失败时自动无缝降级到备用模型。"""

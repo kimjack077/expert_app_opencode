@@ -27,6 +27,7 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
+from app.utils.item_completion import is_item_assessed
 from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import classify_result
 from app.services import AuditService
@@ -47,6 +48,49 @@ def make_response(data=None, code=200, message="success"):
     return ApiResponse(
         code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
     )
+
+
+async def _normalize_numeric_verdict(
+    db: AsyncSession,
+    template_item_id: Optional[str],
+    result: Optional[str],
+    result_value: Optional[str],
+) -> Optional[str]:
+    """BUG-11 服务端兜底：数值/打分项的 pass 必须由阈值裁决得出。
+
+    历史上客户端对任何数值录入都默认 ``result='pass'``，未配置阈值的项也被
+    算进合格数，虚增合规率。规则：
+    - 仅当客户端传入 ``pass`` 时才做收敛（显式 fail/na 等人工判定一律尊重）；
+    - numeric：有任一阈值且在范围内 → pass，超界 → fail，无阈值 → None（计入「其他项」）；
+    - score：有合格线 → 按线裁决，无合格线 → None。
+    """
+    if classify_result(result) != "pass" or not template_item_id:
+        return result
+    if result_value is None or str(result_value).strip() == "":
+        return result
+    try:
+        item = await db.get(TemplateItem, UUID(str(template_item_id)))
+    except (ValueError, TypeError):
+        return result
+    if item is None:
+        return result
+    check_type = (item.check_type or item.result_type or "").lower()
+    if check_type not in {"numeric", "score"}:
+        return result
+    try:
+        number = float(str(result_value).strip())
+    except (TypeError, ValueError):
+        return result
+    if check_type == "score":
+        if item.pass_score is None:
+            return None
+        return "pass" if number >= float(item.pass_score) else "fail"
+    if item.min_value is None and item.max_value is None:
+        return None
+    in_range = (item.min_value is None or number >= float(item.min_value)) and (
+        item.max_value is None or number <= float(item.max_value)
+    )
+    return "pass" if in_range else "fail"
 
 
 async def _sync_reaudited_task_to_formal_record(
@@ -849,7 +893,14 @@ async def create_or_update_record(
 
         if record:
             if record_data.result is not None:
-                record.result = record_data.result
+                record.result = await _normalize_numeric_verdict(
+                    db,
+                    record_data.template_item_id or record.template_item_id,
+                    record_data.result,
+                    record_data.result_value
+                    if record_data.result_value is not None
+                    else record.result_value,
+                )
             if record_data.result_value is not None:
                 record.result_value = record_data.result_value
             if record_data.result_text is not None:
@@ -867,10 +918,16 @@ async def create_or_update_record(
                 data=InspectionRecordResponse.model_validate(record).model_dump()
             )
 
+    normalized_result = await _normalize_numeric_verdict(
+        db,
+        record_data.template_item_id,
+        record_data.result,
+        record_data.result_value,
+    )
     record = InspectionRecord(
         task_id=task_id,
         template_item_id=record_data.template_item_id,
-        result=record_data.result,
+        result=normalized_result,
         result_value=record_data.result_value,
         result_text=record_data.result_text,
         inspector_note=record_data.inspector_note,
@@ -914,6 +971,13 @@ async def update_record(
     update_data = record_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(record, key, value)
+    if "result" in update_data or "result_value" in update_data:
+        record.result = await _normalize_numeric_verdict(
+            db,
+            record.template_item_id,
+            record.result,
+            record.result_value,
+        )
     record.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -970,7 +1034,11 @@ async def get_task_summary(
         countable.append(r)
 
     total = len(countable)
-    completed = sum(1 for r in countable if r.result)
+    # 完成度口径统一走 app.utils.item_completion.is_item_assessed：
+    # 判定型必须落到结论字段，描述型/数值型/打分型填了内容即算完成。
+    # 历史上此处只认 r.result 非空，导致描述型/数值型项明明填了内容却算「未填写」，
+    # 与 H5 现场端（按类型判定）给出不同的完成度。
+    completed = sum(1 for r in countable if is_item_assessed(r.template_item, r))
     compliant = sum(1 for r in countable if classify_result(r.result) == "pass")
     non_compliant = sum(1 for r in countable if classify_result(r.result) == "fail")
     not_applicable = sum(1 for r in countable if classify_result(r.result) == "na")
