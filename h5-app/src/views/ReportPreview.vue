@@ -54,7 +54,7 @@
           <van-icon name="description" color="#1e40af" />
           一、检查概况
         </div>
-        <div class="overview-cards">
+        <div class="overview-cards" :class="{ 'has-extra': extraStatCount > 0 }">
           <div class="stat-card total">
             <div class="stat-value">{{ reportData.statistics.total }}</div>
             <div class="stat-label">检查项</div>
@@ -70,6 +70,15 @@
           <div class="stat-card na">
             <div class="stat-value">{{ reportData.statistics.na }}</div>
             <div class="stat-label">不适用</div>
+          </div>
+          <!-- 观察项 / 未填写：让「合格+不合格+不适用+观察项+未填写 = 检查项」闭合 -->
+          <div v-if="reportData.statistics.observe > 0" class="stat-card observe">
+            <div class="stat-value">{{ reportData.statistics.observe }}</div>
+            <div class="stat-label">观察项</div>
+          </div>
+          <div v-if="unfilledCount > 0" class="stat-card unfilled">
+            <div class="stat-value">{{ unfilledCount }}</div>
+            <div class="stat-label">未填写</div>
           </div>
         </div>
         <div class="pass-rate">
@@ -239,6 +248,23 @@ const getProgressColor = computed(() => {
   if (rate >= 80) return '#22c55e'
   if (rate >= 60) return '#f59e0b'
   return '#ef4444'
+})
+
+// 观察项之外还剩多少项没填 —— 保证概况卡片各项相加等于「检查项」总数
+const unfilledCount = computed(() => {
+  const s = reportData.value?.statistics
+  if (!s) return 0
+  return Math.max(
+    (s.total || 0) - (s.pass || 0) - (s.fail || 0) - (s.na || 0) - (s.observe || 0),
+    0
+  )
+})
+
+// 需要额外占位的卡片数（有观察项 / 有未填写时才显示，用于调整网格列数）
+const extraStatCount = computed(() => {
+  const s = reportData.value?.statistics
+  if (!s) return 0
+  return (s.observe > 0 ? 1 : 0) + (unfilledCount.value > 0 ? 1 : 0)
 })
 
 const formatDate = (dateStr) => {
@@ -491,6 +517,20 @@ onMounted(() => {
 
 .stat-card.na {
   background: rgba(156, 163, 175, 0.1);
+}
+
+/* 观察项：已填写但不属三级判定的中间态 */
+.stat-card.observe {
+  background: rgba(8, 145, 178, 0.1);
+}
+
+.stat-card.unfilled {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+/* 多出观察项/未填写卡片时改为三列，避免 390px 宽度下挤压 */
+.overview-cards.has-extra {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .stat-value {

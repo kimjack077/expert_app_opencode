@@ -90,6 +90,12 @@ export default function InspectionReport({ open, record, onClose }: Props) {
     )
     const passItems = allCheckItems.filter((item: any) => item.radio_value === 'pass')
     const naItems = allCheckItems.filter((item: any) => item.radio_value === 'na' || item.radio_value === 'not_applicable')
+    // 观察项 / 待整改：已填写但不属于合格/不合格/不适用的中间态。
+    // 必须单独统计并展示，否则「合格 + 不合格 + 不适用」恒小于「总计」，
+    // 报告汇总卡片出现对不上账的缺口（外部复测已提）。
+    const observeItems = allCheckItems.filter(
+        (item: any) => item.radio_value === 'observe' || item.radio_value === 'pending_rectification'
+    )
     const validCount = allCheckItems.length - naItems.length
     const passRate = validCount > 0 ? Math.round((passItems.length / validCount) * 1000) / 10 : 0
 
@@ -299,11 +305,14 @@ export default function InspectionReport({ open, record, onClose }: Props) {
                         三、各检查项结果汇总
                     </div>
                     {/* 统计卡片 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 16 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${observeItems.length > 0 ? 6 : 5}, 1fr)`, gap: 12, marginBottom: 16 }}>
                         {[
                             { label: '合格', value: passItems.length, color: '#16a34a', bg: '#dcfce7' },
                             { label: '不合格', value: failItems.length, color: '#dc2626', bg: '#fee2e2' },
                             { label: '不适用', value: naItems.length, color: '#6b7280', bg: '#f3f4f6' },
+                            ...(observeItems.length > 0
+                                ? [{ label: '观察项', value: observeItems.length, color: '#0891b2', bg: '#ecfeff' }]
+                                : []),
                             { label: '总计', value: allCheckItems.length, color: '#1e40af', bg: '#eff6ff' },
                             { label: '合格率', value: `${passRate}%`, color: '#7c3aed', bg: '#f5f3ff' },
                         ].map(stat => (

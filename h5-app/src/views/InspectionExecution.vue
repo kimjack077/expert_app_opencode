@@ -258,15 +258,26 @@
           <div class="stats-grid">
             <div class="stat-item pass">
               <div class="stat-value">{{ passCount }}</div>
-              <div class="stat-label">符合项</div>
+              <div class="stat-label">合格项</div>
             </div>
             <div class="stat-item fail">
               <div class="stat-value">{{ failCount }}</div>
-              <div class="stat-label">不符合项</div>
+              <div class="stat-label">不合格项</div>
             </div>
             <div class="stat-item na">
               <div class="stat-value">{{ naCount }}</div>
               <div class="stat-label">不适用项</div>
+            </div>
+            <!-- 其他项 / 未填写：让「符合+不符合+不适用+其他+未填写 = 总检查项」闭合。
+                 数值型、描述型与观察项这类已填写但不属三级判定的项必须有归属，
+                 否则汇总与下方的总计对不上。 -->
+            <div v-if="otherCount > 0" class="stat-item other">
+              <div class="stat-value">{{ otherCount }}</div>
+              <div class="stat-label">其他项</div>
+            </div>
+            <div v-if="unfilledCount > 0" class="stat-item na">
+              <div class="stat-value">{{ unfilledCount }}</div>
+              <div class="stat-label">未填写</div>
             </div>
             <div class="stat-item total">
               <div class="stat-value">{{ totalCheckItems }}</div>
@@ -645,6 +656,26 @@ const naCount = computed(() => {
   }
   return count
 })
+
+// 其他项：已填写但不属于「符合 / 不符合 / 不适用」三级判定的项。
+// 典型是数值型（如耗能参数 100.9）、描述型、以及「观察项 / 待整改」中间态。
+// 原先这类项既不计入任何一档，又被算进「总检查项」，
+// 于是最终判定卡与提交确认弹窗出现「符合 2 项 / 共计 4 项」这种对不上账的展示。
+const otherCount = computed(() => {
+  let count = 0
+  for (const item of flattenItems.value) {
+    if (item.is_category !== true && isItemCompleted(item)) {
+      const status = getItemStatus(item)
+      if (status === 'completed' || status === 'pending_rectification') count++
+    }
+  }
+  return count
+})
+
+// 未填写：总数扣除以上四档后的余额，保证加法闭合
+const unfilledCount = computed(() =>
+  Math.max(totalCheckItems.value - passCount.value - failCount.value - naCount.value - otherCount.value, 0)
+)
 
 const progressPercentage = computed(() => {
   if (totalCheckItems.value === 0) return 0
@@ -1521,13 +1552,18 @@ const showSubmitConfirm = async () => {
   const passNum = passCount.value
   const failNum = failCount.value
   const naNum = naCount.value
+  const otherNum = otherCount.value
+  const unfilledNum = unfilledCount.value
   const totalNum = totalCheckItems.value
 
+  // 各项之和必须等于「共计」，否则用户会质疑统计口径（外部复测已提）。
   const summaryLines = [
     `检查项目统计：`,
     `✅ 合格：${passNum} 项`,
     failNum > 0 ? `❌ 不合格：${failNum} 项` : null,
     naNum > 0 ? `⚪ 不适用：${naNum} 项` : null,
+    otherNum > 0 ? `🔵 其他（数值/描述等）：${otherNum} 项` : null,
+    unfilledNum > 0 ? `⚫ 未填写：${unfilledNum} 项` : null,
     `━━━━━━━━━━━━`,
     `共计：${totalNum} 项`,
     '',
@@ -2402,6 +2438,15 @@ watch(
 
 .stat-item.na {
   background: #F5F5F5;
+}
+
+/* 「其他项」：数值型/描述型/观察项这类已填写但不属三级判定的项 */
+.stat-item.other {
+  background: #E0F7FA;
+}
+
+.stat-item.other .stat-value {
+  color: #0891B2;
 }
 
 .stat-item.total {

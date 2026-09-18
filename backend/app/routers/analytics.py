@@ -11,7 +11,7 @@ from app.models.audit import AuditLog, LLMCallLog
 from app.models.enterprise import Enterprise
 from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
-from app.utils.item_stats import classify_result
+from app.utils.item_stats import classify_result, classify_result_ext
 
 router = APIRouter()
 
@@ -23,14 +23,15 @@ def _summarize_task_records(record_rows) -> dict:
     避免同一批数据在工作台与详情页给出不同的「不适用」数字——
     历史上工作台只认 ``("na","not_applicable")``、详情只认 ``"na"``，两处对不上。
 
-    ``filled`` 定义为 pass + fail + na，保证
-    「合格 + 不合格 + 不适用 + 未填报 = 总检查项」在页面上闭合
-    （``observe`` / ``pending_rectification`` 属中间态，不计入已填报）。
+    ``filled`` 定义为 pass + fail + na + observe（观察项属已填写），保证
+    「合格 + 不合格 + 不适用 + 观察项 + 未填报 = 总检查项」在页面上闭合。
+    旧实现把 ``observe`` 算进 ``unfilled``，于是工作台卡片出现
+    「已填报 67 / 合格 43 / 不合格 16」这类对不上账的组合。
     """
-    stats = {"total": 0, "pass": 0, "fail": 0, "na": 0, "filled": 0}
+    stats = {"total": 0, "pass": 0, "fail": 0, "na": 0, "observe": 0, "filled": 0}
     for result, count in record_rows:
         stats["total"] += count
-        bucket = classify_result(result)
+        bucket = classify_result_ext(result)
         if bucket:
             stats[bucket] += count
             stats["filled"] += count
@@ -85,6 +86,7 @@ async def get_dashboard(
         compliant_records = _s["pass"]
         non_compliant_records = _s["fail"]
         not_applicable_records = _s["na"]
+        observe_records = _s["observe"]
     else:
         task_rows = (
             await db.execute(
@@ -114,6 +116,7 @@ async def get_dashboard(
         compliant_records = _s["pass"]
         non_compliant_records = _s["fail"]
         not_applicable_records = _s["na"]
+        observe_records = _s["observe"]
 
     # 用户/企业总数只统计未删除记录，与列表页口径一致（单次复合标量查询，减少 1 次网络往返）
     counts_row = (
@@ -145,14 +148,17 @@ async def get_dashboard(
             },
             "inspections": {
                 # total = 全部检查项；filled = 已填报项；两者相减即为未填报，
-                # 让「合格 + 不合格 + 不适用 + 未填报 = 总检查项」在页面上闭合
+                # 让「合格 + 不合格 + 不适用 + 观察项 + 未填报 = 总检查项」在页面上闭合
                 "total": total_records,
                 "filled": filled_records,
                 "not_filled": max(total_records - filled_records, 0),
                 "compliant": compliant_records,
                 "non_compliant": non_compliant_records,
                 "not_applicable": not_applicable_records,
-                # 达标率口径：合格 ÷（总项 - 不适用项），与 item_stats.compliance_rate 及报告侧统一
+                "observe": observe_records,
+                # 合规率口径 = 合格 ÷（总项 − 不适用项）。
+                # 注意：分母**包含未填报项**，与「已填报合格项 ÷ 已填报项」不同。
+                # 前端文案必须与此一致；报告侧 item_stats.compliance_rate 同式。
                 "compliance_rate": round(
                     compliant_records / (total_records - not_applicable_records) * 100,
                     2,
@@ -298,7 +304,6 @@ async def get_trends(
                     InspectionTask.is_deleted == False,  # noqa: E712
                     InspectionTask.created_at >= start,
                     InspectionTask.created_at < end,
-                    TaskItemRecord.result.in_(["pass", "fail"]),
                     func.date(TaskItemRecord.recorded_at)
                     == func.date(InspectionTask.created_at),
                 )
@@ -331,7 +336,6 @@ async def get_trends(
                 .join(InspectionTask, TaskItemRecord.task_id == InspectionTask.id)
                 .where(
                     InspectionTask.is_deleted == False,  # noqa: E712
-                    TaskItemRecord.result.in_(["pass", "fail"]),
                     TaskItemRecord.recorded_at >= start,
                     TaskItemRecord.recorded_at < end,
                 )
@@ -343,28 +347,35 @@ async def get_trends(
         return value.strftime("%Y-%m-%d") if hasattr(value, "strftime") else str(value)
 
     task_map = {_day_key(d): c for d, c in task_rows}
-    pass_map: dict = {}
-    fail_map: dict = {}
+    # 按日累计四类判定 + 当日总项，供「合格 ÷（总项 − 不适用）」统一口径计算。
+    day_stats: dict = {}
     for d, result, cnt in rec_rows:
         key = _day_key(d)
-        # 判定归类统一走 classify_result：旧实现只认字面量 "pass"/"fail"，
-        # 会漏掉 compliant / qualified / non_compliant / unqualified 等历史与外部集成写法，
-        # 导致趋势图与工作台汇总数字对不上。
-        bucket = classify_result(result)
-        if bucket == "pass":
-            pass_map[key] = cnt
-        elif bucket == "fail":
-            fail_map[key] = cnt
+        bucket = classify_result_ext(result)
+        slot = day_stats.setdefault(
+            key, {"pass": 0, "fail": 0, "na": 0, "observe": 0, "total": 0}
+        )
+        slot["total"] += cnt
+        if bucket:
+            slot[bucket] += cnt
 
     inspection_trend = []
     compliance_trend = []
     current = start
     while current < end:
         key = current.strftime("%Y-%m-%d")
-        compliant = pass_map.get(key, 0)
-        non_compliant = fail_map.get(key, 0)
-        total_items = compliant + non_compliant
-        compliance_rate = round(compliant / total_items * 100, 2) if total_items > 0 else 0
+        slot = day_stats.get(key) or {
+            "pass": 0, "fail": 0, "na": 0, "observe": 0, "total": 0
+        }
+        compliant = slot["pass"]
+        non_compliant = slot["fail"]
+        na = slot["na"]
+        observe = slot["observe"]
+        # 与工作台卡片、报告侧 item_stats.compliance_rate 严格同式：
+        # 合格 ÷（总项 − 不适用）。旧实现用「合格 ÷(合格+不合格)」，
+        # 导致同一页面卡片显示 50.59%、趋势图显示 44.44%，客户当场质疑哪个对。
+        denom = slot["total"] - na
+        compliance_rate = round(compliant / denom * 100, 2) if denom > 0 else 0
 
         inspection_trend.append({"date": key, "count": task_map.get(key, 0)})
         compliance_trend.append({
@@ -372,6 +383,9 @@ async def get_trends(
             "rate": compliance_rate,
             "compliant": compliant,
             "non_compliant": non_compliant,
+            "not_applicable": na,
+            "observe": observe,
+            "total": slot["total"],
         })
         current += timedelta(days=1)
     

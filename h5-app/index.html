@@ -2,7 +2,14 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8">
-    <link rel="icon" href="/favicon.ico">
+    <!-- 内联 data-URI 图标：base 为 /h5/ 时 vite 会把 /favicon.ico 重写成
+         /h5/favicon.ico，而文件实际在站点根的 /favicon.ico，必然 404。
+         内联后不再依赖任何静态路径。 -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M18 34l9 9 19-21' stroke='%23fff' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
     <title>易审通 (EasyAudit) - 移动现场审核平台</title>
   </head>

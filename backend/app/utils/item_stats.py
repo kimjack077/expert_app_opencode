@@ -33,6 +33,10 @@ _BUCKET_VALUES = {
     "pass": PASS_VALUES,
     "fail": FAIL_VALUES,
     "na": NA_VALUES,
+    # 中间态在 SQL 层同样需要一个桶名，与 classify_result_ext / 统计字典保持一致，
+    # 统一叫 "observe"。曾用 "other" 导致 classify_result_ext 返回的桶名与
+    # stats 字典键名对不上（stats["other"] → KeyError），报告接口 500。
+    "observe": OTHER_VALUES,
 }
 
 # 承载判定值的字段名。三套并行记录模型字段名不一致，这里集中登记。
@@ -53,6 +57,28 @@ def classify_result(value: Optional[Any]) -> Optional[str]:
         return "fail"
     if text in NA_VALUES:
         return "na"
+    return None
+
+
+def classify_result_ext(value: Optional[Any]) -> Optional[str]:
+    """在 :func:`classify_result` 基础上多识别一个 ``observe`` 中间态桶。
+
+    「观察项 / 待整改」这类值有明确录入，但不属于合格、不合格、不适用。
+    旧实现把它们一律丢进 ``unfilled``（未填报），导致汇总表出现
+    「合格 + 不合格 + 不适用 ≠ 总项数」的缺口——用户明明填了，系统却按没填统计。
+    汇总口径统一走本函数。
+
+    返回值集合与 :func:`calculate_item_stats` 的统计键名严格一致：
+    ``pass`` / ``fail`` / ``na`` / ``observe``。
+    """
+    bucket = classify_result(value)
+    if bucket:
+        return bucket
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in OTHER_VALUES:
+        return "observe"
     return None
 
 
@@ -142,15 +168,29 @@ def calculate_item_stats(items: Optional[Iterable[Any]]) -> dict:
     """统计检查项结果分布。
 
     ``items`` 支持 ORM 对象（``InspectionRecordItem``）或 dict（报告装配后的模板项）。
-    返回 ``total`` / ``pass`` / ``fail`` / ``na`` / ``filled`` / ``unfilled``。
+    返回 ``total`` / ``pass`` / ``fail`` / ``na`` / ``observe`` / ``filled`` / ``unfilled``。
+
+    加法闭合关系（前端汇总表必须满足）::
+
+        total == pass + fail + na + observe + unfilled
+
+    其中 ``observe``（观察项/待整改）是「已填写但不属于三级判定」的中间态。
+    旧实现把它算进 ``unfilled``，于是「合格+不合格+不适用」恒小于 ``total``，
+    报告、H5 最终判定卡、H5 提交确认弹窗三处都出现了对不上账的问题。
     """
-    stats = {"total": 0, "pass": 0, "fail": 0, "na": 0}
+    stats = {"total": 0, "pass": 0, "fail": 0, "na": 0, "observe": 0}
     for item in items or []:
         stats["total"] += 1
-        bucket = classify_result(radio_value_of(item))
-        if bucket:
+        # 跨模型归类：radio_value → result → evaluation_3level，
+        # 与 _flatten_items / 报告装配保持同一优先级，避免双计。
+        bucket = classify_item(item)
+        if bucket is None:
+            bucket = classify_result_ext(radio_value_of(item))
+        # 防御：桶名与统计键不一致时绝不能抛 KeyError——报告接口会直接 500。
+        # 曾因 classify_result_ext 返回 "other" 而键名是 "observe" 整站报错。
+        if bucket in stats:
             stats[bucket] += 1
-    stats["filled"] = stats["pass"] + stats["fail"] + stats["na"]
+    stats["filled"] = stats["pass"] + stats["fail"] + stats["na"] + stats["observe"]
     stats["unfilled"] = stats["total"] - stats["filled"]
     return stats
 

@@ -246,6 +246,17 @@ export default function ProjectArtifacts({ projectId }: Props) {
       return
     }
 
+    // 质量门禁阻断时，禁止导出**完整资料包**。
+    // 此前门禁只拦「生成」，历史已固化的包仍可下载 —— 等于给了绕过门禁的后门：
+    // 明知有阻断项（缺记录 / 计划项未完成），依然能把 6.2MB 的归档包交给客户。
+    const isPackage = (artifact.artifact_type || artifact.type) === 'package'
+    if (isPackage && blockerCount > 0) {
+      message.warning(
+        `质量门禁未通过（${blockerCount} 项阻断），请先处理阻断项并重新运行质量检查后再导出资料包`
+      )
+      return
+    }
+
     setDownloadingId(artifactId)
     try {
       const response = await projectArtifactApi.download(projectId, artifactId)

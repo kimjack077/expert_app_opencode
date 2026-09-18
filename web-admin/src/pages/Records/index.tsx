@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Tag, Space, message, Modal, Drawer, Popconfirm, Alert, Collapse, Form, Input, Select, DatePicker, Row, Col, Badge } from 'antd'
+import { Card, Table, Button, Tag, Space, message, Modal, Drawer, Popconfirm, Alert, Collapse, Form, Input, Select, DatePicker, Row, Col, Badge, Tooltip } from 'antd'
 import { EyeOutlined, DeleteOutlined, CheckCircleOutlined, FileTextOutlined, FilePdfOutlined, SearchOutlined, ReloadOutlined, FilterOutlined, FolderFilled, UpOutlined, DownOutlined } from '@ant-design/icons'
 import { recordApi, templateApi } from '@/services/api'
 import dayjs from 'dayjs'
@@ -410,15 +410,23 @@ export default function Records() {
           >
             详情
           </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<FilePdfOutlined />}
-            onClick={() => handleGenerateReport(record)}
-            style={{ color: '#1e40af' }}
+          {/* 生成报告：草稿态禁用。
+              未完成检查的记录没有检查结论，生成的报告必然是空壳，
+              既误导用户也可能被当成正式交付物（外部复测已提，老杨批注「没完成检查不能生成报告」）。 */}
+          <Tooltip
+            title={record.status === 'draft' ? '该记录尚未完成检查，请先「继续检查」并提交后再生成报告' : ''}
           >
-            生成报告
-          </Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<FilePdfOutlined />}
+              disabled={record.status === 'draft'}
+              onClick={() => handleGenerateReport(record)}
+              style={{ color: record.status === 'draft' ? undefined : '#1e40af' }}
+            >
+              生成报告
+            </Button>
+          </Tooltip>
           {record.status === 'draft' && (
             <Button
               type="link"
@@ -710,7 +718,7 @@ export default function Records() {
                 marginBottom: 16,
               }}>
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14, color: '#333' }}>检查结果汇总</div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${(selectedRecord.stats.observe || 0) > 0 ? 6 : 5}, 1fr)`, gap: 12 }}>
                   <div style={{ textAlign: 'center', padding: 12, background: '#f6ffed', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#52c41a' }}>{selectedRecord.stats.pass}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>符合项</div>
@@ -723,6 +731,14 @@ export default function Records() {
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#8c8c8c' }}>{selectedRecord.stats.na}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>不适用项</div>
                   </div>
+                  {/* 观察项（已填写但不属三级判定的中间态）：与报告、H5 判定卡口径一致，
+                      不加这一格则「符合+不符合+不适用」小于「总检查项」，用户会质疑汇总。 */}
+                  {(selectedRecord.stats.observe || 0) > 0 && (
+                    <div style={{ textAlign: 'center', padding: 12, background: '#ecfeff', borderRadius: 8 }}>
+                      <div style={{ fontSize: 28, fontWeight: 700, color: '#0891b2' }}>{selectedRecord.stats.observe}</div>
+                      <div style={{ fontSize: 12, color: '#666' }}>观察项</div>
+                    </div>
+                  )}
                   <div style={{ textAlign: 'center', padding: 12, background: '#e6f7ff', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#1890ff' }}>{selectedRecord.stats.total}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>总检查项</div>
@@ -1035,6 +1051,27 @@ function TreeItem({
             </span>
           )}
         </span>
+        {/* 附件 / 审核记录 上提到折叠行内直接可见。
+            此前两者都只在展开区深处渲染，用户不点开就以为「没传附件、没写审核记录」，
+            外部复测正是这么提的（附件不能隐藏太深）。 */}
+        {Array.isArray(item.photos) && item.photos.length > 0 && (
+          <Tag
+            color="blue"
+            style={{ margin: 0, fontSize: 11, lineHeight: '18px', flexShrink: 0 }}
+            title={`已上传 ${item.photos.length} 张附件`}
+          >
+            📎 附件 {item.photos.length}
+          </Tag>
+        )}
+        {item.inspector_note && (
+          <Tag
+            color="cyan"
+            style={{ margin: 0, fontSize: 11, lineHeight: '18px', flexShrink: 0 }}
+            title={item.inspector_note}
+          >
+            审核记录
+          </Tag>
+        )}
         {getResultDisplay()}
         <div style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>
           {isDetailExpanded ? '▲' : '▼'}

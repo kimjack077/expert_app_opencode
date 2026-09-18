@@ -31,6 +31,13 @@
             <span class="stat-value">{{ resultCounts.fail }}</span>
             <span class="stat-label">不合格</span>
           </div>
+          <div class="stat-divider"></div>
+          <!-- 待判定：草稿或未出总体结论的记录。
+               此前徽章只有三档，三项之和不等于「共 N 条」，客户会问「剩下的是哪几条」。 -->
+          <div class="stat-item">
+            <span class="stat-value">{{ resultCounts.pending }}</span>
+            <span class="stat-label">待判定</span>
+          </div>
         </div>
       </div>
     </div>
@@ -185,11 +192,12 @@ const filterTabs = [
 ]
 
 const resultCounts = computed(() => {
-  return {
-    pass: records.value.filter(r => r.overall_result === 'pass').length,
-    partial_pass: records.value.filter(r => r.overall_result === 'partial_pass').length,
-    fail: records.value.filter(r => r.overall_result === 'fail').length,
-  }
+  const pass = records.value.filter(r => r.overall_result === 'pass').length
+  const partial = records.value.filter(r => r.overall_result === 'partial_pass').length
+  const fail = records.value.filter(r => r.overall_result === 'fail').length
+  // 待判定 = 总数扣除已出结论的，保证「四项之和 = 共 N 条」在页面上闭合
+  const pending = Math.max(records.value.length - pass - partial - fail, 0)
+  return { pass, partial_pass: partial, fail, pending }
 })
 
 const filteredRecords = computed(() => {
@@ -231,10 +239,14 @@ const formatDate = (dateStr) => {
   const now = new Date()
   const diff = now - date
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
+
   if (days === 0) return '今天'
   if (days === 1) return '昨天'
   if (days < 7) return `${days}天前`
+  // 跨年数据必须带年份，否则「4月17日」无法判断是哪一年
+  if (date.getFullYear() !== now.getFullYear()) {
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
+  }
   return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 

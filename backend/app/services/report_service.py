@@ -320,6 +320,9 @@ class ReportService:
                     'multi_value': getattr(ri, 'multi_value', None),
                     'audit_evidence': getattr(ri, 'audit_evidence', None),
                     'audit_findings': getattr(ri, 'audit_findings', None),
+                    # 审核记录（检查项级），录入页写入的就是 inspector_note；
+                    # 此处原先漏merge，导致报告与详情都看不到用户填写的审核记录。
+                    'inspector_note': getattr(ri, 'inspector_note', None),
                     'photos': getattr(ri, 'photos', None) or [],
                 }
 
@@ -348,6 +351,8 @@ class ReportService:
                     item['audit_evidence'] = ri_data['audit_evidence']
                 if ri_data.get('audit_findings'):
                     item['audit_findings'] = ri_data['audit_findings']
+                if ri_data.get('inspector_note'):
+                    item['inspector_note'] = ri_data['inspector_note']
                 if ri_data.get('photos'):
                     item['photos'] = ri_data['photos']
         return all_items
@@ -404,6 +409,7 @@ class ReportService:
         pass_count = _stats['pass']
         fail_count = _stats['fail']
         na_count = _stats['na']
+        observe_count = _stats.get('observe', 0)
         total = _stats['total']
         filled_count = _stats['filled']
         pass_rate = compliance_rate(_stats)
@@ -412,6 +418,7 @@ class ReportService:
         合格项：{pass_count} 项
         不合格项：{fail_count} 项
         不适用项：{na_count} 项
+        观察项：{observe_count} 项
         """
         elements.append(Paragraph(overview_text.replace('\n', '<br/>'), self.styles['CustomBodyText']))
         if record.total_score is not None:
@@ -648,6 +655,7 @@ class ReportService:
         pass_count = _stats['pass']
         fail_count = _stats['fail']
         na_count = _stats['na']
+        observe_count = _stats.get('observe', 0)
         total = _stats['total']
         filled_count = _stats['filled']
         pass_rate = compliance_rate(_stats)
@@ -684,6 +692,9 @@ class ReportService:
                 'pass': pass_count,
                 'fail': fail_count,
                 'na': na_count,
+                # 观察项（中间态）：前端汇总表必须单独列一行，
+                # 否则「合格+不合格+不适用」小于 total，客户当场就能看出对不上账。
+                'observe': observe_count,
                 'filled': filled_count,
                 'unfilled': total - filled_count,
                 'pass_rate': pass_rate,

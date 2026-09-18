@@ -218,9 +218,11 @@ export default function AuditProjectDetail() {
                   {statusConfig.text}
                 </Tag>
               </Tooltip>
-              <Tag color="cyan" style={{ fontSize: 12, margin: 0 }}>
-                {auditTypeMap[project.audit_type] || project.audit_type} · {project.audit_days || 0}人天
-              </Tag>
+              <Tooltip title="审核工作量（人天）：全体审核员现场工作天数之和。例如 2 名审核员现场工作 3 天即为 6 人天。">
+                <Tag color="cyan" style={{ fontSize: 12, margin: 0, cursor: 'help' }}>
+                  {auditTypeMap[project.audit_type] || project.audit_type} · 审核工作量 {project.audit_days || 0} 人天
+                </Tag>
+              </Tooltip>
             </Space>
 
             <Space wrap size={8}>

@@ -2,7 +2,13 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- 内联 data-URI 图标：原先指向 /vite.svg，但 public/ 下并无该文件，
+         导致每个页面都在控制台刷 404。改为内联后可彻底消除该噪音。 -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M18 34l9 9 19-21' stroke='%23fff' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>易审通 (EasyAudit) - 认证审核与现场评审智能云平台</title>
   </head>

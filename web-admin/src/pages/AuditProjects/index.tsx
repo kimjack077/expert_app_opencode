@@ -150,7 +150,7 @@ export default function AuditProjects() {
       ),
     },
     {
-      title: '审核人天',
+      title: '审核工作量（人天）',
       dataIndex: 'audit_days',
       key: 'audit_days',
       width: 100,

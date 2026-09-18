@@ -724,7 +724,10 @@ async def get_record(
         "created_at": record.created_at.isoformat() if record.created_at else None,
         "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         "template": template_data,
-        # 同步返回扁平 items，便于 H5/Web 明细页与 Agent 写回定位
+        # 同步返回扁平 items，便于 H5/Web 明细页与 Agent 写回定位。
+        # 字段必须与写入链路（InspectionRecordItemBase / update_fields）对齐——
+        # 此前漏了 inspector_note 等，导致「审核记录」在录入页能填、存得进库、
+        # 但详情读取时被投影丢掉，用户重新打开永远看到「暂无」（外部复测 bug #1）。
         "items": [
             {
                 "id": str(i.id),
@@ -741,9 +744,18 @@ async def get_record(
                 "text_value": i.text_value,
                 "multi_value": i.multi_value or [],
                 "problem_description": i.problem_description,
+                "rectification_suggestion": i.rectification_suggestion,
                 "result": i.result,
                 "item_title": i.item_title,
                 "photos": i.photos or [],
+                # 审核记录 / 审核证据（二者历史上混用，前端按 inspector_note 优先展示）
+                "inspector_note": i.inspector_note,
+                "audit_evidence": i.audit_evidence,
+                "audit_findings": i.audit_findings,
+                # 检查项快照元数据，供详情渲染风险等级/单位/类型标签
+                "item_risk_level": i.item_risk_level,
+                "item_unit": i.item_unit,
+                "item_check_type": i.item_check_type,
             }
             for i in items
         ],

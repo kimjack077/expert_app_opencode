@@ -438,6 +438,18 @@ export default function ProjectDocuments({ projectId }: Props) {
       render: (_, item) => {
         const value = item.parse_status || item.status || 'pending'
         const config = statusConfig[value] || { text: value, color: 'default' }
+        const metadata = (item.metadata as any) || {}
+        const indexed = ['completed', 'indexed', 'ready'].includes(value)
+        // 「已索引」但知识片段为 0：说明切块/嵌入实际没有产出任何可检索内容。
+        // 旧版一律绿标「已索引」，与同一行的「知识片段 0」自相矛盾，
+        // 也让「已完成索引 5 份」的统计口径失真（外部复测已提）。
+        if (indexed && !Number(item.chunk_count || 0) && !metadata.quarantined) {
+          return (
+            <Tooltip title="解析成功但未产出任何可检索片段，AI 检索无法命中该资料。建议重新索引。">
+              <Tag color="warning">已索引·无片段</Tag>
+            </Tooltip>
+          )
+        }
         const tag = <Tag color={config.color}>{config.text}</Tag>
         return item.parse_error ? <Tooltip title={item.parse_error}>{tag}</Tooltip> : tag
       },

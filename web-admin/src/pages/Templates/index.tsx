@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Modal, Form, Input, Select, Tree, message, Space, Tag, Radio, InputNumber, Switch, Empty, Row, Col, Tooltip, Divider, RadioChangeEvent } from 'antd'
+import { Card, Table, Button, Modal, Form, Input, Select, Tree, message, Space, Tag, Radio, InputNumber, Switch, Empty, Row, Col, Tooltip, Divider, RadioChangeEvent, Alert } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, CheckCircleOutlined, FolderOutlined, FileTextOutlined, PlusCircleOutlined, SaveOutlined, CloseOutlined, ArrowLeftOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons'
 import { templateApi } from '@/services/api'
 import AiExtractModal from './AiExtractModal'
@@ -362,6 +362,18 @@ export default function Templates() {
           borderRadius: 8,
           border: '1px solid #b7eb8f',
         }}>
+          {/* 父节点防呆：只要存在下级子项，系统一律将其规范为「分类目录」。
+              除了把 Switch 置灰，还必须有显式警示——此前只有一行灰色小字，
+              演示脚本要求的「醒目 Alert」缺失，用户容易误以为可以关掉分类锁定。 */}
+          {nodeHasChildren && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message="当前节点包含下级子项，系统已将其规范为「分类目录」"
+              description="分类目录仅作为层级分组容器，不可录入分值权重、合格阈值、检查方法、法律依据等检查项内容；后端落库时也会自动清洗这些字段。"
+            />
+          )}
           <Form form={editNodeForm} layout="vertical" onFinish={handleUpdateItem}>
             <Row gutter={16}>
               <Col span={6}>

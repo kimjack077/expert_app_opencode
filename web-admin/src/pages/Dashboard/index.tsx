@@ -203,9 +203,19 @@ export default function Dashboard() {
   const compliantItems = stats?.inspections?.compliant || 0
   const nonCompliantItems = stats?.inspections?.non_compliant || 0
   const notApplicableItems = stats?.inspections?.not_applicable || 0
+  const observeItems = stats?.inspections?.observe || 0
   const filledItems = stats?.inspections?.filled || 0
   const notFilledItems = stats?.inspections?.not_filled || 0
   const totalItems = stats?.inspections?.total || 0
+
+  // 合规率口径（全站唯一）：合格 ÷（总检查项 − 不适用项）。
+  // 注意分母**包含未填报项**——后端 analytics / item_stats.compliance_rate 同式。
+  // 此前页面文案写成「已填报合格项 / 已填报项」，与 50.59% 的实际取值互相矛盾，
+  // 且与趋势图（旧式：合格 ÷(合格+不合格)）给出同一屏两个数字。
+  const COMPLIANCE_FORMULA = '合格 ÷（总检查项 − 不适用项）'
+
+  // 趋势图展示区间跟随日期筛选，不再固定截断 14 天
+  const trendDays = Math.max(dateRange[1].diff(dateRange[0], 'day') + 1, 1)
 
   // 审核项目概览：口径与「审核项目」列表完全一致（均排除软删除项目）
   const projectTotal = projectOverview?.total || 0
@@ -234,7 +244,7 @@ export default function Dashboard() {
             工作台
           </h1>
           <div className="dashboard-header-desc">
-            全生命周期协同 · 优先处理待办事项（合规率口径 = 已填报合格项 / 已填报项）
+            全生命周期协同 · 优先处理待办事项（合规率口径 = {COMPLIANCE_FORMULA}）
           </div>
         </div>
 
@@ -427,7 +437,7 @@ export default function Dashboard() {
             }
             extra={
               <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                最近 14 日走势
+                最近 {trendDays} 日走势
               </span>
             } variant="borderless"
             loading={!trends}
@@ -447,7 +457,7 @@ export default function Dashboard() {
                     gap: 3,
                     paddingTop: 8,
                   }}>
-                    {trends.inspection_trend.slice(-14).map((item: any, idx: number) => {
+                    {trends.inspection_trend.map((item: any, idx: number) => {
                       const pct = (item.count / maxInspectionCount) * 100
                       return (
                         <Tooltip key={idx} title={`${item.date} : 检查 ${item.count} 次`}>
@@ -497,7 +507,7 @@ export default function Dashboard() {
                     gap: 3,
                     paddingTop: 8,
                   }}>
-                    {trends.compliance_trend.slice(-14).map((item: any, idx: number) => {
+                    {trends.compliance_trend.map((item: any, idx: number) => {
                       const pct = (item.rate / maxComplianceRate) * 100
                       const barColor = item.rate >= 80
                         ? 'linear-gradient(180deg, #10b981 0%, #34d399 100%)'
@@ -729,7 +739,7 @@ export default function Dashboard() {
             >
               <div style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                  <span style={{ color: '#64748b' }}>检查项达标率（合格 ÷ 已填报）</span>
+                  <span style={{ color: '#64748b' }}>检查项达标率（{COMPLIANCE_FORMULA}）</span>
                   <span style={{ fontWeight: 700, color: '#16a34a' }}>{complianceRate}%</span>
                 </div>
                 <Progress
@@ -744,7 +754,7 @@ export default function Dashboard() {
               </div>
 
               <Row gutter={8}>
-                <Col span={8}>
+                <Col span={6}>
                   <div style={{
                     padding: '8px 4px',
                     background: '#f0fdf4',
@@ -758,7 +768,7 @@ export default function Dashboard() {
                     <div style={{ fontSize: 10, color: '#15803d', marginTop: 2 }}>合格项</div>
                   </div>
                 </Col>
-                <Col span={8}>
+                <Col span={6}>
                   <div style={{
                     padding: '8px 4px',
                     background: '#fef2f2',
@@ -772,7 +782,21 @@ export default function Dashboard() {
                     <div style={{ fontSize: 10, color: '#b91c1c', marginTop: 2 }}>不合格项</div>
                   </div>
                 </Col>
-                <Col span={8}>
+                <Col span={6}>
+                  <div style={{
+                    padding: '8px 4px',
+                    background: '#eff6ff',
+                    borderRadius: 6,
+                    textAlign: 'center',
+                    border: '1px solid #dbeafe',
+                  }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#0369a1', lineHeight: 1.1 }}>
+                      {notApplicableItems}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#1d4ed8', marginTop: 2 }}>不适用项</div>
+                  </div>
+                </Col>
+                <Col span={6}>
                   <div style={{
                     padding: '8px 4px',
                     background: '#f8fafc',
@@ -780,7 +804,7 @@ export default function Dashboard() {
                     textAlign: 'center',
                     border: '1px solid #e2e8f0',
                   }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: '#0369a1', lineHeight: 1.1 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#64748b', lineHeight: 1.1 }}>
                       {notFilledItems}
                     </div>
                     <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>未填报</div>
@@ -788,13 +812,16 @@ export default function Dashboard() {
                 </Col>
               </Row>
 
-              {/* 口径说明：四项相加必须等于总检查项，避免「135 + 21 ≠ 248」这类对不上的数字 */}
+              {/* 口径说明：各项相加必须等于总检查项，避免「135 + 21 ≠ 248」这类对不上的数字。
+                  「观察项」是已填写但不属于合格/不合格/不适用的中间态，
+                  必须单独列出——否则汇总表差额无处归属。 */}
               <div style={{ marginTop: 10, fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
                 总检查项 {totalItems} 项 = 合格 {compliantItems} + 不合格 {nonCompliantItems}
                 {notApplicableItems > 0 ? ` + 不适用 ${notApplicableItems}` : ''}
+                {observeItems > 0 ? ` + 观察项 ${observeItems}` : ''}
                 {notFilledItems > 0 ? ` + 未填报 ${notFilledItems}` : ''}
                 <br />
-                已填报 {filledItems} 项；不适用项不计入达标率分母。
+                已填报 {filledItems} 项；达标率分母 = 总检查项 − 不适用项 = {Math.max(totalItems - notApplicableItems, 0)} 项。
               </div>
             </Card>
           )}

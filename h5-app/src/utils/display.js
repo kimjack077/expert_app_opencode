@@ -23,7 +23,23 @@ export function formatTaskDisplay(task = {}) {
     .replace(/^E2E[-_]FULL[-_]\d+[-\s]*/i, '')
     .replace(/^Codex\s+P\d+\s+/i, '')
     .trim()
-  const parts = cleaned.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean)
+
+  // 先把日期/编号样式的片段保护起来再切分。
+  // 旧实现直接 split(/[-–—]/)，会把标题里的 "2026-07-20" 切成 "2026"/"07"/"20"，
+  // 于是卡片上出现了两个互相矛盾的日期：右上角"创建时间 7月21日"，正文副标题"07 · 20"，
+  // 且主标题尾部还挂着半截"· 2026"（外部复测已提）。
+  const DATE_LIKE = /\d{4}\s*[-/.]\s*\d{1,2}\s*[-/.]\s*\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日/g
+  const preserved = []
+  const masked = cleaned.replace(DATE_LIKE, (m) => {
+    preserved.push(m)
+    return `\u0000${preserved.length - 1}\u0000`
+  })
+
+  const parts = masked
+    .split(/\s*[-–—]\s*/)
+    .map((p) => p.replace(/\u0000(\d+)\u0000/g, (_, i) => preserved[Number(i)]).trim())
+    .filter(Boolean)
+
   if (parts.length >= 3) {
     const dateHint = parts[parts.length - 1]
     const area = parts[parts.length - 2]

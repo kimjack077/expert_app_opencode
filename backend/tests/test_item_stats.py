@@ -97,14 +97,58 @@ def _fake_column(name: str = "radio_value"):
 
 
 def test_total_equals_sum_of_buckets():
-    """核心守恒律：total == pass + fail + na + unfilled。"""
+    """核心守恒律：total == pass + fail + na + observe + unfilled。
+
+    2026-09-18 修订：新增 ``observe``（观察项/待整改）一档。
+    旧契约把 observe 算进 ``unfilled``，导致
+    「合格 + 不合格 + 不适用」恒小于 total，报告汇总表出现对不上的缺口。
+    """
     items = _items("pass", "fail", "na", "not_applicable", None, "", "observe", "pass")
     stats = calculate_item_stats(items)
 
     assert stats["total"] == len(items)
     assert (
-        stats["pass"] + stats["fail"] + stats["na"] + stats["unfilled"] == stats["total"]
+        stats["pass"]
+        + stats["fail"]
+        + stats["na"]
+        + stats["observe"]
+        + stats["unfilled"]
+        == stats["total"]
     ), f"统计不守恒：{stats}"
+
+
+def test_observe_is_filled_not_unfilled():
+    """回归：观察项是「已填写」，不得被统计成「未填报」。
+
+    外部复测 bug：一记录 4 项 = 1 合格 + 2 观察项 + 1 不适用，
+    报告汇总显示「1 合格 + 0 不合格 + 1 不适用 = 2」而「总计 4」，
+    差额 2 项无处归属——根因就是 observe 被塞进了 unfilled。
+    """
+    stats = calculate_item_stats(_items("pass", "observe", "observe", "na"))
+
+    assert stats["total"] == 4
+    assert stats["observe"] == 2
+    assert stats["unfilled"] == 0, "观察项必须是已填写，不能计入未填报"
+    assert stats["filled"] == 4
+    assert stats["pass"] + stats["fail"] + stats["na"] + stats["observe"] == stats["total"]
+
+
+def test_classify_result_ext_bucket_names_are_all_valid_stats_keys():
+    """防回归：classify_result_ext 的返回值必须是 calculate_item_stats 的合法键。
+
+    事故背景：该函数曾返回 "other"，而统计字典的键是 "observe"，
+    `stats[bucket] += 1` 直接抛 KeyError，把 /api/records/{id}/report 打成 500。
+    任何新增桶都必须同时出现在统计字典里。
+    """
+    from app.utils.item_stats import classify_result_ext
+
+    valid_keys = set(calculate_item_stats([]).keys())
+    for raw in ("pass", "fail", "na", "not_applicable", "observe", "pending_rectification", "", None):
+        bucket = classify_result_ext(raw)
+        assert bucket is None or bucket in valid_keys, (
+            f"classify_result_ext({raw!r}) 返回了非法桶名 {bucket!r}，"
+            f"合法键为 {sorted(valid_keys)}"
+        )
 
 
 def test_filled_plus_unfilled_equals_total():
@@ -122,7 +166,17 @@ def test_filled_plus_unfilled_equals_total():
 def test_empty_and_none_input_are_safe():
     for empty in (None, [], ()):
         stats = calculate_item_stats(empty)
-        assert stats == {"total": 0, "pass": 0, "fail": 0, "na": 0, "filled": 0, "unfilled": 0}
+        # 契约变更（2026-09-18）：新增 observe 桶，用于让
+        # 「pass + fail + na + observe + unfilled == total」在汇总表上闭合。
+        assert stats == {
+            "total": 0,
+            "pass": 0,
+            "fail": 0,
+            "na": 0,
+            "observe": 0,
+            "filled": 0,
+            "unfilled": 0,
+        }
 
 
 def test_supports_both_orm_objects_and_dicts():
@@ -148,6 +202,7 @@ def test_real_world_record_regression():
         "pass": 0,
         "fail": 1,
         "na": 1,
+        "observe": 0,
         "filled": 2,
         "unfilled": 2,
     }
