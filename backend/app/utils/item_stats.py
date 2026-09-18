@@ -121,6 +121,10 @@ def classify_item(item: Any) -> Optional[str]:
     按 :data:`RESULT_FIELDS` 的优先级取**第一个能归类**的值，
     避免出现「同时命中合格与不合格」的双计（旧实现用 ``or`` 连接，确有此缺陷）。
 
+    本函数只做**三级归类**（``pass`` / ``fail`` / ``na``），
+    中间态（``observe`` / ``pending_rectification``）由调用方用
+    :func:`classify_result_ext` 兜底——见 :func:`calculate_item_stats`。
+
     无法归类（未填写、空串、未知值）返回 ``None``。
     """
     for field in RESULT_FIELDS:
@@ -181,11 +185,25 @@ def calculate_item_stats(items: Optional[Iterable[Any]]) -> dict:
     stats = {"total": 0, "pass": 0, "fail": 0, "na": 0, "observe": 0}
     for item in items or []:
         stats["total"] += 1
-        # 跨模型归类：radio_value → result → evaluation_3level，
-        # 与 _flatten_items / 报告装配保持同一优先级，避免双计。
+        # 跨模型归类：先走三级归类（radio_value → result → evaluation_3level，
+        # 与 _flatten_items / 报告装配保持同一优先级，避免双计）；
+        # 三级归类不认的中间态（observe / pending_rectification）再逐个字段兜底。
+        #
+        # 兜底分支**不能只看 radio_value**：判定值可能落在 result 字段——
+        # TaskItemRecord 压根没有 radio_value 列（实测生产库 information_schema），
+        # 其判定值只存在于 result / result_value。旧实现只看 radio_value，
+        # 一旦将来有写入端把 observe 写进 result，该值会被静默计成「未填报」，
+        # 汇总表重新出现「合格+不合格+不适用+观察项 ≠ 总项数」的缺口。
+        #
+        # 说明：当前生产库无此组合（observe / pending_rectification 共 6 行
+        # 全部落在 radio_value 且 result 为空；Agent 写回白名单
+        # VALID_CHECK_RESULTS 不含 observe），故本兜底不改变任何现存统计数字。
         bucket = classify_item(item)
         if bucket is None:
-            bucket = classify_result_ext(radio_value_of(item))
+            for field in RESULT_FIELDS:
+                bucket = classify_result_ext(_raw_of(item, field))
+                if bucket:
+                    break
         # 防御：桶名与统计键不一致时绝不能抛 KeyError——报告接口会直接 500。
         # 曾因 classify_result_ext 返回 "other" 而键名是 "observe" 整站报错。
         if bucket in stats:

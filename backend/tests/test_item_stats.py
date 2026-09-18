@@ -133,6 +133,46 @@ def test_observe_is_filled_not_unfilled():
     assert stats["pass"] + stats["fail"] + stats["na"] + stats["observe"] == stats["total"]
 
 
+def test_observe_in_result_field_is_not_lost():
+    """回归：判定值落在 ``result`` 字段的 observe 也必须被统计到，不能计成「未填报」。
+
+    旧实现 ``calculate_item_stats`` 的兜底分支只看 ``radio_value_of(item)``。
+    但 ``TaskItemRecord`` **没有 ``radio_value`` 列**（实测生产库
+    information_schema：只有 result / result_value），判定值只存在于 ``result``。
+    若写入端把 ``observe`` 写进 ``result``，该值会被静默丢成 unfilled，
+    汇总表重新出现「合格+不合格+不适用+观察项 ≠ 总项数」的缺口。
+
+    现场数据无此组合（observe 全在 radio_value），故此处锁的是**契约**。
+    """
+    # TaskItemRecord 真实形态：只有 result 字段
+    stats = calculate_item_stats([{"result": "observe"}])
+    assert stats["observe"] == 1
+    assert stats["unfilled"] == 0, "result 字段的观察项不得被计成未填报"
+    assert stats["filled"] == 1
+
+    # radio_value 为空、判定值落在 result
+    stats = calculate_item_stats([{"radio_value": None, "result": "pending_rectification"}])
+    assert stats["observe"] == 1
+    assert stats["unfilled"] == 0
+
+    # 三级归类的值走 result 同样要认
+    stats = calculate_item_stats([{"result": "pass"}, {"result": "fail"}, {"result": "na"}])
+    assert (stats["pass"], stats["fail"], stats["na"]) == (1, 1, 1)
+    assert stats["unfilled"] == 0
+
+
+def test_classify_item_priority_radio_value_wins_over_result():
+    """``RESULT_FIELDS`` 的顺序即优先级：radio_value 有可识别值时不让 result 覆盖。
+
+    防止「同时命中合格与不合格」的双计——旧实现用 ``or`` 连接两个字段，
+    两处都有值时会被算两次。实测生产库无「双非空且归类不同」的行（0 行）。
+    """
+    assert classify_item({"radio_value": "fail", "result": "pass"}) == "fail"
+    assert classify_item({"radio_value": "pass", "result": "fail"}) == "pass"
+    # radio_value 无法识别时才回退到 result
+    assert classify_item({"radio_value": "unknown-x", "result": "fail"}) == "fail"
+
+
 def test_classify_result_ext_bucket_names_are_all_valid_stats_keys():
     """防回归：classify_result_ext 的返回值必须是 calculate_item_stats 的合法键。
 
