@@ -89,9 +89,11 @@ def _run(ssh, cmd: str, timeout: int = 120) -> tuple[bool, str]:
 
 
 def _health_code(ssh) -> str:
+    # 只取 curl 的 %{http_code}：连接失败时 curl 本身就输出 000，
+    # 再加 `|| echo 000` 会让输出变成 "000000"，解析出错。
     _, out = _run(
         ssh,
-        f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 8 {HEALTH_URL} || echo 000",
+        f"curl -s -o /dev/null -w '%{{http_code}}' --max-time 8 {HEALTH_URL}; echo",
         timeout=30,
     )
     return out.strip().splitlines()[-1].strip() if out.strip() else "000"
@@ -154,14 +156,25 @@ def main() -> int:
             time.sleep(0.5)
         time.sleep(1)
 
+        # ⚠ 启动命令必须是**多行**，不能写成 `cd X && source Y && nohup ... & echo $!`。
+        # 单行写法里 `&` 作用于整个 `A && B && C` 列表，会把后台子 shell 一起挂起，
+        # 而该子 shell 的 stdout 仍是 SSH 通道 → 通道永不关闭 →
+        # run_remote_command 里的 stdout.read() 永久阻塞（实测卡死到超时）。
+        # 多行写法下 `nohup ... &` 只后台化 uvicorn 本身，shell 立刻继续并退出。
+        # 另加 `< /dev/null` 切断 stdin，避免后台进程持有通道输入。
         start_cmd = (
-            f"cd {REMOTE_DIR}/backend && source .venv/bin/activate && "
+            f"cd {REMOTE_DIR}/backend\n"
+            "source .venv/bin/activate\n"
             f"nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 "
-            f"> {REMOTE_DIR}/backend.log 2>&1 & echo $!"
+            f"> {REMOTE_DIR}/backend.log 2>&1 < /dev/null &\n"
+            "echo started\n"
         )
-        ok, out = _run(ssh, start_cmd, timeout=60)
-        new_pid = out.strip().splitlines()[-1].strip() if out.strip() else ""
+        _run(ssh, start_cmd, timeout=60)
+
+        # PID 单独查，不从启动命令的输出里取（那正是会阻塞的地方）
+        new_pid = _current_uvicorn_pid(ssh)
         print(f"  已启动，PID：{new_pid or '<未取到>'}")
+        print(f"  重启前 PID：{old_pid or '未运行'}")
 
         print("\n[4/5] 健康检查……")
         code = "000"
