@@ -115,6 +115,7 @@ test_upload.png
 main_new.py
 *.service
 *.conf
+!deploy/*.conf
 
 # Temporary LLM/API diagnostic scripts
 backend/test_*.py

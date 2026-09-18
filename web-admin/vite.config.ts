@@ -22,4 +22,19 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-antd': ['antd'],
+          'vendor-icons': ['@ant-design/icons'],
+          'vendor-markdown': ['react-markdown', 'remark-gfm'],
+          'vendor-utils': ['axios', 'dayjs', 'zustand'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 1000,
+  },
 })
+
