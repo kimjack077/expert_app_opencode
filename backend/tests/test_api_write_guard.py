@@ -161,6 +161,24 @@ def _post_item(client, auth_headers, record_id, payload):
     )
 
 
+def _find_record_item(client, auth_headers, record_id, template_item_id):
+    """回查记录详情里该检查项的落库内容。
+
+    写入响应**只回 id / template_item_id，不含任何值字段**
+    （现有用例因此只断言 template_item_id）。但「值有没有落到正确字段」
+    恰恰是写入守卫要保的东西，所以必须回查记录详情再断言。
+    记录详情的 ``items`` 是 ``inspection_record_items``，带各值字段。
+    """
+    detail = _data(client.get(f"/api/records/{record_id}", headers=auth_headers))
+    for item in detail.get("items") or []:
+        if str(item.get("template_item_id")) == str(template_item_id):
+            return item
+    raise AssertionError(
+        f"记录详情中找不到 template_item_id={template_item_id} 的条目；"
+        f"现有条目：{[i.get('template_item_id') for i in detail.get('items') or []]}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. 字段白名单 —— 「数据无法录入」的直接防线
 # ---------------------------------------------------------------------------
@@ -270,7 +288,17 @@ def test_numeric_item_declared_via_result_type_accepts_numeric_value(
     )
     body = _data(resp)
     assert body["template_item_id"] == guard_fixture["numeric_via_result_type"]
-    assert str(body.get("numeric_value")) == "100.9", "数值必须落到 numeric_value"
+
+    # 写入响应只回 id / template_item_id，**不含值字段**，
+    # 所以「值是否落到 numeric_value」必须回查记录详情 —— 而这正是本缺陷的核心：
+    # 老实现下请求被拒（200 都拿不到），放行后还必须确认值没落错字段。
+    stored = _find_record_item(
+        client, auth_headers, guard_fixture["record_id"],
+        guard_fixture["numeric_via_result_type"],
+    )
+    assert str(stored.get("numeric_value")) == "100.9", (
+        f"数值必须落到 numeric_value，实际：{stored.get('numeric_value')!r}"
+    )
 
 
 def test_text_item_declared_via_result_type_accepts_text_value(
@@ -289,7 +317,15 @@ def test_text_item_declared_via_result_type_accepts_text_value(
     assert resp.status_code == 200, (
         f"描述型检查项提交 text_value 必须放行，实际 HTTP {resp.status_code}：{resp.text[:300]}"
     )
-    assert str(_data(resp).get("text_value")) == "现场检查未发现异常"
+    assert _data(resp)["template_item_id"] == guard_fixture["text_via_result_type"]
+
+    stored = _find_record_item(
+        client, auth_headers, guard_fixture["record_id"],
+        guard_fixture["text_via_result_type"],
+    )
+    assert str(stored.get("text_value")) == "现场检查未发现异常", (
+        f"文本必须落到 text_value，实际：{stored.get('text_value')!r}"
+    )
 
 
 def test_numeric_via_result_type_still_rejects_radio_value(
