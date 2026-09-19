@@ -37,7 +37,13 @@ class User(Base, SoftDeleteMixin):
     token_revoked_at = Column(
         DateTime(timezone=True),
         nullable=True,
-        comment="令牌吊销时间；登出后使该时间点之前签发的 token 失效",
+        comment="旧版全量吊销时间；仅用于兼容没有会话 ID 的历史 token",
+    )
+    revoked_sessions = Column(
+        JSON,
+        nullable=False,
+        default=list,
+        comment="已吊销的登录会话 ID；按设备/会话登出，不影响同用户其他设备",
     )
     
     # 审核员资质信息（新增）

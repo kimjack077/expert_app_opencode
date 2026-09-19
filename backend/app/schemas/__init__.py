@@ -67,6 +67,7 @@ from .enterprise import (
     RectificationCreate,
     RectificationUpdate,
     RectificationResponse,
+    RectificationReviewRequest,
 )
 
 __all__ = [
@@ -128,4 +129,5 @@ __all__ = [
     "RectificationCreate",
     "RectificationUpdate",
     "RectificationResponse",
+    "RectificationReviewRequest",
 ]

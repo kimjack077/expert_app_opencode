@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Body, Query
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -23,6 +25,7 @@ from app.utils.security import (
     decode_token,
     _token_revoked,
     get_current_user,
+    security,
 )
 from app.services import AuditService
 
@@ -57,6 +60,7 @@ async def login(
     token_data = {
         "sub": user.username,
         "rv": user.token_revoked_at.isoformat() if user.token_revoked_at else None,
+        "sid": str(uuid4()),
     }
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
@@ -78,9 +82,19 @@ async def login(
 async def logout(
     request: Request,
     current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ):
-    current_user.token_revoked_at = datetime.now(timezone.utc)
+    # 吊销当前登录会话，而不是用户的全部会话。access/refresh token
+    # 共享 sid，因此同一设备退出后无法用 refresh token 重新登录，
+    # 但用户在其他设备上的会话仍保持有效。
+    payload = decode_token(credentials.credentials) if credentials else None
+    session_id = payload.get("sid") if payload else None
+    if session_id:
+        revoked = list(current_user.revoked_sessions or [])
+        if session_id not in revoked:
+            revoked.append(session_id)
+        current_user.revoked_sessions = revoked[-50:]
     await AuditService.log_action(
         db,
         str(current_user.id),
@@ -131,6 +145,7 @@ async def refresh_token(
     token_data = {
         "sub": user.username,
         "rv": user.token_revoked_at.isoformat() if user.token_revoked_at else None,
+        "sid": payload.get("sid") or str(uuid4()),
     }
     access_token = create_access_token(data=token_data)
     new_refresh_token = create_refresh_token(data=token_data)

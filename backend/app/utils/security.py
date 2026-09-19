@@ -68,7 +68,17 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def _token_revoked(payload: dict, user: User) -> bool:
-    """判断 token 是否在用户最近一次登出时已经被吊销。"""
+    """判断 token 的当前会话或旧版全局版本是否已被吊销。"""
+    session_id = payload.get("sid")
+    revoked_sessions = getattr(user, "revoked_sessions", None) or []
+    if session_id and session_id in revoked_sessions:
+        return True
+
+    # Keep the timestamp check for legacy tokens issued before session IDs were
+    # introduced. New tokens are revoked by session and do not affect peers.
+    if session_id:
+        return False
+
     revoked_at = getattr(user, "token_revoked_at", None)
     if revoked_at is None:
         return False

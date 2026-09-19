@@ -119,7 +119,7 @@ class QualificationBase(BaseModel):
 
 
 class QualificationCreate(QualificationBase):
-    enterprise_id: UUID
+    enterprise_id: Optional[UUID] = None
 
 
 class QualificationUpdate(BaseModel):
@@ -155,7 +155,12 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    enterprise_id: UUID
+    enterprise_id: Optional[UUID] = None
+
+
+class RectificationReviewRequest(BaseModel):
+    status: str
+    rectification_result: Optional[str] = None
 
 
 class ProductUpdate(BaseModel):

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, desc
 from sqlalchemy.orm import selectinload
@@ -36,6 +36,7 @@ from app.schemas.enterprise import (
     RectificationCreate,
     RectificationUpdate,
     RectificationResponse,
+    RectificationReviewRequest,
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.services import AuditService
@@ -383,11 +384,17 @@ async def update_rectification(
 @router.post("/rectifications/{rect_id}/review", response_model=ApiResponse)
 async def review_rectification(
     rect_id: str,
-    status: str,
-    rectification_result: Optional[str] = None,
+    review_data: Optional[RectificationReviewRequest] = Body(None),
+    status: Optional[str] = Query(None, description="兼容旧版 query 传参"),
+    rectification_result: Optional[str] = Query(None, description="兼容旧版 query 传参"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
+    if review_data is not None:
+        status = review_data.status
+        rectification_result = review_data.rectification_result
+    if not status:
+        raise HTTPException(status_code=422, detail="status is required")
     rectification = await db.get(RectificationRecord, rect_id)
     if not rectification:
         raise HTTPException(status_code=404, detail="Rectification record not found")

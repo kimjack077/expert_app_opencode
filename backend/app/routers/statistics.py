@@ -375,7 +375,8 @@ async def get_nc_by_clause(
     - project_id: 可选，筛选指定项目
     - limit: 返回数量限制
 
-    返回：[{clause_no, count}] 格式的排序数据
+    返回：[{clause_no, name, count}] 格式的排序数据；name 为通用图表字段，
+    clause_no 保留用于兼容现有调用方。
     """
     # 构建基础查询（join 项目表排除软删除项目下的不符合项）
     stmt = (
@@ -413,7 +414,7 @@ async def get_nc_by_clause(
         merged[normalized] = merged.get(normalized, 0) + int(row.count)
 
     data = [
-        {"clause_no": clause, "count": count}
+        {"clause_no": clause, "name": clause, "count": count}
         for clause, count in sorted(
             merged.items(), key=lambda kv: (-kv[1], kv[0])
         )[:limit]
