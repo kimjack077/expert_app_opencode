@@ -343,3 +343,72 @@ def test_pass_fail_alias_is_accepted():
 def test_alias_does_not_widen_accepted_types():
     """别名只是归一，不能把未知类型也放进来。"""
     assert validate_item_payload(check_type="rating", payload={"radio_value": "pass"})
+
+
+# ---------------------------------------------------------------------------
+# 4. 调用方必须传「真实类型」而非列默认值（静态门禁，不需数据库）
+# ---------------------------------------------------------------------------
+
+
+def test_records_guard_call_site_uses_resolve_check_type():
+    """``POST /records/{id}/items`` 的守卫必须用 ``resolve_check_type()``。
+
+    回归缺陷（2026-09-19 实测报出）：守卫直接读 ``template_item.check_type``，
+    而 ``template_items.check_type`` **恒为列默认值 'radio'**
+    （模板编辑器只写 ``result_type``）。生产库实测 174 个叶子检查项，
+    ``check_type`` 全部是 'radio'，其中 8 个 ``result_type='numeric'``、
+    3 个 ``result_type='text'`` —— 这 11 项在 Web 记录页提交时
+    一律被判成"写错字段"而 422，**完全无法保存**。
+
+    同一文件的快照写入用的是 ``resolve_check_type()``，两处口径必须一致。
+    """
+    import re
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "records.py"
+    ).read_text(encoding="utf-8")
+
+    # 定位守卫调用，检查它传给 check_type 的表达式
+    call = re.search(r"guard_errors\s*=\s*validate_item_payload\((.*?)\n\s*\)", src, re.S)
+    assert call, "未找到 validate_item_payload 调用点，records.py 结构可能已变更"
+
+    # ⚠️ 必须先剥掉注释：说明性注释里会写到 `template_item.check_type` 这个字样，
+    #    直接扫描会把注释当成实现（本门禁开发时真被绊过一次）。
+    block = "\n".join(
+        line.split("#", 1)[0] for line in call.group(1).splitlines()
+    )
+
+    assert "resolve_check_type(" in block, (
+        "写入守卫必须用 resolve_check_type(template_item) 解析真实类型；"
+        "直接读 template_item.check_type 会把数值型/描述型项误判为单选，"
+        "导致前端正常提交被 422 拒绝"
+    )
+    assert "template_item.check_type" not in block, (
+        "守卫又退回读原始 template_item.check_type（列默认 'radio'），"
+        "会让数值型/描述型检查项无法保存"
+    )
+
+
+def test_records_has_no_raw_template_item_check_type_fallback():
+    """records.py 内不得再出现「读 t_item.check_type 作类型」的写法。
+
+    该列是列默认值，不能当类型用；类型一律走 resolve_check_type()。
+    同样先剥注释再扫。
+    """
+    import re
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "records.py"
+    ).read_text(encoding="utf-8")
+
+    offenders = []
+    for i, raw in enumerate(src.splitlines(), 1):
+        code = raw.split("#", 1)[0]  # 剥掉行内注释
+        if re.search(r"\bt_item\.check_type\b|\btemplate_item\.check_type\b", code):
+            offenders.append(f"records.py:{i}: {raw.strip()}")
+    assert not offenders, (
+        "以下位置仍把列默认值 check_type 当类型使用，应改用 resolve_check_type()：\n  "
+        + "\n  ".join(offenders)
+    )

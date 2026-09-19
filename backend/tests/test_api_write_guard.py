@@ -115,6 +115,12 @@ def guard_template(client, auth_headers):
             tag="numeric", check_type="numeric", min_value=0, max_value=100
         ),
         "text_item": add_item(tag="text", check_type="text"),
+        # ↓ 真实模板的形态：check_type 停在列默认值 'radio'，类型写在 result_type。
+        #   模板编辑器只写 result_type（UI 上的「结论类型」），从不写 check_type。
+        #   生产库实测 174 个叶子检查项，check_type 全部是 'radio'，其中
+        #   8 个 result_type='numeric'、3 个 result_type='text'。
+        "numeric_via_result_type": add_item(tag="numeric_rt", result_type="numeric"),
+        "text_via_result_type": add_item(tag="text_rt", result_type="text"),
     }
 
     yield payload
@@ -227,6 +233,80 @@ def test_text_item_rejects_radio_value(client, auth_headers, guard_fixture):
     )
     assert resp.status_code == 422
     assert "text_value" in _error_text(resp)
+
+
+def test_numeric_item_declared_via_result_type_accepts_numeric_value(
+    client, auth_headers, guard_fixture
+):
+    """真实模板形态：类型写在 result_type、check_type 停在列默认 'radio'。
+
+    回归缺陷（2026-09-19 老杨实测报出）：Web 记录页给「重点耗能设备运行参数」
+    填数值后保存失败，HTTP 422 ——
+    「该检查项类型为「单选」，结果应写入 单选结果(radio_value)，
+      但本次只写入了 数值结果(numeric_value)」。
+
+    根因：``POST /records/{id}/items`` 的写入守卫直接读 ``template_item.check_type``，
+    而该列**恒为列默认值 'radio'**（模板编辑器只写 ``result_type``），
+    于是数值型/描述型检查项一律被误判成单选，前端正常提交反被拒绝。
+    同一文件的快照写入用的是 ``resolve_check_type()``（正确口径），
+    两处不一致 —— 本模块自己制造的「数据无法录入」。
+
+    ⚠️ 本用例**刻意不传 check_type**，因为真实前端只提交
+    ``{template_item_id, numeric_value}``；老用例显式传 check_type，
+    恰好把这条路径掩盖了。
+    """
+    resp = _post_item(
+        client,
+        auth_headers,
+        guard_fixture["record_id"],
+        {
+            "template_item_id": guard_fixture["numeric_via_result_type"],
+            "numeric_value": "100.9",
+        },
+    )
+    assert resp.status_code == 200, (
+        "数值型检查项（类型写在 result_type）提交 numeric_value 必须放行，"
+        f"实际 HTTP {resp.status_code}：{resp.text[:300]}"
+    )
+    body = _data(resp)
+    assert body["template_item_id"] == guard_fixture["numeric_via_result_type"]
+    assert str(body.get("numeric_value")) == "100.9", "数值必须落到 numeric_value"
+
+
+def test_text_item_declared_via_result_type_accepts_text_value(
+    client, auth_headers, guard_fixture
+):
+    """同上，描述型：check_type='radio' + result_type='text' 时写 text_value 必须放行。"""
+    resp = _post_item(
+        client,
+        auth_headers,
+        guard_fixture["record_id"],
+        {
+            "template_item_id": guard_fixture["text_via_result_type"],
+            "text_value": "现场检查未发现异常",
+        },
+    )
+    assert resp.status_code == 200, (
+        f"描述型检查项提交 text_value 必须放行，实际 HTTP {resp.status_code}：{resp.text[:300]}"
+    )
+    assert str(_data(resp).get("text_value")) == "现场检查未发现异常"
+
+
+def test_numeric_via_result_type_still_rejects_radio_value(
+    client, auth_headers, guard_fixture
+):
+    """放宽的同时不能丢掉守卫的牙齿：这类项写 radio_value 仍应被拒绝。"""
+    resp = _post_item(
+        client,
+        auth_headers,
+        guard_fixture["record_id"],
+        {
+            "template_item_id": guard_fixture["numeric_via_result_type"],
+            "radio_value": "pass",
+        },
+    )
+    assert resp.status_code == 422, "数值型项写 radio_value 应被拒绝"
+    assert "numeric_value" in _error_text(resp)
 
 
 def test_unknown_check_type_is_rejected(client, auth_headers, guard_fixture):

@@ -1055,8 +1055,19 @@ async def create_or_update_record_item(
         template_item = await db.get(TemplateItem, template_item_id)
 
     guard_errors = validate_item_payload(
+        # ⚠️ 必须用 resolve_check_type，不能直接读 template_item.check_type。
+        #
+        # template_items 上 check_type 与 result_type 两个字段并存：
+        #   · check_type  恒为**列默认值** 'radio'（模板编辑器根本不写它）
+        #   · result_type 才是模板编辑器实际写入的「结论类型」
+        # 直接读 check_type 会把数值型/描述型检查项一律误判为「单选」，
+        # 于是前端正常提交 numeric_value 反被判成"写错字段"而 422 ——
+        # 这是本模块自己制造的「数据无法录入」，比它要防的问题更严重。
+        #
+        # 同一文件的快照写入（见 resolve_check_type 的调用）用的是正确口径，
+        # 两处必须一致，否则同一份数据在快照与校验里是两个类型。
         check_type=item_data.check_type
-        or (template_item.check_type if template_item else None),
+        or (resolve_check_type(template_item) if template_item else None),
         payload={
             "score_value": item_data.score_value,
             "radio_value": item_data.radio_value,
@@ -1185,11 +1196,7 @@ async def get_record_items(
         check_type = (
             item.item_check_type
             if item.item_title
-            else (
-                t_item.check_type
-                if t_item
-                else (t_item.result_type if t_item else "radio")
-            )
+            else (resolve_check_type(t_item) if t_item else "radio")
         )
         result_type = t_item.result_type if t_item else "pass_fail"
         result_options = (
@@ -1332,9 +1339,7 @@ async def get_record_item(
     check_type = (
         record_item.item_check_type
         if record_item.item_title
-        else (
-            t_item.check_type if t_item else (t_item.result_type if t_item else "radio")
-        )
+        else (resolve_check_type(t_item) if t_item else "radio")
     )
     result_type = t_item.result_type if t_item else "pass_fail"
     result_options = (
