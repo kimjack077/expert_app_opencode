@@ -421,3 +421,55 @@ def test_result_in_rejects_unknown_bucket():
 def test_result_fields_priority_is_declared():
     """字段优先级是契约的一部分，不得被随意重排。"""
     assert RESULT_FIELDS == ("radio_value", "result", "evaluation_3level")
+
+
+def test_history_stats_call_site_uses_classify_item():
+    """``GET /records/{id}/items/{item_id}/history-stats`` 必须用 ``classify_item``。
+
+    历史缺陷（2026-09-19 发现）：该接口逐个取 ``classify_result(i.radio_value)``，
+    **只看 radio_value**。而判定值可能落在 ``result`` 字段 ——
+    生产库实测：已提交记录下有 10 条 radio_value 为空、result 有判定值
+    （na 4 / fail 3 / pass 3），只看 radio_value 会把它们全部漏计
+    （合格 173 vs 权威口径 176，不适用还会再漏 4）。
+
+    ``classify_item`` 按 ``radio_value → result → evaluation_3level`` 取第一个
+    能归类的值，与 ``audit_projects``、``calculate_item_stats`` 同一口径。
+    """
+    import re
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1] / "app" / "routers" / "records.py"
+    ).read_text(encoding="utf-8")
+
+    # 先剥注释：说明性注释里会写到旧写法字样，不剥会把注释当成实现
+    code = "\n".join(line.split("#", 1)[0] for line in src.splitlines())
+
+    offenders = [
+        f"records.py:{i}"
+        for i, line in enumerate(code.splitlines(), 1)
+        if re.search(r"classify_result\(\s*\w+\.radio_value\s*\)", line)
+    ]
+    assert not offenders, (
+        "以下位置仍「只看 radio_value」做判定归类，判定值落在 result 字段时会被漏计，"
+        f"应改用 classify_item()：{offenders}"
+    )
+    assert "classify_item" in code, "records.py 应引入并使用 classify_item"
+
+
+def test_classify_item_finds_verdict_in_result_field():
+    """回归本缺陷的核心：radio_value 为空、判定值在 result 时仍能归类。"""
+    from app.utils.item_stats import classify_item
+
+    for verdict, expected in (
+        ("pass", "pass"), ("fail", "fail"),
+        ("not_applicable", "na"), ("na", "na"),
+    ):
+        assert classify_item({"radio_value": None, "result": verdict}) == expected
+        assert classify_item({"radio_value": "", "result": verdict}) == expected
+        assert classify_item({"radio_value": "  ", "result": verdict}) == expected
+
+    # radio_value 有值时优先级更高，不被 result 覆盖
+    assert classify_item({"radio_value": "pass", "result": "fail"}) == "pass"
+    # 两边都空 → 无法归类
+    assert classify_item({"radio_value": None, "result": None}) is None

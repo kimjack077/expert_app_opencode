@@ -26,7 +26,7 @@ from app.schemas import (
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import RECORD_VIEW_ALL_ROLES, can_view_all_records, is_admin
 from app.utils.category import is_category_node, load_parent_ids
-from app.utils.item_stats import calculate_item_stats, classify_result
+from app.utils.item_stats import calculate_item_stats, classify_result, classify_item
 from app.utils.business_time import business_day_bounds
 from app.utils.item_write_guard import validate_item_payload
 from app.utils.item_completion import resolve_check_type
@@ -1798,12 +1798,24 @@ async def get_item_history_stats(
     history_items = history_result.scalars().all()
 
     total_inspections = len(history_items)
-    # 判定归类统一走 app.utils.item_stats.classify_result。
-    # 原实现只认 "na"，而写入侧落库的是 "not_applicable"（全库 na 为 0 条），
-    # 导致该接口的「不适用」恒为 0。
-    pass_count = sum(1 for i in history_items if classify_result(i.radio_value) == "pass")
-    fail_count = sum(1 for i in history_items if classify_result(i.radio_value) == "fail")
-    na_count = sum(1 for i in history_items if classify_result(i.radio_value) == "na")
+    # 判定归类统一走 app.utils.item_stats.calculate_item_stats（权威口径）。
+    #
+    # 两处历史坑，都已收敛：
+    #   ① 只认 "na" —— 写入侧落库的是 "not_applicable"（全库 na 为 0 条），
+    #      该接口的「不适用」恒为 0。
+    #   ② 只看 radio_value —— 判定值可能落在 **result** 字段。
+    #      生产库实测：已提交记录下有 10 条 radio_value 为空、result 有判定值
+    #      （na 4 / fail 3 / pass 3），只看 radio_value 会把它们全部漏计
+    #      （合格 173 vs 权威口径 176）。
+    # calculate_item_stats 内部按 radio_value → result → evaluation_3level 取
+    # 第一个能归类的值，与 audit_projects 同一口径。
+    #
+    # 这里**必须**调用它而不是自己 sum —— tests/test_contract_consistency.py
+    # 的「禁止手写计数」门禁会拦下任何 `na_count = sum(...)` 形式的写法。
+    history_stats = calculate_item_stats(history_items)
+    pass_count = history_stats["pass"]
+    fail_count = history_stats["fail"]
+    na_count = history_stats["na"]
     history_records = []
 
     for idx, item in enumerate(history_items):
