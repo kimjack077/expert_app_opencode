@@ -52,6 +52,7 @@ def make_response(data=None, code=200, message="success"):
 @router.get("", response_model=ApiResponse)
 async def get_enterprises(
     name: Optional[str] = Query(None),
+    keyword: Optional[str] = Query(None, description="企业名称或统一信用代码模糊搜索"),
     credit_code: Optional[str] = Query(None),
     district: Optional[str] = Query(None),
     risk_level: Optional[str] = Query(None),
@@ -63,8 +64,14 @@ async def get_enterprises(
 ):
     query = select(Enterprise).where(Enterprise.is_deleted == False)  # noqa: E712
 
-    if name:
-        query = query.where(Enterprise.name.ilike(f"%{name}%"))
+    search_keyword = keyword or name
+    if search_keyword:
+        query = query.where(
+            or_(
+                Enterprise.name.ilike(f"%{search_keyword}%"),
+                Enterprise.credit_code.ilike(f"%{search_keyword}%"),
+            )
+        )
     if credit_code:
         query = query.where(Enterprise.credit_code.ilike(f"%{credit_code}%"))
     if district:
@@ -75,8 +82,13 @@ async def get_enterprises(
         query = query.where(Enterprise.status == status)
 
     total_query = select(func.count(Enterprise.id)).where(Enterprise.is_deleted == False)  # noqa: E712
-    if name:
-        total_query = total_query.where(Enterprise.name.ilike(f"%{name}%"))
+    if search_keyword:
+        total_query = total_query.where(
+            or_(
+                Enterprise.name.ilike(f"%{search_keyword}%"),
+                Enterprise.credit_code.ilike(f"%{search_keyword}%"),
+            )
+        )
     if credit_code:
         total_query = total_query.where(Enterprise.credit_code.ilike(f"%{credit_code}%"))
     if district:

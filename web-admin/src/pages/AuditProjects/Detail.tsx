@@ -184,7 +184,7 @@ export default function AuditProjectDetail() {
     <div style={{ padding: '24px' }}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
         <Card
-          bodyStyle={{ padding: '16px 20px' }}
+          styles={{ body: { padding: '16px 20px' } }}
           style={{
             borderRadius: 12,
             background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',

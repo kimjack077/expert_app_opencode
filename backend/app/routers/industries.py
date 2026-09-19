@@ -96,7 +96,7 @@ async def create_industry(
     if data.code:
         result = await db.execute(select(Industry).where(Industry.code == data.code))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="分类编码已存在")
+            raise HTTPException(status_code=409, detail="分类编码已存在")
             
     ind = Industry(**data.model_dump())
     db.add(ind)
@@ -119,7 +119,7 @@ async def update_industry(
     if 'code' in update_data and update_data['code']:
         result = await db.execute(select(Industry).where(Industry.code == update_data['code'], Industry.id != industry_id))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="分类编码已存在")
+            raise HTTPException(status_code=409, detail="分类编码已存在")
             
     for key, value in update_data.items():
         setattr(ind, key, value)
@@ -137,6 +137,20 @@ async def delete_industry(
     ind = await db.get(Industry, industry_id)
     if not ind or ind.is_deleted:
         raise HTTPException(status_code=404, detail="行业分类不存在")
+
+    child_id = (
+        await db.execute(
+            select(Industry.id).where(
+                Industry.parent_id == industry_id,
+                Industry.is_deleted == False,  # noqa: E712
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if child_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="该行业分类存在未删除的子分类，请先处理子分类后再删除",
+        )
 
     from app.utils.soft_delete import soft_delete
 

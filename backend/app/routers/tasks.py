@@ -26,7 +26,7 @@ from app.schemas import (
     InspectionSummary,
 )
 from app.utils.security import get_current_user, get_current_admin_user
-from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES
+from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES, is_admin
 from app.utils.item_completion import is_item_assessed
 from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import classify_result
@@ -519,6 +519,54 @@ async def start_task(
     )
 
     return make_response(message="Task started")
+
+
+@router.post("/{task_id}/cancel", response_model=ApiResponse)
+async def cancel_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """取消尚未完成的任务，并同步关联审核计划项状态。"""
+    task = await db.get(InspectionTask, task_id)
+    if not task or task.is_deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not is_admin(current_user.role) and not await can_access_linked_task(
+        db, task, current_user
+    ):
+        raise HTTPException(status_code=403, detail="Not authorized to cancel this task")
+
+    if task.status == "cancelled":
+        raise HTTPException(status_code=409, detail="任务已取消，不能重复操作")
+    if task.status == "completed":
+        raise HTTPException(status_code=409, detail="任务已完成，不能取消")
+
+    task.status = "cancelled"
+    from app.models.audit_project import AuditPlanItem
+
+    try:
+        task_uuid = UUID(task_id)
+    except ValueError:
+        task_uuid = None
+    if task_uuid:
+        plan_item = (
+            await db.execute(
+                select(AuditPlanItem).where(
+                    AuditPlanItem.inspection_task_id == task_uuid,
+                    AuditPlanItem.is_deleted == False,  # noqa: E712
+                )
+            )
+        ).scalar_one_or_none()
+        if plan_item:
+            plan_item.status = "cancelled"
+
+    await db.commit()
+    await AuditService.log_action(
+        db, str(current_user.id), current_user.username, "cancel_task", "task", task_id
+    )
+    await db.commit()
+    return make_response(message="Task cancelled")
 
 
 async def _sync_project_status_after_plan_item(db: AsyncSession, project_id) -> None:

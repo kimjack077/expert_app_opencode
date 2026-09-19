@@ -84,6 +84,7 @@ class TestCategoryFieldOverrides:
         "legal_basis",
         "standard_ref",
         "ai_prompt_template",
+        "risk_level",
     )
     FLAG_FIELDS = ("use_ai", "attachment_required", "allow_attachment", "is_required")
 
@@ -123,6 +124,7 @@ class TestNormalizeAsCategory:
             legal_basis="某法第 3 条",
             standard_ref="GB/T 1234",
             ai_prompt_template="请判断",
+            risk_level="high",
             use_ai=True,
             attachment_required=True,
             allow_attachment=True,
@@ -143,6 +145,7 @@ class TestNormalizeAsCategory:
         assert item.legal_basis is None
         assert item.standard_ref is None
         assert item.ai_prompt_template is None
+        assert item.risk_level is None
         assert item.use_ai is False
         assert item.attachment_required is False
         assert item.allow_attachment is False

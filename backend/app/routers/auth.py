@@ -21,6 +21,7 @@ from app.utils.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    _token_revoked,
     get_current_user,
 )
 from app.services import AuditService
@@ -53,8 +54,12 @@ async def login(
     if not user.is_active:
         raise HTTPException(status_code=400, detail="User account is disabled")
 
-    access_token = create_access_token(data={"sub": user.username})
-    refresh_token = create_refresh_token(data={"sub": user.username})
+    token_data = {
+        "sub": user.username,
+        "rv": user.token_revoked_at.isoformat() if user.token_revoked_at else None,
+    }
+    access_token = create_access_token(data=token_data)
+    refresh_token = create_refresh_token(data=token_data)
 
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
@@ -75,6 +80,7 @@ async def logout(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    current_user.token_revoked_at = datetime.now(timezone.utc)
     await AuditService.log_action(
         db,
         str(current_user.id),
@@ -82,6 +88,7 @@ async def logout(
         "logout",
         ip_address=request.client.host if request.client else None,
     )
+    await db.commit()
     return make_response(message="Logged out successfully")
 
 
@@ -115,14 +122,18 @@ async def refresh_token(
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
 
-    if not user or not user.is_active:
+    if not user or not user.is_active or _token_revoked(payload, user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
 
-    access_token = create_access_token(data={"sub": user.username})
-    new_refresh_token = create_refresh_token(data={"sub": user.username})
+    token_data = {
+        "sub": user.username,
+        "rv": user.token_revoked_at.isoformat() if user.token_revoked_at else None,
+    }
+    access_token = create_access_token(data=token_data)
+    new_refresh_token = create_refresh_token(data=token_data)
 
     return make_response(
         data={
@@ -170,12 +181,12 @@ async def register(
 ):
     result = await db.execute(select(User).where(User.username == user_data.username))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Username already registered")
+        raise HTTPException(status_code=409, detail="Username already registered")
 
     if user_data.email:
         result = await db.execute(select(User).where(User.email == user_data.email))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Email already registered")
+            raise HTTPException(status_code=409, detail="Email already registered")
 
     # 安全：公开注册端点绝不信任客户端提供的 role / org_id。
     # 否则任何人都能自注册为 super_admin 或挂入他人组织（提权 + 跨组织越权）。

@@ -147,6 +147,7 @@ class LLMService:
                 max_tokens=settings.LLM_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
+                stream_options={"include_usage": True},
                 stream=True,
             )
 
@@ -215,6 +216,7 @@ class LLMService:
                 max_tokens=settings.LLM_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
+                stream_options={"include_usage": True},
                 stream=True,
             )
 
@@ -392,6 +394,7 @@ class LLMService:
                 max_tokens=2000,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
+                stream_options={"include_usage": True},
                 stream=True,
             )
 

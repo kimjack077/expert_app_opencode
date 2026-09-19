@@ -343,11 +343,15 @@ async def get_nc_by_system(
         "En": "能源体系(En)",
     }
 
-    # 初始化所有体系
-    data_dict = {"Q": 0, "E": 0, "S": 0, "En": 0}
+    # 显式保留未填写体系的记录，确保与严重程度分布的分母闭合。
+    data_dict = {"Q": 0, "E": 0, "S": 0, "En": 0, "unclassified": 0}
     for row in rows:
         if row.certification_system:
-            data_dict[row.certification_system] = row.count
+            data_dict[row.certification_system] = data_dict.get(row.certification_system, 0) + row.count
+        else:
+            data_dict["unclassified"] += row.count
+
+    system_labels["unclassified"] = "未归类体系"
 
     data = [
         {"name": system_labels.get(k, k), "value": v}

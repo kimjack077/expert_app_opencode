@@ -73,17 +73,20 @@ export const DocsSearchModal: React.FC<DocsSearchModalProps> = ({
       const cat = DOCS_CATEGORIES.find((c) => c.id === article.category)
       const catTitle = cat ? cat.title : ''
 
-      // 1. 匹配文章标题或描述或关键词
+      // 1. 匹配文章元信息（含导语）；避免正文只写在 intro 时零召回。
       if (
         article.title.toLowerCase().includes(trimmed) ||
         article.description.toLowerCase().includes(trimmed) ||
+        article.intro?.toLowerCase().includes(trimmed) ||
         article.keywords.some((k) => k.toLowerCase().includes(trimmed))
       ) {
         matched.push({
           articleId: article.id,
           articleTitle: article.title,
           categoryTitle: catTitle,
-          snippet: article.description,
+          snippet: article.intro?.toLowerCase().includes(trimmed)
+            ? article.intro
+            : article.description,
           matchedKeyword: trimmed,
         })
       }
@@ -113,6 +116,39 @@ export const DocsSearchModal: React.FC<DocsSearchModalProps> = ({
             sectionId: sec.id,
             sectionTitle: sec.title,
             snippet,
+            matchedKeyword: trimmed,
+          })
+        } else if (sec.image?.caption.toLowerCase().includes(trimmed)) {
+          matched.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            categoryTitle: catTitle,
+            sectionId: sec.id,
+            sectionTitle: sec.title,
+            snippet: sec.image.caption,
+            matchedKeyword: trimmed,
+          })
+        } else if (sec.callout && (
+          sec.callout.title.toLowerCase().includes(trimmed) ||
+          sec.callout.content.toLowerCase().includes(trimmed)
+        )) {
+          matched.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            categoryTitle: catTitle,
+            sectionId: sec.id,
+            sectionTitle: sec.title,
+            snippet: `${sec.callout.title}: ${sec.callout.content}`,
+            matchedKeyword: trimmed,
+          })
+        } else if (sec.keyPoints?.some((point) => point.toLowerCase().includes(trimmed))) {
+          matched.push({
+            articleId: article.id,
+            articleTitle: article.title,
+            categoryTitle: catTitle,
+            sectionId: sec.id,
+            sectionTitle: sec.title,
+            snippet: sec.keyPoints.find((point) => point.toLowerCase().includes(trimmed)) || sec.title,
             matchedKeyword: trimmed,
           })
         } else if (sec.steps) {
@@ -184,7 +220,7 @@ export const DocsSearchModal: React.FC<DocsSearchModalProps> = ({
       width={640}
       className="docs-search-modal"
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       <div className="docs-search-input-wrapper">
         <SearchOutlined style={{ fontSize: 18, color: '#0284c7' }} />

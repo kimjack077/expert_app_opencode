@@ -39,6 +39,10 @@ export const startTask = (id) => {
   return request.post(`/tasks/${id}/start`)
 }
 
+export const cancelTask = (id) => {
+  return request.post(`/tasks/${id}/cancel`)
+}
+
 export const completeTask = (id) => {
   return request.post(`/tasks/${id}/complete`)
 }

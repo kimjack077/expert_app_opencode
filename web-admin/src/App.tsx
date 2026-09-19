@@ -6,7 +6,7 @@ import MainLayout from '@/components/MainLayout'
 
 const PageLoading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '360px' }}>
-    <Spin size="large" tip="页面加载中..." />
+    <Spin size="large" aria-label="页面加载中" />
   </div>
 )
 

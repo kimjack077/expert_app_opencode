@@ -183,7 +183,7 @@ export default function Inspection() {
             </div>
           }
           style={{ width: 380, flexShrink: 0, maxHeight: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{ padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' }}
+          styles={{ body: { padding: 0, overflow: 'hidden', flex: 1, display: 'flex', flexDirection: 'column' } }}
         >
           {/* 进度条 */}
           <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>

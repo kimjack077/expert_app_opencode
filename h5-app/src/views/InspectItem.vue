@@ -317,7 +317,11 @@
       </div>
 
       <!-- 附件 -->
-      <div class="attachment-card" :class="{ 'attachment-required': itemData.attachment_required && formData.photos.length === 0 }">
+      <div
+        v-if="itemData.allow_attachment !== false || itemData.attachment_required || formData.photos.length > 0"
+        class="attachment-card"
+        :class="{ 'attachment-required': itemData.attachment_required && formData.photos.length === 0 }"
+      >
         <div class="card-header">
           <span class="card-title">附件</span>
           <div style="display:flex;align-items:center;gap:8px">

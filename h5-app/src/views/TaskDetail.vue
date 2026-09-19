@@ -186,6 +186,18 @@
           <span>完成任务</span>
         </van-button>
         <van-button
+          v-if="task.status === 'pending' || task.status === 'in_progress'"
+          type="danger"
+          plain
+          block
+          class="action-btn"
+          style="margin-top: 10px;"
+          @click="cancelTask"
+        >
+          <van-icon name="close" size="20" />
+          <span>取消任务</span>
+        </van-button>
+        <van-button
           v-if="task.status === 'completed'"
           type="primary"
           block
@@ -208,7 +220,7 @@
       </div>
     </div>
 
-    <van-empty v-else description="任务不存在" />
+    <van-empty v-else :description="taskError || '任务不存在'" />
   </div>
 </template>
 
@@ -217,6 +229,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
 import {
+  cancelTask as cancelTaskApi,
   getTask,
   startTask as startTaskApi,
 } from '../api/tasks.js'
@@ -237,6 +250,7 @@ const router = useRouter()
 const route = useRoute()
 const task = ref(null)
 const loading = ref(true)
+const taskError = ref('')
 const openingAiAudit = ref(false)
 
 // 出发前离线缓存
@@ -340,11 +354,13 @@ const loadTaskFromCache = (taskId) => {
 
 const fetchTask = async () => {
   const taskId = route.params.id
+  taskError.value = ''
   console.log('获取任务详情, ID:', taskId)
   
   if (!taskId || taskId === 'undefined' || taskId === 'null') {
     console.error('任务ID无效:', taskId)
     showToast({ type: 'fail', message: '任务ID无效' })
+    taskError.value = '任务ID无效'
     loading.value = false
     return
   }
@@ -362,6 +378,7 @@ const fetchTask = async () => {
       // BUG-32：后端现返回 assigned_to_name（指派人姓名），映射到展示字段
       task.value = { ...res.data, assignee: res.data.assigned_to_name || res.data.assignee || '' }
     } else {
+      taskError.value = res.message || '获取任务失败'
       showToast({ type: 'fail', message: res.message || '获取任务失败' })
     }
   } catch (error) {
@@ -370,6 +387,7 @@ const fetchTask = async () => {
       return
     }
     const errorMsg = error.response?.data?.detail || error.response?.data?.message || '获取任务详情失败'
+    taskError.value = errorMsg
     showToast({ type: 'fail', message: errorMsg })
   } finally {
     loading.value = false
@@ -419,6 +437,28 @@ const completeTask = async () => {
   } catch (error) {
     if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('跳转执行页失败:', error)
+    }
+  }
+}
+
+const cancelTask = async () => {
+  try {
+    await showConfirmDialog({
+      title: '确认取消',
+      message: '取消后该任务将停止流转，确定继续吗？',
+      confirmButtonText: '确认取消',
+      confirmButtonColor: '#ee0a24',
+    })
+    const res = await cancelTaskApi(task.value.id)
+    if (res.code === 200) {
+      showToast({ type: 'success', message: '任务已取消' })
+      await fetchTask()
+    } else {
+      showToast({ type: 'fail', message: res.message || '取消失败' })
+    }
+  } catch (error) {
+    if (error?.message !== 'cancel' && error !== 'cancel') {
+      showToast({ type: 'fail', message: error.response?.data?.detail || '取消失败' })
     }
   }
 }

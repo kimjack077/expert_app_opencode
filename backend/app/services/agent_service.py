@@ -821,6 +821,7 @@ class AgentService:
                     tool_choice="auto" if not force_final else None,
                     max_tokens=settings.LLM_MAX_TOKENS,
                     temperature=settings.LLM_TEMPERATURE,
+                    stream_options={"include_usage": True},
                     stream=True,
                 )
 
@@ -828,14 +829,16 @@ class AgentService:
                 had_tool_calls = False
                 assistant_text = ""
                 streamed_any_content = False
+                round_tokens = 0
 
                 async for chunk in response:
                     chunk_model = getattr(chunk, "model", None)
                     if chunk_model:
                         served_model_name = str(chunk_model)
+                    usage = getattr(chunk, "usage", None)
+                    if usage and getattr(usage, "total_tokens", None):
+                        round_tokens = max(round_tokens, usage.total_tokens)
                     if not chunk.choices:
-                        if getattr(chunk, "usage", None):
-                            total_tokens += chunk.usage.total_tokens or 0
                         continue
 
                     delta = chunk.choices[0].delta
@@ -868,6 +871,8 @@ class AgentService:
                         if force_final or not had_tool_calls:
                             streamed_any_content = True
                             yield {"type": "content", "content": delta.content}
+
+                total_tokens += round_tokens
 
                 if not had_tool_calls:
                     # Only surface text once the turn is a final answer.
@@ -1054,7 +1059,9 @@ class AgentService:
                 prompt=prompt,
                 response=response,
                 model=model or self.model,
-                tokens_used=tokens_used or None,
+                # Keep 0 when a provider omits usage; legacy NULL rows remain
+                # identifiable while new calls stay queryable numerically.
+                tokens_used=tokens_used,
                 duration_ms=duration_ms,
                 is_success="false" if error_text else "true",
                 error_msg=error_text,
@@ -1936,6 +1943,7 @@ class AgentService:
                 messages=[{"role": "user", "content": briefing["prompt"]}],
                 max_tokens=max_tokens,
                 temperature=0.5,
+                stream_options={"include_usage": True},
                 stream=True,
             )
             async for chunk in stream:
@@ -1973,7 +1981,7 @@ class AgentService:
                     prompt=briefing["prompt"],
                     response=collected_text,
                     tokens_used=stream_tokens,
-                    duration_ms=int(time.monotonic() - start_time) * 1000,
+                    duration_ms=int((time.monotonic() - start_time) * 1000),
                     error_text=stream_error,
                     call_type="agent_briefing_stream",
                     model=logged_model,

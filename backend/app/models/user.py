@@ -34,6 +34,11 @@ class User(Base, SoftDeleteMixin):
     industry_id = Column(UUID(as_uuid=True), ForeignKey("industries.id", ondelete="SET NULL"), nullable=True)
     is_active = Column(Boolean, default=True)
     last_login_at = Column(DateTime(timezone=True))
+    token_revoked_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="令牌吊销时间；登出后使该时间点之前签发的 token 失效",
+    )
     
     # 审核员资质信息（新增）
     auditor_registration_no = Column(String(100), comment="注册审核员编号，如 2022-N1QMS-2215455")

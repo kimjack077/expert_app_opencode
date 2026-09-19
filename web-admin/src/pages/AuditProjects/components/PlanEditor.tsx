@@ -547,7 +547,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                                 }`,
                                 boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
                               }}
-                              bodyStyle={{ padding: '10px 12px' }}
+                              styles={{ body: { padding: '10px 12px' } }}
                             >
                               {/* 顶部时间与组 */}
                               <div

@@ -38,11 +38,15 @@ async def get_users(
 
 @router.get("/{user_id}", response_model=ApiResponse)
 async def get_user(
-    user_id: UUID, 
+    user_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    user = await db.get(User, user_id)
+    try:
+        parsed_user_id = UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
+    user = await db.get(User, parsed_user_id)
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
     return make_response(data=UserResponse.model_validate(user).model_dump())

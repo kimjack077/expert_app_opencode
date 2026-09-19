@@ -102,6 +102,7 @@ def clear_check_item_fields(payload: dict, *, keep_title: bool = True) -> dict:
         "score_weight",
         "default_score",
         "ai_prompt_template",
+        "risk_level",
     ):
         if field in payload:
             payload[field] = None
@@ -132,6 +133,7 @@ CATEGORY_FIELD_OVERRIDES: dict = {
     "attachment_required": False,
     "allow_attachment": False,
     "is_required": False,
+    "risk_level": None,
 }
 
 
@@ -143,4 +145,3 @@ def normalize_as_category(item) -> None:
     for field, value in CATEGORY_FIELD_OVERRIDES.items():
         if hasattr(item, field):
             setattr(item, field, value)
-

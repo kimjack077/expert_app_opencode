@@ -1,28 +1,45 @@
 import { useState, useEffect } from 'react'
-import { Card, Row, Col, Table, Tag, DatePicker, Tabs } from 'antd'
+import { Card, Table, Tag, Tabs } from 'antd'
 import { analyticsApi } from '@/services/api'
 import dayjs from 'dayjs'
 
-const { RangePicker } = DatePicker
+const PAGE_SIZE = 20
+
+const CALL_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  suggestion: { label: '审核建议', color: 'gold' },
+  basis: { label: '法规依据', color: 'purple' },
+  agent_chat: { label: 'Agent 对话', color: 'blue' },
+  agent_briefing: { label: '审核简报', color: 'cyan' },
+  agent_briefing_stream: { label: '审核简报（流式）', color: 'cyan' },
+  evidence_analysis: { label: '证据分析', color: 'volcano' },
+  planner_plan: { label: 'Agent 规划', color: 'geekblue' },
+  planner_synthesis: { label: '规划汇总', color: 'geekblue' },
+}
 
 export default function Analytics() {
   const [auditLogs, setAuditLogs] = useState<any[]>([])
   const [llmLogs, setLlmLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [llmTotal, setLlmTotal] = useState(0)
+  const [auditPage, setAuditPage] = useState(1)
+  const [llmPage, setLlmPage] = useState(1)
 
   useEffect(() => {
-    fetchLogs()
-  }, [])
+    fetchLogs(auditPage, llmPage)
+  }, [auditPage, llmPage])
 
-  const fetchLogs = async () => {
+  const fetchLogs = async (nextAuditPage: number, nextLlmPage: number) => {
     setLoading(true)
     try {
       const [auditRes, llmRes]: any[] = await Promise.all([
-        analyticsApi.getAuditLogs({ limit: 50 }),
-        analyticsApi.getLLMLogs({ limit: 50 }),
+        analyticsApi.getAuditLogs({ skip: (nextAuditPage - 1) * PAGE_SIZE, limit: PAGE_SIZE }),
+        analyticsApi.getLLMLogs({ skip: (nextLlmPage - 1) * PAGE_SIZE, limit: PAGE_SIZE }),
       ])
       setAuditLogs(auditRes.data?.items || [])
       setLlmLogs(llmRes.data?.items || [])
+      setAuditTotal(auditRes.data?.total || 0)
+      setLlmTotal(llmRes.data?.total || 0)
     } catch (error) {
       console.error('Failed to fetch logs:', error)
     } finally {
@@ -47,11 +64,10 @@ export default function Analytics() {
 
   const llmColumns = [
     { title: '调用类型', dataIndex: 'call_type', key: 'call_type', width: 100,
-      render: (type: string) => (
-        <Tag color={type === 'suggestion' ? 'gold' : 'purple'}>
-          {type === 'suggestion' ? '监管建议' : '法规依据'}
-        </Tag>
-      )
+      render: (type: string) => {
+        const display = CALL_TYPE_LABELS[type] || { label: type || '未知类型', color: 'default' }
+        return <Tag color={display.color}>{display.label}</Tag>
+      }
     },
     { title: '模型', dataIndex: 'model', key: 'model', ellipsis: true },
     { title: 'Token数', dataIndex: 'tokens_used', key: 'tokens_used', width: 100 },
@@ -96,7 +112,13 @@ export default function Analytics() {
                   loading={loading}
                   scroll={{ x: 1000 }}
                   size="small"
-                  pagination={{ pageSize: 20 }}
+                  pagination={{
+                    current: auditPage,
+                    pageSize: PAGE_SIZE,
+                    total: auditTotal,
+                    showSizeChanger: false,
+                    onChange: setAuditPage,
+                  }}
                 />
               </Card>
             ),
@@ -113,7 +135,13 @@ export default function Analytics() {
                   loading={loading}
                   scroll={{ x: 800 }}
                   size="small"
-                  pagination={{ pageSize: 20 }}
+                  pagination={{
+                    current: llmPage,
+                    pageSize: PAGE_SIZE,
+                    total: llmTotal,
+                    showSizeChanger: false,
+                    onChange: setLlmPage,
+                  }}
                 />
               </Card>
             ),

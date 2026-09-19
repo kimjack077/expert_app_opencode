@@ -592,7 +592,7 @@ export default function AuditRecordEdit() {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="正在加载审核记录..." />
+        <Spin size="large" aria-label="正在加载审核记录" />
       </div>
     )
   }
@@ -669,7 +669,7 @@ export default function AuditRecordEdit() {
       {/* 检查进度与统计概览卡片 */}
       {template && (
         <Card variant="borderless"
-          bodyStyle={{ padding: '14px 20px' }}
+          styles={{ body: { padding: '14px 20px' } }}
           style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
@@ -713,7 +713,7 @@ export default function AuditRecordEdit() {
                 <Tag color="blue" style={{ borderRadius: 4 }}>现场审核记录</Tag>
               </div>
             } variant="borderless"
-            bodyStyle={{ padding: readOnly ? '12px 16px' : '16px 20px' }}
+            styles={{ body: { padding: readOnly ? '12px 16px' : '16px 20px' } }}
             style={{ marginBottom: 16, borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
             {readOnly ? (
@@ -844,7 +844,7 @@ export default function AuditRecordEdit() {
                   )}
                 </div>
               } variant="borderless"
-              bodyStyle={{ padding: 0 }}
+              styles={{ body: { padding: 0 } }}
               style={{ marginBottom: 16, borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
             >
               <Table
@@ -869,7 +869,7 @@ export default function AuditRecordEdit() {
                 <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>审核结论</span>
               </Space>
             } variant="borderless"
-            bodyStyle={{ padding: '16px 20px' }}
+            styles={{ body: { padding: '16px 20px' } }}
             style={{ borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
             {readOnly ? (

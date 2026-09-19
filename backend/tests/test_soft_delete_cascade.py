@@ -202,6 +202,19 @@ def test_cascade_depth_guard_is_bounded():
     )
 
 
+def test_project_sibling_cascades_delete_fk_dependents_first():
+    """区域记录必须排在其引用的区域之前删除，防止 FK 23503。"""
+    from app.utils.soft_delete import _child_table, _order_cascade_relations
+
+    metadata = _metadata()
+    ordered = _order_cascade_relations(
+        _child_table("audit_projects"), metadata.tables
+    )
+    names = [name for name, _column, _policy in ordered]
+
+    assert names.index("audit_area_records") < names.index("audit_areas")
+
+
 def test_soft_cascade_targets_have_deleted_at_column():
     """CASCADE_SOFT 的目标表必须同时具备 is_deleted 与 deleted_at。
 

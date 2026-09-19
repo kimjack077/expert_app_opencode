@@ -648,7 +648,7 @@ async def create_item(
         unit=None if is_category else item_data.unit,
         is_required=False if is_category else (item_data.is_required if item_data.is_required is not None else True),
         use_ai=False if is_category else (item_data.use_ai if item_data.use_ai is not None else False),
-        risk_level=item_data.risk_level or "medium",
+        risk_level=None if is_category else (item_data.risk_level or "medium"),
         sort_order=item_data.sort_order or 0,
         is_category=is_category,
         score_weight=None if is_category else item_data.score_weight,

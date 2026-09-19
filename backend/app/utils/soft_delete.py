@@ -511,6 +511,42 @@ def _child_table(parent_table_name: str) -> list[tuple[str, str, str]]:
     return result
 
 
+def _order_cascade_relations(
+    relations: list[tuple[str, str, str]], tables,
+) -> list[tuple[str, str, str]]:
+    """按外键依赖将同一层的子表排成「子先父后」。"""
+    if len(relations) < 2:
+        return relations
+
+    first_index = {child_table: index for index, (child_table, _, _) in enumerate(relations)}
+    child_names = set(first_index)
+    dependencies = {child_table: set() for child_table in child_names}
+    for child_table in child_names:
+        table = tables.get(child_table)
+        if table is None:
+            continue
+        for foreign_key in table.foreign_keys:
+            referred_table = foreign_key.column.table.name
+            if referred_table in child_names and referred_table != child_table:
+                dependencies[child_table].add(referred_table)
+
+    remaining = set(child_names)
+    ordered_names: list[str] = []
+    while remaining:
+        referred_by_remaining = set().union(
+            *(dependencies[name] & remaining for name in remaining)
+        )
+        ready = [name for name in remaining if name not in referred_by_remaining]
+        if not ready:
+            ready = [min(remaining, key=first_index.__getitem__)]
+        ready.sort(key=first_index.__getitem__)
+        ordered_names.extend(ready)
+        remaining.difference_update(ready)
+
+    by_name = {child_table: (child_column, policy) for child_table, child_column, policy in relations}
+    return [(name, *by_name[name]) for name in ordered_names]
+
+
 # 级联的最大层数。模板分类树、项目→计划项→区域记录这类多级归属需要逐层展开；
 # 正常情况下 2–3 层足够，12 层是防御性上限（配合"已软删的行不重复命中"，
 # 环状关系也会自然收敛）。
@@ -627,7 +663,10 @@ async def soft_delete_cascade(
                 continue
 
             # ── 1. 直接级联（外键在子表上）────────────────────────────
-            for child_table_name, child_column, policy in _child_table(parent_table_name):
+            child_relations = _order_cascade_relations(
+                _child_table(parent_table_name), Base.metadata.tables
+            )
+            for child_table_name, child_column, policy in child_relations:
                 table = Base.metadata.tables.get(child_table_name)
                 if table is None:
                     # 表不存在（迁移未跑或模型未导入）：跳过而不是报错，

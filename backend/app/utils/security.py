@@ -37,7 +37,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.now(timezone.utc) + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
-    to_encode.update({"exp": expire, "type": "access"})
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "access"})
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
@@ -50,7 +50,7 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) 
         expire = datetime.now(timezone.utc) + expires_delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "refresh"})
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM
     )
@@ -65,6 +65,16 @@ def decode_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def _token_revoked(payload: dict, user: User) -> bool:
+    """判断 token 是否在用户最近一次登出时已经被吊销。"""
+    revoked_at = getattr(user, "token_revoked_at", None)
+    if revoked_at is None:
+        return False
+    # rv 是登录时看到的最近吊销版本。登出会更新该时间戳，使此前签发的
+    # access/refresh token 全部失效；再次登录携带当前版本，可立即正常使用。
+    return payload.get("rv") != revoked_at.isoformat()
 
 
 async def get_user_from_token(token: str, db: AsyncSession) -> User:
@@ -91,7 +101,7 @@ async def get_user_from_token(token: str, db: AsyncSession) -> User:
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None:
+    if user is None or _token_revoked(payload, user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -134,6 +144,9 @@ async def get_current_user(
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
     if user is None:
+        raise credentials_exception
+
+    if _token_revoked(payload, user):
         raise credentials_exception
 
     if not user.is_active:

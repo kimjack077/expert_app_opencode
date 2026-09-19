@@ -137,6 +137,7 @@ class LLMGateway:
                 max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE if temperature is None else temperature,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             async for chunk in stream:
                 usage = getattr(chunk, "usage", None)
@@ -207,7 +208,7 @@ class LLMGateway:
                 prompt=prompt,
                 response=response,
                 model=model,
-                tokens_used=tokens or None,
+                tokens_used=tokens,
                 duration_ms=duration_ms,
                 is_success="false" if error_text else "true",
                 error_msg=error_text,
