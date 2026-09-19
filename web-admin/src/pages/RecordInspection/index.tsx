@@ -158,7 +158,9 @@ export default function RecordInspection() {
     setAiJudgmentResultType('')
 
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      // 与 InspectionForm 一致：fallback 必须是空串（相对路径），
+      // 不能写 'http://localhost:8000'。理由见 InspectionForm 同位置注释。
+      const API_URL = import.meta.env.VITE_API_URL || ''
 
       const response = await fetch(`${API_URL}/api/records/${id}/final-judgment-stream`, {
         headers: {

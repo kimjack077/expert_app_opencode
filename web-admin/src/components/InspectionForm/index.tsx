@@ -508,7 +508,13 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     setAiJudgmentResultType('')
 
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+      // 注意：不能用 'http://localhost:8000' 作 fallback。
+      // 生产 .env.production 中 VITE_API_URL 为空，nginx 已在 3000/5173 端口反代
+      // /api 到 127.0.0.1:8000；fetch 用空字符串会拼成相对路径 '/api/...'，
+      // 由浏览器自动走同源 nginx 反代。若误指 localhost:8000，
+      // 浏览器会把 SSE 发到用户本机，连不上后端 → 「AI生成失败，请稍后重试」，
+      // 且后端日志完全无记录，难以定位（2026-09-19 实测）。
+      const API_URL = import.meta.env.VITE_API_URL || ''
       const streamPath = isTaskMode
         ? `/api/tasks/${streamId}/final-judgment-stream`
         : `/api/records/${streamId}/final-judgment-stream`
