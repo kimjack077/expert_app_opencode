@@ -1,5 +1,30 @@
 /** 展示层文案与标题格式化（面向业务用户，隐藏技术编号噪音） */
 
+import dayjs from 'dayjs'
+
+/**
+ * 业务日期格式化（唯一来源）。
+ *
+ * 后端返回的是带时区的 ISO-8601 串（如 `2026-07-20T01:00:00+00:00`），
+ * **绝不能直接渲染到界面**——客户会看到一串原始时间戳。
+ *
+ * 也不能简单 `slice(0, 10)`：那取的是 UTC 日期，对 `2026-09-10T16:00:00+00:00`
+ * 会显示成 09-10，而按业务时区（UTC+8）实际是 09-11，与列表页差一天。
+ * 这里统一按浏览器本地时区（业务时区 UTC+8）格式化，与
+ * `AuditProjects/index.tsx` 的 `toLocaleDateString()` 口径一致。
+ */
+export function formatBusinessDate(value?: string | null): string {
+  if (!value) return '-'
+  const d = dayjs(value)
+  return d.isValid() ? d.format('YYYY-MM-DD') : String(value).slice(0, 10)
+}
+
+/** 起止区间：`2026-07-20 ~ 2026-07-22`；两端皆空时返回 '-' */
+export function formatDateRange(start?: string | null, end?: string | null): string {
+  if (!start && !end) return '-'
+  return `${formatBusinessDate(start)} ~ ${formatBusinessDate(end)}`
+}
+
 export function roleLabel(role?: string | null): string {
   const map: Record<string, string> = {
     super_admin: '系统管理员',

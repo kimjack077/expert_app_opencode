@@ -722,18 +722,21 @@ export default function Records() {
                 <div style={{ display: 'grid', gridTemplateColumns: `repeat(${(selectedRecord.stats.observe || 0) > 0 ? 6 : 5}, 1fr)`, gap: 12 }}>
                   <div style={{ textAlign: 'center', padding: 12, background: '#f6ffed', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#52c41a' }}>{selectedRecord.stats.pass}</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>符合项</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>合格项</div>
                   </div>
                   <div style={{ textAlign: 'center', padding: 12, background: '#fff2f0', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#ff4d4f' }}>{selectedRecord.stats.fail}</div>
-                    <div style={{ fontSize: 12, color: '#666' }}>不符合项</div>
+                    <div style={{ fontSize: 12, color: '#666' }}>不合格项</div>
                   </div>
                   <div style={{ textAlign: 'center', padding: 12, background: '#f5f5f5', borderRadius: 8 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, color: '#8c8c8c' }}>{selectedRecord.stats.na}</div>
                     <div style={{ fontSize: 12, color: '#666' }}>不适用项</div>
                   </div>
                   {/* 观察项（已填写但不属三级判定的中间态）：与报告、H5 判定卡口径一致，
-                      不加这一格则「符合+不符合+不适用」小于「总检查项」，用户会质疑汇总。 */}
+                      不加这一格则「合格+不合格+不适用」小于「总检查项」，用户会质疑汇总。
+                      术语统一为「合格项/不合格项」——与现场执行页、H5 现场端一致；
+                      「不符合项」在系统里是另一实体（项目下正式开具的不符合项单据），
+                      两者混用会让客户以为检查项被开成了不符合项。 */}
                   {(selectedRecord.stats.observe || 0) > 0 && (
                     <div style={{ textAlign: 'center', padding: 12, background: '#ecfeff', borderRadius: 8 }}>
                       <div style={{ fontSize: 28, fontWeight: 700, color: '#0891b2' }}>{selectedRecord.stats.observe}</div>

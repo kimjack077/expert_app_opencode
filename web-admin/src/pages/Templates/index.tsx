@@ -98,7 +98,10 @@ export default function Templates() {
   // AI辅助录入相关状态
   const [aiModalOpen, setAiModalOpen] = useState(false)
   // 编辑版本选择
-  const [editorVersion, setEditorVersion] = useState<'v1' | 'v2'>('v1')
+  // 默认进「新版」V2：V2 是树形防呆（父节点锁定 + Alert）的正式入口，
+  // 旧版仅作兼容保留，可由 V2 内的「切换旧版」按钮进入。
+  // 默认停在旧版会让演示人员点进来后看不到防呆效果。
+  const [editorVersion, setEditorVersion] = useState<'v1' | 'v2'>('v2')
 
   useEffect(() => {
     fetchTemplates()

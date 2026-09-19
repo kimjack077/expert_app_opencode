@@ -15,7 +15,7 @@ import {
   CheckOutlined,
 } from '@ant-design/icons'
 import { auditProjectApi, auditAIApi } from '@/services/auditProjectApi'
-import { projectStatusMeta } from '@/utils/display'
+import { projectStatusMeta, formatDateRange } from '@/utils/display'
 import TeamManagement from './components/TeamManagement'
 import PlanManagement from './components/PlanManagement'
 import RecordsList from './components/RecordsList'
@@ -309,8 +309,7 @@ export default function AuditProjectDetail() {
             <div>
               <span style={{ color: '#64748b' }}>审核排期：</span>
               <span style={{ color: '#1e293b', fontWeight: 500 }}>
-                {project.scheduled_start ? String(project.scheduled_start).slice(0, 10) : '-'} ~{' '}
-                {project.scheduled_end ? String(project.scheduled_end).slice(0, 10) : '-'}
+                {formatDateRange(project.scheduled_start, project.scheduled_end)}
               </span>
             </div>
             {project.remarks && (

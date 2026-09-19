@@ -378,6 +378,45 @@ body {
   background: #f0f9ff !important;
 }
 
+/* ── 检查项步骤条完成态 ────────────────────────────────────────────────
+   注意：上面 .ant-btn-default 的 color / background / border 都带 !important，
+   组件内联样式**无法覆盖**它 —— 这就是步骤条完成态配色长期不生效的原因
+   （合格项的绿色高亮其实一直是死代码）。
+   因此完成态必须在这里以同等优先级（!important + 提高选择器特异性）定义。
+   语义：标记表示「已完成」，颜色表示结论性质，与 H5 现场端一致。 */
+.ant-btn.efis-step-pass,
+.ant-btn.efis-step-pass:hover,
+.ant-btn.efis-step-pass:focus {
+  border-color: #52c41a !important;
+  color: #389e0d !important;
+  background: #f6ffed !important;
+}
+
+.ant-btn.efis-step-fail,
+.ant-btn.efis-step-fail:hover,
+.ant-btn.efis-step-fail:focus {
+  border-color: #ff4d4f !important;
+  color: #cf1322 !important;
+  background: #fff1f0 !important;
+}
+
+.ant-btn.efis-step-na,
+.ant-btn.efis-step-na:hover,
+.ant-btn.efis-step-na:focus {
+  border-color: #d9d9d9 !important;
+  color: #8c8c8c !important;
+  background: #fafafa !important;
+}
+
+/* 其他项（数值型 / 描述型 / 打分型 / 观察项 / 待整改）：已填写，非三级判定 */
+.ant-btn.efis-step-other,
+.ant-btn.efis-step-other:hover,
+.ant-btn.efis-step-other:focus {
+  border-color: #91caff !important;
+  color: #0958d9 !important;
+  background: #e6f4ff !important;
+}
+
 /* Fix ghost button contrast: prevent primary gradient from overriding ghost transparent background */
 .ant-btn-background-ghost.ant-btn-primary {
   background: transparent !important;

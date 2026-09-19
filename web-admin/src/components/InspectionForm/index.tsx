@@ -13,9 +13,32 @@ import {
 } from '@ant-design/icons'
 import { recordApi, llmApi, mediaApi, taskApi } from '@/services/api'
 import { resultTagColor, resolveOptionLabel, resultLabel } from '@/utils/display'
+import { classifyItem, countBuckets } from '@/utils/completion'
 import { useAuthStore } from '@/stores/auth'
 
 const { TextArea } = Input
+
+/**
+ * 检查项步骤条的完成态样式与标记。
+ *
+ * 语义：**标记表示「已完成」，颜色表示结论性质**（与 H5 现场端一致 ——
+ * H5 对任何已完成项都显示 success 图标，由状态类着色）。
+ *
+ * 修复背景：数值型/描述型项填了内容后，原实现落到 `isPass/isFail/isNa` 三者皆否的
+ * 空档，被渲染成「·」且无任何完成态底色 —— 录入完成却看起来像漏填，
+ * 演示现场极易被误读为未完成。
+ *
+ * 配色**必须放在 index.css**（`.ant-btn.efis-step-*`）：全局 `.ant-btn-default`
+ * 的 border/color/background 都带 `!important`，内联样式覆盖不了，
+ * 写成内联等于没写。
+ */
+const STEP_MARK: Record<string, { cls: string; mark: string }> = {
+  pass: { cls: 'efis-step-pass', mark: ' ✓' },
+  fail: { cls: 'efis-step-fail', mark: ' ✕' },
+  na: { cls: 'efis-step-na', mark: ' ✓' },
+  // 其他项（数值 / 描述 / 打分 / 观察项 / 待整改）：蓝色 ✓ 表示「已填写，非三级判定」
+  other: { cls: 'efis-step-other', mark: ' ✓' },
+}
 
 interface InspectionFormProps {
   /** 返回路径 */
@@ -275,6 +298,18 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const recordId = actualRecordId || (executionMode === 'record' ? record?.id : null)
   const isTaskMode = executionMode === 'task'
   const isCompleted = record?.status === 'submitted' || record?.task_status === 'completed'
+
+  /**
+   * 「该项是否已完成」—— 进度条、步骤条、提交前校验共用同一判据。
+   *
+   * = 已填写（`classifyItem` 非 unfilled）且必传附件已上传。
+   * 此前本文件有 3 处各自手写 `hasResult`，口径略有出入（如漏判 multi_value），
+   * 收敛到一处，避免改了一处漏两处。
+   */
+  const isItemDone = (item: any): boolean => {
+    if (classifyItem(item) === 'unfilled') return false
+    return !item.attachment_required || (item.photos && item.photos.length > 0)
+  }
 
   const buildTaskItemPayload = (item: any, field: string, value: any) => {
     const valueToSend =
@@ -564,12 +599,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
     flatItems.forEach((item, index) => {
       if (item.is_required !== false) {
-        const hasResult =
-          item.radio_value ||
-          (item.numeric_value !== undefined && item.numeric_value !== '' && item.numeric_value !== null) ||
-          item.text_value ||
-          (item.score_value !== undefined && item.score_value !== '' && item.score_value !== null)
-        if (!hasResult) {
+        if (!isItemDone(item)) {
           incompleteItems.push(`第${index + 1}项: ${item.title || '未命名'}`)
         }
       }
@@ -640,12 +670,16 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
             <span>✅ 合格：{passCount} 项</span>
             {failCount > 0 && <span style={{ color: '#ff4d4f' }}>❌ 不合格：{failCount} 项</span>}
-            {pendingRectificationCount > 0 && (
-              <span style={{ color: '#faad14' }}>⚠️ 待整改：{pendingRectificationCount} 项</span>
+            {otherCount > 0 && (
+              <span style={{ color: '#0958d9' }}>🔵 其他（数值/描述等）：{otherCount} 项</span>
             )}
             {notApplicableCount > 0 && (
               <span style={{ color: '#999' }}>⚪ 不适用：{notApplicableCount} 项</span>
             )}
+            {unfilledCount > 0 && (
+              <span style={{ color: '#faad14' }}>🟡 未填写：{unfilledCount} 项</span>
+            )}
+            <span style={{ color: '#666' }}>共计：{flatItems.length} 项</span>
           </div>
           {finalJudgment.result && (
             <div style={{ marginBottom: 8 }}>
@@ -763,31 +797,20 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   }
 
   // 计算完成进度
-  const completedCount = flatItems.filter((item) => {
-    const hasResult =
-      item.radio_value ||
-      (item.numeric_value !== undefined && item.numeric_value !== '' && item.numeric_value !== null) ||
-      item.text_value ||
-      (item.score_value !== undefined && item.score_value !== '' && item.score_value !== null)
-    const hasRequiredAttachment =
-      !item.attachment_required || (item.photos && item.photos.length > 0)
-    return hasResult && hasRequiredAttachment
-  }).length
+  const completedCount = flatItems.filter(isItemDone).length
   const progress = flatItems.length > 0 ? Math.round((completedCount / flatItems.length) * 100) : 0
 
-  // 统计各项数量
-  const passCount = flatItems.filter(
-    (item) => item.radio_value === 'pass' || item.radio_value === 'compliant'
-  ).length
-  const failCount = flatItems.filter(
-    (item) => item.radio_value === 'fail' || item.radio_value === 'non_compliant'
-  ).length
-  const pendingRectificationCount = flatItems.filter(
-    (item) => item.radio_value === 'pending_rectification'
-  ).length
-  const notApplicableCount = flatItems.filter(
-    (item) => item.radio_value === 'not_applicable' || item.radio_value === 'na'
-  ).length
+  // 统计各项数量 —— 统一走 classifyItem 分档，保证
+  // 「合格 + 不合格 + 不适用 + 其他 === 总检查项」的加法闭合。
+  // 历史上这里只数三级判定，数值型/描述型项填了内容却不进任何一档，
+  // 于是汇总卡出现「3 + 0 + 0 = 3 ≠ 总 4」的假象。
+  const bucketCounts = countBuckets(flatItems)
+  const passCount = bucketCounts.pass
+  const failCount = bucketCounts.fail
+  const notApplicableCount = bucketCounts.na
+  // 其他项：数值型 / 描述型 / 打分型，以及观察项、待整改等中间态
+  const otherCount = bucketCounts.other
+  const unfilledCount = bucketCounts.unfilled
 
   // 任务模式：完成进度满即可提交/保存；记录模式：草稿 + 最终判定
   const canSubmit = isTaskMode
@@ -880,36 +903,24 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {flatItems.map((item, idx) => {
-              const hasResult = item.radio_value || item.numeric_value || item.text_value || item.score_value
-              const hasRequiredAttachment = !item.attachment_required || (item.photos && item.photos.length > 0)
-              const isDone = hasResult && hasRequiredAttachment
+              const isDone = isItemDone(item)
               const isCur = idx === currentIndex
-              const val = String(item.radio_value || '').toLowerCase()
-              const isPass = val === 'pass' || val === 'compliant' || val === '合格'
-              const isFail = val === 'fail' || val === 'non_compliant' || val === '不合格'
-              const isNa = val === 'not_applicable' || val === 'na' || val === '不适用'
-
-              let btnStyle: React.CSSProperties = { marginBottom: 4 }
-              if (!isCur) {
-                if (isPass) {
-                  btnStyle = { ...btnStyle, borderColor: '#52c41a', color: '#389e0d', background: '#f6ffed' }
-                } else if (isFail) {
-                  btnStyle = { ...btnStyle, borderColor: '#ff4d4f', color: '#cf1322', background: '#fff1f0' }
-                } else if (isNa) {
-                  btnStyle = { ...btnStyle, borderColor: '#d9d9d9', color: '#8c8c8c', background: '#fafafa' }
-                }
-              }
+              // 分档统一走 classifyItem：数值型/描述型/观察项/待整改都归入 other，
+              // 不再落到「既非合格也非不合格」的空档而被渲染成「·」。
+              const bucket = classifyItem(item)
+              const preset = isDone ? STEP_MARK[bucket] : undefined
 
               return (
                 <Button
                   key={item.id}
                   size="small"
                   type={isCur ? 'primary' : 'default'}
+                  className={!isCur && preset ? preset.cls : undefined}
                   onClick={() => setCurrentIndex(idx)}
-                  style={btnStyle}
+                  style={{ marginBottom: 4 }}
                 >
                   {idx + 1}
-                  {isDone ? (isPass ? ' ✓' : isFail ? ' ✕' : ' ·') : ''}
+                  {preset ? preset.mark : ''}
                 </Button>
               )
             })}
@@ -1137,31 +1148,46 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
               </Space>
             }
           >
-            {/* 统计汇总 */}
+            {/* 统计汇总 —— 五档相加必须等于「总检查项」，否则客户现场会质疑数字对不上账 */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontWeight: 500, marginBottom: 12 }}>检查结果汇总</div>
               <Row gutter={16}>
-                <Col span={6}>
+                <Col span={otherCount > 0 ? 4 : 5}>
                   <Card size="small" style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}>
                     <Statistic title="合格项" value={passCount} valueStyle={{ color: '#52c41a' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                <Col span={otherCount > 0 ? 4 : 5}>
                   <Card size="small" style={{ background: '#fff2f0', borderColor: '#ffccc7' }}>
                     <Statistic title="不合格项" value={failCount} valueStyle={{ color: '#ff4d4f' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                <Col span={otherCount > 0 ? 4 : 5}>
                   <Card size="small" style={{ background: '#fafafa', borderColor: '#d9d9d9' }}>
                     <Statistic title="不适用项" value={notApplicableCount} valueStyle={{ color: '#8c8c8c' }} />
                   </Card>
                 </Col>
-                <Col span={6}>
+                {/* 其他项：数值型 / 描述型 / 打分型，以及观察项、待整改等中间态。
+                    不加这一格则「合格 + 不合格 + 不适用」小于「总检查项」，
+                    与 H5 现场端（已含「其他项」）口径也不一致。 */}
+                {otherCount > 0 && (
+                  <Col span={4}>
+                    <Card size="small" style={{ background: '#e6f4ff', borderColor: '#91caff' }}>
+                      <Statistic title="其他项" value={otherCount} valueStyle={{ color: '#0958d9' }} />
+                    </Card>
+                  </Col>
+                )}
+                <Col span={otherCount > 0 ? 4 : 5}>
                   <Card size="small">
                     <Statistic title="总检查项" value={flatItems.length} />
                   </Card>
                 </Col>
               </Row>
+              {unfilledCount > 0 && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#faad14' }}>
+                  另有 {unfilledCount} 项未填写，未计入以上统计。
+                </div>
+              )}
             </div>
 
             <Divider />

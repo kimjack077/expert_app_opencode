@@ -99,3 +99,58 @@ export function isItemAssessed(item: any, record?: any): boolean {
 export function countAssessed(items: any[]): number {
   return (items || []).filter((it) => isItemAssessed(it)).length
 }
+
+/* ────────────────────────────────────────────────────────────────────
+ * 检查项的「统计分档」—— Web 端唯一来源
+ * ──────────────────────────────────────────────────────────────────── */
+
+export type ItemBucket = 'pass' | 'fail' | 'na' | 'other' | 'unfilled'
+
+const PASS_VALUES = new Set(['pass', 'compliant', '合格', '符合'])
+const FAIL_VALUES = new Set(['fail', 'non_compliant', '不合格', '不符合'])
+const NA_VALUES = new Set(['na', 'not_applicable', '不适用'])
+
+/**
+ * 把检查项归入五档之一，保证 **pass + fail + na + other + unfilled === 总项数**。
+ *
+ * 与 H5 现场端 `InspectionExecution.vue` 的 `getItemStatus` + `otherCount` 同口径：
+ *   - pass / fail / na —— 三级判定结论
+ *   - other           —— 已填写但**不属**三级判定：数值型、描述型、打分型，
+ *                        以及 `observe`（观察项）/ `pending_rectification`（待整改）中间态
+ *   - unfilled        —— 未填写
+ *
+ * 为什么必须有 other 这一档：数值型/描述型项既不计入任何三级判定，又被算进
+ * 「总检查项」，于是汇总卡出现「合格 3 + 不合格 0 + 不适用 0 = 3 ≠ 总 4」的假象，
+ * 客户现场会当场质疑数字对不上账。
+ */
+export function classifyItem(item: any, record?: any): ItemBucket {
+  const r = record ?? item
+  if (!isItemAssessed(item, r)) return 'unfilled'
+
+  // 非判定型（数值 / 描述 / 打分 / 多选）填了内容即「其他项」
+  if (resolveCheckType(item) !== 'radio') return 'other'
+
+  const v = verdictOf(r)
+  if (v === null) return 'other'
+
+  const key = v.toLowerCase()
+  if (PASS_VALUES.has(key)) return 'pass'
+  if (FAIL_VALUES.has(key)) return 'fail'
+  if (NA_VALUES.has(key)) return 'na'
+  // observe / pending_rectification 等已填写但不属三级判定的中间态
+  return 'other'
+}
+
+/** 批量分档计数；`recordOf` 用于「项定义」与「结果值」分离的场景 */
+export function countBuckets(
+  items: any[],
+  recordOf?: (item: any) => any
+): Record<ItemBucket, number> {
+  const out: Record<ItemBucket, number> = {
+    pass: 0, fail: 0, na: 0, other: 0, unfilled: 0,
+  }
+  for (const item of items || []) {
+    out[classifyItem(item, recordOf ? recordOf(item) : undefined)] += 1
+  }
+  return out
+}

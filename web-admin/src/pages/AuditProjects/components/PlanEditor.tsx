@@ -31,6 +31,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { auditPlanApi, auditTeamApi, auditProjectApi } from '@/services/auditProjectApi'
 import { templateApi } from '@/services/api'
+import { formatDateRange } from '@/utils/display'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 
@@ -412,7 +413,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
           </Button>
           {project?.scheduled_start && project?.scheduled_end && (
             <Tag color="cyan" style={{ fontSize: 13, padding: '4px 8px' }}>
-              📅 审核排期：{project.scheduled_start} ~ {project.scheduled_end}
+              📅 审核排期：{formatDateRange(project.scheduled_start, project.scheduled_end)}
             </Tag>
           )}
           <Tag color="purple" style={{ fontSize: 13, padding: '4px 8px' }}>
@@ -732,7 +733,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
               <DatePicker 
                 style={{ width: 200 }} 
                 disabledDate={disabledDate}
-                placeholder={project ? `${project.scheduled_start || ''} ~ ${project.scheduled_end || ''}` : '选择日期'}
+                placeholder={project ? formatDateRange(project.scheduled_start, project.scheduled_end) : '选择日期'}
               />
             </Form.Item>
 

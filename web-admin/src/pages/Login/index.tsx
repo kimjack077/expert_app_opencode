@@ -106,7 +106,7 @@ export default function Login() {
                   <span>多模态证据链与质量门禁</span>
                   <CheckCircleFilled style={{ color: '#4ade80', fontSize: 13 }} />
                 </h4>
-                <p>现场照片智能打标、客观事实结构化留痕，执行 6 重全要素质量门禁把关</p>
+                <p>现场照片智能打标、客观事实结构化留痕，执行多重要素质量门禁把关</p>
               </div>
             </div>
 

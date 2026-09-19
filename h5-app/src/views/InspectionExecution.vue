@@ -268,7 +268,7 @@
               <div class="stat-value">{{ naCount }}</div>
               <div class="stat-label">不适用项</div>
             </div>
-            <!-- 其他项 / 未填写：让「符合+不符合+不适用+其他+未填写 = 总检查项」闭合。
+            <!-- 其他项 / 未填写：让「合格+不合格+不适用+其他+未填写 = 总检查项」闭合。
                  数值型、描述型与观察项这类已填写但不属三级判定的项必须有归属，
                  否则汇总与下方的总计对不上。 -->
             <div v-if="otherCount > 0" class="stat-item other">
@@ -1898,7 +1898,9 @@ watch(
 .inspection-execution-page {
   min-height: 100vh;
   background: var(--bg-light);
-  padding-bottom: 120px;
+  /* 必须与 .action-bar 的实际高度同步：固定栏加了 env(safe-area-inset-bottom)
+     后会变高，这里的留白也要跟着加，否则全面屏机型上最后一项会被底栏遮住。 */
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
   /* 明确开放纵向滚动，并启用移动端惯性滚动，避免内容超屏时滑不动 */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -2650,7 +2652,10 @@ watch(
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 12px 20px 24px;
+  /* 底部安全区：24px 基础内边距 + 全面屏手势条高度。
+     不叠加 env() 时，iPhone 等带 Home Indicator 的机型上
+     主按钮与手势条过近，易误触或视觉贴底。 */
+  padding: 12px 20px calc(24px + env(safe-area-inset-bottom, 0px));
   background: var(--bg-white);
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
 }
