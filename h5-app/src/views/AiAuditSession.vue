@@ -46,8 +46,10 @@
       <ul><li v-for="item in blockers" :key="item.code || item.message">{{ item.message || item.title }}</li></ul>
     </section>
 
-    <!-- 快捷跳转到表格式模板检查 -->
-    <section v-if="!isCompleted && (planItem?.inspection_task_id || planItem?.template_id)" class="template-nav-card">
+    <!-- 快捷跳转到表格式模板检查。
+         仅当存在 inspection_task_id 时才展示：这张卡片的唯一作用是「前往检查表」，
+         只有 template_id 而没有检查任务时点了必然落到「检查记录不存在」的死页。 -->
+    <section v-if="!isCompleted && planItem?.inspection_task_id" class="template-nav-card">
       <div class="template-nav-inner">
         <div class="template-nav-info">
           <van-icon name="todo-list-o" size="20" color="#0284C7" />
