@@ -74,14 +74,14 @@
       :actions="modeActions"
       cancel-text="取消"
       close-on-click-action
-      description="建议优先采用【表格式模板检查】逐项核对并录入记录；也可使用【AI 辅助】进行拍照分析与会话问答。"
+      :description="sheetDescription"
       @select="onSelectMode"
     />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { createAuditSession, getMyAuditTasks, listAuditSessions } from '../api/auditProjects'
@@ -95,18 +95,35 @@ const openingId = ref('')
 const showModeSheet = ref(false)
 const selectedTask = ref(null)
 
-const modeActions = [
+// 会议类（activity_type='meeting'）及历史遗留的计划项没有 inspection_task_id，
+// 也就没有检查表。此前 openTemplateInspection 会退化成用**计划项 id** 去打开
+// 现场检查页，而它既不是记录 id 也不是任务 id —— 必然落到「检查记录不存在」，
+// 用户看到的是卡死的加载页。这里按有无检查任务收敛入口。
+const hasInspectionTask = computed(() => !!selectedTask.value?.inspection_task_id)
+
+const modeActions = computed(() => [
   {
-    name: '📋 表格式模板检查（推荐）',
-    subname: '依据检查模板逐项采集、判定与打分，生成正式条款审核记录',
+    name: hasInspectionTask.value
+      ? '📋 表格式模板检查（推荐）'
+      : '📋 表格式模板检查（该任务不可用）',
+    subname: hasInspectionTask.value
+      ? '依据检查模板逐项采集、判定与打分，生成正式条款审核记录'
+      : '该计划项未生成检查任务与检查表（会议类常见），请改用 AI 辅助或到 PC 端处理',
     value: 'template',
+    disabled: !hasInspectionTask.value,
   },
   {
     name: '🤖 AI 辅助现场审核',
     subname: '现场拍照识别、多条款证据智能抽取与辅助会话',
     value: 'agent',
   },
-]
+])
+
+const sheetDescription = computed(() =>
+  hasInspectionTask.value
+    ? '建议优先采用【表格式模板检查】逐项核对并录入记录；也可使用【AI 辅助】进行拍照分析与会话问答。'
+    : '该任务为会议类或未生成检查表，建议使用【AI 辅助】记录现场情况。'
+)
 
 const getStatusType = (status) => {
   const typeMap = {
@@ -210,8 +227,12 @@ const openCompletedResult = async (task) => {
 }
 
 const openTemplateInspection = (task) => {
-  const targetId = task.inspection_task_id || task.id
-  router.push(`/inspection/${targetId}`)
+  // 没有检查任务时不得回退到计划项 id —— 那必然打开一个「检查记录不存在」的死页
+  if (!task.inspection_task_id) {
+    showToast('该任务没有检查表，请改用 AI 辅助审核')
+    return
+  }
+  router.push(`/inspection/${task.inspection_task_id}`)
 }
 
 const openAgentSession = async (task) => {
