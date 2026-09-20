@@ -73,11 +73,12 @@
             <van-button
               type="primary"
               class="primary-action-btn"
+              :disabled="!priorityHasTemplate"
               :loading="openingTaskId === priorityTask.id && openingMode === 'template'"
               @click="openTemplateInspection(priorityTask)"
             >
               <van-icon name="notes-o" style="margin-right: 4px;" />
-              表格式模板检查（推荐）
+              {{ priorityHasTemplate ? '表格式模板检查（推荐）' : '表格式模板检查（该任务无检查表）' }}
             </van-button>
             <van-button
               plain
@@ -175,7 +176,7 @@
       :actions="modeActions"
       cancel-text="取消"
       close-on-click-action
-      description="建议优先采用【表格式模板检查】逐项核查并录入记录；也可使用【AI 辅助】进行拍照分析与会话问答。"
+      :description="sheetDescription"
       @select="onSelectMode"
     />
 
@@ -204,18 +205,38 @@ const openingMode = ref('')
 const showModeSheet = ref(false)
 const selectedTaskForSheet = ref(null)
 
-const modeActions = [
-  {
-    name: '📋 表格式模板检查（推荐）',
-    subname: '依据检查模板逐项采集、判定与打分，生成正式条款审核记录',
-    value: 'template',
-  },
-  {
-    name: '🤖 AI 辅助现场审核',
-    subname: '现场拍照识别、多条款证据智能抽取与辅助会话',
-    value: 'agent',
-  },
-]
+// 会议类（activity_type='meeting'）及历史遗留的计划项没有 inspection_task_id，
+// 也就没有检查表。此前 openTemplateInspection 会退化成用**计划项 id** 打开现场检查页，
+// 而它既不是记录 id 也不是任务 id —— 必然落到「检查记录不存在」，用户看到卡死的加载页。
+// 这里按有无检查任务收敛入口（与 AuditTasks.vue 同口径）。
+const hasInspectionTask = (task) => !!task?.inspection_task_id
+
+const priorityHasTemplate = computed(() => hasInspectionTask(priorityTask.value))
+
+const modeActions = computed(() => {
+  const usable = hasInspectionTask(selectedTaskForSheet.value)
+  return [
+    {
+      name: usable ? '📋 表格式模板检查（推荐）' : '📋 表格式模板检查（该任务不可用）',
+      subname: usable
+        ? '依据检查模板逐项采集、判定与打分，生成正式条款审核记录'
+        : '该计划项未生成检查任务与检查表（会议类常见），请改用 AI 辅助或到 PC 端处理',
+      value: 'template',
+      disabled: !usable,
+    },
+    {
+      name: '🤖 AI 辅助现场审核',
+      subname: '现场拍照识别、多条款证据智能抽取与辅助会话',
+      value: 'agent',
+    },
+  ]
+})
+
+const sheetDescription = computed(() =>
+  hasInspectionTask(selectedTaskForSheet.value)
+    ? '建议优先采用【表格式模板检查】逐项核查并录入记录；也可使用【AI 辅助】进行拍照分析与会话问答。'
+    : '该任务为会议类或未生成检查表，建议使用【AI 辅助】记录现场情况。'
+)
 
 const statusOrder = { in_progress: 0, pending: 1, completed: 2, cancelled: 3 }
 
@@ -363,8 +384,12 @@ const openCompletedResult = async (task) => {
 /** 模式一：打开表格式模板检查 */
 const openTemplateInspection = (task) => {
   if (!task) return
-  const targetId = task.inspection_task_id || task.id
-  router.push(`/inspection/${targetId}`)
+  // 没有检查任务时不得回退到计划项 id —— 那必然打开一个「检查记录不存在」的死页
+  if (!task.inspection_task_id) {
+    showToast('该任务没有检查表，请改用 AI 辅助审核')
+    return
+  }
+  router.push(`/inspection/${task.inspection_task_id}`)
 }
 
 /** 模式二：打开 AI 辅助审核会话 */

@@ -957,11 +957,13 @@ const goAuditTasks = () => {
   router.replace('/audit-tasks')
 }
 const goToTemplateInspection = () => {
-  const targetId = planItem.value?.inspection_task_id || planItem.value?.id || planItemId.value
+  // 不得回退到计划项 id —— 现场检查页只认「检查任务 id / 检查记录 id」，
+  // 计划项 id 会必然落到「检查记录不存在」的死页（会议类计划项常见）。
+  const targetId = planItem.value?.inspection_task_id
   if (targetId) {
     router.push(`/inspection/${targetId}`)
   } else {
-    showToast('未找到关联的检查任务')
+    showToast('该任务没有检查表，请改用 AI 辅助审核')
   }
 }
 const goResultPage = () => {
