@@ -1,5 +1,4 @@
 import json
-from datetime import datetime, timezone
 from typing import Optional, List, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -17,14 +16,11 @@ from app.utils.category import normalize_as_category
 from app.utils.document_parser import document_parser
 from app.services.ai_extract_service import ai_extract_service
 from app.services import AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 class RefineRequest(BaseModel):

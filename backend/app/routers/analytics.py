@@ -13,6 +13,7 @@ from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.item_stats import classify_result, classify_result_ext
 from app.utils.risk_level import levels_in_bucket
+from app.utils.response import make_response
 
 router = APIRouter()
 
@@ -39,10 +40,6 @@ def _summarize_task_records(record_rows) -> dict:
     return stats
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 @router.get("/dashboard", response_model=ApiResponse)

@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,14 +11,11 @@ from app.schemas import ApiResponse, MediaFileResponse
 from app.utils.security import get_current_user
 from app.utils.file_handler import save_upload_file
 from app.services import AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 @router.post("/upload", response_model=ApiResponse)

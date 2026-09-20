@@ -40,14 +40,11 @@ from app.schemas.enterprise import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.services import AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 @router.get("", response_model=ApiResponse)

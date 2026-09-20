@@ -32,14 +32,11 @@ from app.utils.item_write_guard import validate_item_payload
 from app.utils.item_completion import resolve_check_type
 from app.services import AuditService
 from app.services.llm_service import llm_service
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 def _ensure_record_access(record: InspectionRecord, current_user: User, *, write: bool = False) -> None:

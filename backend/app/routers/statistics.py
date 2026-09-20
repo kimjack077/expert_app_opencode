@@ -28,6 +28,7 @@ from app.models.audit_project import (
 )
 from app.schemas import ApiResponse
 from app.utils.security import get_current_user, get_current_admin_user
+from app.utils.response import make_response
 
 router = APIRouter()
 
@@ -49,14 +50,6 @@ def _normalize_clause_no(value: object) -> Optional[str]:
     return text
 
 
-def make_response(data=None, code: int = 200, message: str = "success") -> ApiResponse:
-    """Create standardized API response"""
-    return ApiResponse(
-        code=code,
-        message=message,
-        data=data,
-        timestamp=datetime.now(timezone.utc),
-    )
 
 
 @router.get("/overview", response_model=ApiResponse)

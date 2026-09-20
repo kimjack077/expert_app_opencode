@@ -28,6 +28,7 @@ from app.utils.security import (
     security,
 )
 from app.services import AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
@@ -35,10 +36,6 @@ router = APIRouter()
 SELF_REGISTRATION_ROLE = "expert"
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 @router.post("/login", response_model=ApiResponse)

@@ -155,6 +155,26 @@ export const nonconformityApi = {
 
 // ==================== 审核报告 API ====================
 
+/** 带鉴权的文件下载（避免把 token 放进 URL） */
+async function downloadWithAuth(url: string, filename: string) {
+  const token = useAuthStore.getState().token
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new Error(`导出失败: HTTP ${resp.status} ${text}`)
+  }
+  const blob = await resp.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(link.href)
+}
+
 export const auditReportApi = {
   // 创建审核报告
   create: (projectId: string, data: any) => 
@@ -169,22 +189,18 @@ export const auditReportApi = {
     api.put(`/api/audit-projects/report/${reportId}`, data),
   
   // 导出 Word 格式报告
-  exportWord: (projectId: string) => {
-    const token = useAuthStore.getState().token
-    window.open(
-      `${API_BASE_URL}/api/audit-projects/${projectId}/export/word?token=${token}`,
-      '_blank'
-    )
-  },
+  exportWord: (projectId: string) =>
+    downloadWithAuth(
+      `${API_BASE_URL}/api/audit-projects/${projectId}/export/word`,
+      `audit_report_${projectId}.docx`
+    ),
 
   // 导出 PDF 格式报告
-  exportPdf: (projectId: string) => {
-    const token = useAuthStore.getState().token
-    window.open(
-      `${API_BASE_URL}/api/audit-projects/${projectId}/export/pdf?token=${token}`,
-      '_blank'
-    )
-  },
+  exportPdf: (projectId: string) =>
+    downloadWithAuth(
+      `${API_BASE_URL}/api/audit-projects/${projectId}/export/pdf`,
+      `audit_report_${projectId}.pdf`
+    ),
 }
 
 // ==================== 沟通会议 API ====================

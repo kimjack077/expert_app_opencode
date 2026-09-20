@@ -165,6 +165,31 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """可选鉴权：有合法 Bearer token 时返回用户，否则返回 ``None``。
+
+    用于「优先 Header、回退 Query」的兼容场景（如报告导出），避免
+    ``get_current_user`` 在无 Header 时直接抛 401 而阻断旧版 ``?token=`` 通道。
+    """
+    if credentials is None:
+        return None
+    token = credentials.credentials
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "access":
+        return None
+    username: str = payload.get("sub")
+    if username is None:
+        return None
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if user is None or _token_revoked(payload, user) or not user.is_active:
+        return None
+    return user
+
+
 async def get_current_admin_user(
     current_user: User = Depends(get_current_user),
 ) -> User:

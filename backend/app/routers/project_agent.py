@@ -43,9 +43,9 @@ from app.services.project_access_service import PRIVILEGED_ROLES, ensure_project
 from app.services.project_artifact_service import project_artifact_service
 from app.services.project_knowledge_service import project_knowledge_service
 from app.utils.file_handler import enforce_magic_bytes, save_upload_file
-from app.utils.response import make_response
 from app.utils.storage_path import resolve_storage_path, storage_key
 from app.services.project_document_parser import SUPPORTED_PROJECT_EXTENSIONS
+from app.utils.response import make_response
 
 
 router = APIRouter(prefix="/api/audit-projects", tags=["project-agent"])

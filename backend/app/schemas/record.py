@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Literal, Optional, List
 from datetime import datetime
 from uuid import UUID
@@ -48,8 +48,7 @@ class InspectionRecordResponse(InspectionRecordBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InspectionRecordDetail(InspectionRecordResponse):
@@ -129,8 +128,7 @@ class InspectionRecordItemResponse(InspectionRecordItemBase):
     # 响应层放宽为 str：兼容历史脏数据（空串等），避免序列化 500
     result: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InspectionRecordListQuery(BaseModel):

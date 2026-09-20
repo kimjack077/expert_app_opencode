@@ -93,7 +93,8 @@ def test_post_complete_route_runs_formal_sync_before_commit():
 
     sync.assert_awaited_once_with(db, task, plan, user.id)
     db.commit.assert_awaited_once()
-    assert result.code == 200
+    # 统一响应体走 app.utils.response.make_response，返回 dict（HTTP 层 JSON 不变）
+    assert result["code"] == 200
 
 
 def test_post_complete_without_final_judgment_is_rejected():
@@ -150,7 +151,8 @@ def test_put_completed_route_cannot_bypass_formal_sync():
     sync.assert_awaited_once_with(db, task, plan, user.id)
     db.commit.assert_awaited_once()
     assert task.status == "completed"
-    assert result.code == 200
+    # 统一响应体走 app.utils.response.make_response，返回 dict（HTTP 层 JSON 不变）
+    assert result["code"] == 200
 
 
 def test_put_completed_without_final_judgment_is_rejected():

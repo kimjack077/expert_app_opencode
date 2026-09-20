@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Union
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,14 +12,11 @@ from app.models.template import TemplateItem
 from app.schemas import ApiResponse, LLMRequest, LLMResponse
 from app.utils.security import get_current_user
 from app.services import llm_service, AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 async def get_record_and_template(

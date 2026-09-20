@@ -3,7 +3,7 @@
 Audit Projects API Routes
 """
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -19,7 +19,7 @@ from app.services.project_access_service import (
     ensure_project_access,
     project_visibility_condition,
 )
-from app.utils.response import utc_now_iso
+from app.utils.response import make_response
 from app.utils.category import is_category_node, load_parent_ids
 from app.services.project_artifact_service import project_artifact_service
 from app.services.report_generator import generate_audit_report_word, generate_audit_report_pdf
@@ -38,7 +38,6 @@ from app.models.record import InspectionRecordItem
 from app.models.template import TemplateItem
 from app.models.user import User
 from app.models.enterprise import Enterprise
-from app.schemas import ApiResponse
 from app.schemas.audit_project import (
     AuditProjectCreate,
     AuditProjectUpdate,
@@ -67,7 +66,7 @@ from app.schemas.audit_project import (
     CommunicationMeetingUpdate,
     CommunicationMeetingResponse,
 )
-from app.utils.security import get_current_user, get_user_from_token
+from app.utils.security import get_current_user, get_current_user_optional, get_user_from_token
 from app.utils.item_stats import classify_item
 from app.utils.meeting_guard import (
     duplicate_meeting_message,
@@ -77,18 +76,6 @@ from app.utils.meeting_guard import (
 router = APIRouter(prefix="/api/audit-projects", tags=["audit-projects"])
 
 
-def make_response(data=None, code=200, message="success"):
-    """生成标准 API 响应格式，返回字典供 FastAPI 序列化"""
-    # 使用 jsonable_encoder 将 SQLAlchemy 模型转换为可序列化的字典
-    encoded_data = jsonable_encoder(data) if data is not None else None
-    return {
-        "code": code,
-        "message": message,
-        "data": encoded_data,
-        # 统一时间戳格式；注意不能再手工拼 "Z"：
-        # 现在的时间已带 +00:00 偏移，再加 Z 会产出非法的 ISO8601。
-        "timestamp": utc_now_iso()
-    }
 
 
 def area_record_response(record: AuditAreaRecord) -> dict:
@@ -1297,12 +1284,19 @@ async def get_project_progress(
 @router.get("/{project_id}/export/word")
 async def export_report_word(
     project_id: UUID,
-    token: str = Query(..., description="认证令牌"),
+    token: Optional[str] = Query(None, description="认证令牌（兼容旧版；建议改用 Authorization 头）"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """导出 Word 格式审核报告"""
-    # Authenticate using token query parameter
-    current_user = await get_user_from_token(token, db)
+    """导出 Word 格式审核报告
+
+    鉴权优先级：``Authorization: Bearer <token>`` > ``?token=<token>``。
+    后者仅用于兼容旧前端，会在后续版本中移除。
+    """
+    if current_user is None:
+        if not token:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        current_user = await get_user_from_token(token, db)
     await ensure_project_access(db, project_id, current_user)
     quality = await project_artifact_service.quality_check(db, project_id)
     if not quality["passed"]:
@@ -1333,12 +1327,19 @@ async def export_report_word(
 @router.get("/{project_id}/export/pdf")
 async def export_report_pdf(
     project_id: UUID,
-    token: str = Query(..., description="认证令牌"),
+    token: Optional[str] = Query(None, description="认证令牌（兼容旧版；建议改用 Authorization 头）"),
     db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """导出 PDF 格式审核报告"""
-    # Authenticate using token query parameter
-    current_user = await get_user_from_token(token, db)
+    """导出 PDF 格式审核报告
+
+    鉴权优先级：``Authorization: Bearer <token>`` > ``?token=<token>``。
+    后者仅用于兼容旧前端，会在后续版本中移除。
+    """
+    if current_user is None:
+        if not token:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        current_user = await get_user_from_token(token, db)
     await ensure_project_access(db, project_id, current_user)
     quality = await project_artifact_service.quality_check(db, project_id)
     if not quality["passed"]:

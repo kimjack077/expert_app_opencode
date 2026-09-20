@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -10,13 +9,10 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.common import ApiResponse
 from app.utils.security import get_current_user, get_password_hash, get_current_admin_user
+from app.utils.response import make_response
 
 router = APIRouter()
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 @router.get("", response_model=ApiResponse)
 async def get_users(

@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Literal, Optional, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from uuid import UUID
 
 # 风险等级（与前端 Enterprises 表单选项一致）：A级低风险 / B级一般 / C级较高 / D级高风险
@@ -102,8 +102,7 @@ class EnterpriseResponse(EnterpriseBase):
     risk_level: Optional[str] = None
     status: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class QualificationBase(BaseModel):
@@ -140,8 +139,7 @@ class QualificationResponse(QualificationBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductBase(BaseModel):
@@ -179,8 +177,7 @@ class ProductResponse(ProductBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RectificationBase(BaseModel):
@@ -221,8 +218,7 @@ class RectificationResponse(RectificationBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EnterpriseDetail(EnterpriseResponse):

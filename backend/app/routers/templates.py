@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,14 +26,11 @@ from app.utils.category import (
     parent_id_subquery,
 )
 from app.services import AuditService
+from app.utils.response import make_response
 
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 def is_admin(user: User) -> bool:

@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 # 审核类型：初审 / 监督审核 / 再认证 / 扩大范围
 AuditType = Literal["initial", "surveillance", "recertification", "expansion"]
@@ -85,8 +85,7 @@ class AuditProjectResponse(AuditProjectBase):
     certification_systems: Optional[List[str]] = None
     audit_days: Optional[Decimal] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== AuditTeamMember Schemas ====================
@@ -139,8 +138,7 @@ class AuditTeamMemberResponse(AuditTeamMemberBase):
     # 响应层放宽为 str：兼容历史脏数据（如非法角色值），避免序列化 500
     role: str = "member"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== AuditPlanItem Schemas ====================
@@ -201,8 +199,7 @@ class AuditPlanItemResponse(AuditPlanItemBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== AuditArea Schemas ====================
@@ -237,8 +234,7 @@ class AuditAreaResponse(AuditAreaBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== AuditAreaRecord Schemas ====================
@@ -290,8 +286,7 @@ class AuditAreaRecordResponse(AuditAreaRecordBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Nonconformity Schemas ====================
@@ -360,8 +355,7 @@ class NonconformityResponse(NonconformityBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== AuditReport Schemas ====================
@@ -422,8 +416,7 @@ class AuditReportResponse(AuditReportBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== CommunicationMeeting Schemas ====================
@@ -467,5 +460,4 @@ class CommunicationMeetingResponse(CommunicationMeetingBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

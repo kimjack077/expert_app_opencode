@@ -37,6 +37,7 @@ from app.services.formal_audit_sync_service import (
     sync_task_to_formal_record,
 )
 from app.services.llm_service import llm_service
+from app.utils.response import make_response
 
 # Alias for backward compatibility
 InspectionRecord = TaskItemRecord
@@ -44,10 +45,6 @@ InspectionRecord = TaskItemRecord
 router = APIRouter()
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 async def _normalize_numeric_verdict(

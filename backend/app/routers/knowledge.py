@@ -1,6 +1,6 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +18,7 @@ from app.services import AuditService
 from app.services.rag_service import rag_service
 from app.utils.document_parser import document_parser
 from app.utils.security import get_current_admin_user, get_current_user
+from app.utils.response import make_response
 
 router = APIRouter()
 
@@ -26,10 +27,6 @@ KNOWLEDGE_MD_DIR = Path("uploads") / "knowledge_md"
 KNOWLEDGE_MD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def make_response(data=None, code=200, message="success"):
-    return ApiResponse(
-        code=code, message=message, data=data, timestamp=datetime.now(timezone.utc)
-    )
 
 
 @router.get("/documents", response_model=ApiResponse)
