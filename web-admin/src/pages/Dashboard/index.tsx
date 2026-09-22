@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Row, Col, Card, Progress, Table, Tag, Space, Button, DatePicker, Tooltip, message } from 'antd'
+import { Row, Col, Card, Progress, Table, Tag, Space, Button, DatePicker, Tooltip, message, Skeleton } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -32,7 +32,12 @@ export default function Dashboard() {
   /** 审核项目概览（与「审核项目」列表同源，保证卡片数字与跳转后的列表条数一致） */
   const [projectOverview, setProjectOverview] = useState<any>(null)
   const [recentTasks, setRecentTasks] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+  /** 分卡片渐进加载：谁先返回谁先上屏，避免 Promise.all 拖住整屏 */
+  const [loadingStats, setLoadingStats] = useState(true)
+  const [loadingTasks, setLoadingTasks] = useState(true)
+  const [loadingRisk, setLoadingRisk] = useState(true)
+  const [loadingOverview, setLoadingOverview] = useState(true)
+  const [loadingTrends, setLoadingTrends] = useState(true)
   const [trends, setTrends] = useState<any>(null)
   const [enterpriseRisk, setEnterpriseRisk] = useState<any>(null)
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
@@ -50,35 +55,42 @@ export default function Dashboard() {
     }
   }, [dateRange])
 
-  const fetchData = async () => {
-    try {
-      const [dashboardRes, tasksRes, riskRes, overviewRes]: any[] = await Promise.all([
-        analyticsApi.getDashboard(),
-        taskApi.getTasks({ limit: 8 }),
-        analyticsApi.getEnterpriseRisk(),
-        statisticsApi.getOverview(),
-      ])
-      setStats(dashboardRes.data)
-      setRecentTasks(tasksRes.data.items || [])
-      setEnterpriseRisk(riskRes.data)
-      setProjectOverview(overviewRes.data)
-    } catch (error) {
-      console.error('Failed to fetch dashboard data:', error)
-    } finally {
-      setLoading(false)
-    }
+  const fetchData = () => {
+    analyticsApi
+      .getDashboard()
+      .then((res: any) => setStats(res.data ?? null))
+      .catch((error) => console.error('Failed to fetch dashboard stats:', error))
+      .finally(() => setLoadingStats(false))
+
+    taskApi
+      .getTasks({ limit: 8 })
+      .then((res: any) => setRecentTasks(res.data?.items || []))
+      .catch((error) => console.error('Failed to fetch recent tasks:', error))
+      .finally(() => setLoadingTasks(false))
+
+    analyticsApi
+      .getEnterpriseRisk()
+      .then((res: any) => setEnterpriseRisk(res.data ?? null))
+      .catch((error) => console.error('Failed to fetch enterprise risk:', error))
+      .finally(() => setLoadingRisk(false))
+
+    statisticsApi
+      .getOverview()
+      .then((res: any) => setProjectOverview(res.data ?? null))
+      .catch((error) => console.error('Failed to fetch project overview:', error))
+      .finally(() => setLoadingOverview(false))
   }
 
-  const fetchTrends = async () => {
-    try {
-      const res: any = await analyticsApi.getTrends({
+  const fetchTrends = () => {
+    setLoadingTrends(true)
+    analyticsApi
+      .getTrends({
         start_date: dateRange[0].format('YYYY-MM-DD'),
         end_date: dateRange[1].format('YYYY-MM-DD'),
       })
-      setTrends(res.data)
-    } catch (error) {
-      console.error('Failed to fetch trends:', error)
-    }
+      .then((res: any) => setTrends(res.data ?? null))
+      .catch((error) => console.error('Failed to fetch trends:', error))
+      .finally(() => setLoadingTrends(false))
   }
 
   const handleExport = async () => {
@@ -238,6 +250,11 @@ export default function Dashboard() {
     : 1
   const maxComplianceRate = 100
 
+  const kpiNum = (ready: boolean, value: number) =>
+    ready ? String(value) : <Skeleton.Input active size="small" style={{ width: 48 }} />
+  const kpiPct = (ready: boolean, value: number) =>
+    ready ? `${value}%` : <Skeleton.Input active size="small" style={{ width: 56 }} />
+
   return (
     <div className="dashboard-container">
       {/* 1. Light Modern Filter Header Bar */}
@@ -309,7 +326,7 @@ export default function Dashboard() {
               </div>
               <div className="dashboard-kpi-body">
                 <span className="dashboard-kpi-value" style={{ color: '#0369a1' }}>
-                  {pendingCount}
+                  {kpiNum(!!stats, pendingCount)}
                 </span>
                 <Tag color={pendingCount > 0 ? 'processing' : 'default'} style={{ margin: 0, fontSize: 11 }}>
                   {pendingCount > 0 ? '待推进' : '全部就绪'}
@@ -340,7 +357,7 @@ export default function Dashboard() {
               </div>
               <div className="dashboard-kpi-body">
                 <span className="dashboard-kpi-value" style={{ color: '#0f766e' }}>
-                  {projectTotal}
+                  {kpiNum(!!projectOverview, projectTotal)}
                 </span>
                 <div style={{ textAlign: 'right' }}>
                   <span style={{ fontSize: 11, color: '#64748b' }}>完成率 </span>
@@ -372,7 +389,7 @@ export default function Dashboard() {
               </div>
               <div className="dashboard-kpi-body">
                 <span className="dashboard-kpi-value" style={{ color: '#15803d' }}>
-                  {complianceRate}%
+                  {kpiPct(!!stats, complianceRate)}
                 </span>
                 <Tag color={complianceRate >= 80 ? 'success' : complianceRate >= 60 ? 'warning' : 'error'} style={{ margin: 0, fontSize: 11 }}>
                   {complianceRate >= 80 ? '达标' : '预警'}
@@ -446,7 +463,7 @@ export default function Dashboard() {
                 最近 {trendDays} 日走势
               </span>
             } variant="borderless"
-            loading={!trends}
+            loading={loadingTrends}
           >
             {trends && (
               <Row gutter={16}>
@@ -577,7 +594,7 @@ export default function Dashboard() {
                 全部任务 <ArrowRightOutlined />
               </Button>
             }
-            loading={loading} variant="borderless"
+            loading={loadingTasks} variant="borderless"
           >
             <Table
               dataSource={recentTasks}
