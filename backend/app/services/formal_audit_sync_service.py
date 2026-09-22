@@ -13,7 +13,7 @@ from app.models.audit_project import (
     AuditPlanItem,
     Nonconformity,
 )
-from app.models.record import InspectionRecordItem
+from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
 from app.models.user import User
 from app.utils.item_stats import FAIL_VALUES, NA_VALUES, PASS_VALUES
@@ -283,8 +283,63 @@ async def sync_task_to_formal_record(
                 )
 
     now = datetime.now(timezone.utc)
-    area_record.conclusion = task.remarks or f"本区域完成 {len(completed_rows)} 项现场检查记录。"
+    area_record.conclusion = task.remarks or f"\u672c\u533a\u57df\u5b8c\u6210 {len(completed_rows)} \u9879\u73b0\u573a\u68c0\u67e5\u8bb0\u5f55\u3002"
     area_record.status = "submitted"
+
+    # 同步到 inspection_records：「检查记录与报告」菜单读的是这张表，
+    # 只写 audit_area_records 会导致日常检查完成后该菜单仍为空。
+    marker = f"[task:{task.id}]"
+    inspection_record = (
+        await db.execute(
+            select(InspectionRecord)
+            .where(
+                InspectionRecord.is_deleted == False,  # noqa: E712
+                InspectionRecord.remarks.like(f"%{marker}%"),
+            )
+            .order_by(InspectionRecord.created_at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    project = plan_item.project if getattr(plan_item, "project", None) else None
+    if project is None and plan_item.project_id:
+        from app.models.audit_project import AuditProject
+
+        project = await db.get(AuditProject, plan_item.project_id)
+    enterprise = getattr(project, "enterprise", None) if project else None
+    overall = "pass"
+    if task.remarks and "\u4e0d\u5408\u683c" in task.remarks:
+        overall = "fail"
+    elif task.remarks and "\u57fa\u672c\u5408\u683c" in task.remarks:
+        overall = "partial_pass"
+    if not inspection_record:
+        inspection_record = InspectionRecord(
+            template_id=plan_item.template_id,
+            enterprise_id=getattr(enterprise, "id", None),
+            enterprise_name=(
+                getattr(enterprise, "name", None)
+                or getattr(project, "title", None)
+                or task.target_name
+            ),
+            enterprise_address=getattr(enterprise, "address", None) or task.target_address,
+            contact_person=getattr(enterprise, "contact_person", None) or task.target_contact,
+            contact_phone=getattr(enterprise, "contact_phone", None) or task.target_phone,
+            inspector_id=recorded_by,
+            inspection_date=now,
+            status="submitted",
+            overall_result=overall,
+            remarks=f"{marker} 由日常检查任务 {task.task_no} 完成时同步 | {task.remarks or ''}".strip(),
+            judgment_note=task.remarks,
+        )
+        db.add(inspection_record)
+        await db.flush()
+    else:
+        inspection_record.status = "submitted"
+        inspection_record.overall_result = overall
+        inspection_record.inspector_id = recorded_by
+
+    for item in area_record.items or []:
+        item.record_id = inspection_record.id
+
     area.status = "completed"
     plan_item.status = "completed"
     task.status = "completed"
