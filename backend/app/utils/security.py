@@ -111,7 +111,7 @@ async def get_user_from_token(token: str, db: AsyncSession) -> User:
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or _token_revoked(payload, user):
+    if user is None or user.is_deleted or _token_revoked(payload, user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -153,7 +153,7 @@ async def get_current_user(
 
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None:
+    if user is None or user.is_deleted:
         raise credentials_exception
 
     if _token_revoked(payload, user):
@@ -185,7 +185,7 @@ async def get_current_user_optional(
         return None
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalar_one_or_none()
-    if user is None or _token_revoked(payload, user) or not user.is_active:
+    if user is None or user.is_deleted or _token_revoked(payload, user) or not user.is_active:
         return None
     return user
 

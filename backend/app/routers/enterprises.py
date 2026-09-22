@@ -11,8 +11,6 @@ from app.models.enterprise import (
     Enterprise,
     EnterpriseQualification,
     EnterpriseProduct,
-    EnterpriseEquipment,
-    EnterprisePersonnel,
     RectificationRecord,
 )
 from app.models.record import InspectionRecord, InspectionRecordItem
@@ -162,6 +160,9 @@ async def get_enterprise(
     if not enterprise:
         raise HTTPException(status_code=404, detail="Enterprise not found")
 
+    # 与 /qualifications、/products 列表口径对齐：详情不得展示已软删子资源
+    enterprise.qualifications = [q for q in (enterprise.qualifications or []) if not getattr(q, "is_deleted", False)]
+    enterprise.products = [p for p in (enterprise.products or []) if not getattr(p, "is_deleted", False)]
     return make_response(data=EnterpriseDetail.model_validate(enterprise).model_dump())
 
 

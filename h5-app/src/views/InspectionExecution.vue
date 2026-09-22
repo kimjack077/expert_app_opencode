@@ -66,7 +66,7 @@
         />
         <div class="progress-hint">
           <span v-if="isReadonlyMode" class="complete">✓ {{ readonlyStateText }}，以下为只读查看</span>
-          <span v-else-if="totalCheckItems === 0">检查项加载中，请稍候…</span>
+          <span v-else-if="totalCheckItems === 0">{{ loadError || (loading ? '检查项加载中，请稍候…' : '暂无检查项，请确认任务已关联检查模板') }}</span>
           <span v-else-if="completedCount === 0">请开始填写检查项</span>
           <span v-else-if="requiredCompletedCount < requiredCheckItems">必填项还有 {{ requiredCheckItems - requiredCompletedCount }} 项未完成</span>
           <span v-else class="complete">必填项已全完成，请在下方填写最终判定</span>
@@ -365,8 +365,8 @@
 
     <van-empty v-else description="检查记录不存在" />
 
-    <!-- 底部操作区 -->
-    <div class="action-bar">
+    <!-- 底部操作区：仅在已加载到任务/记录时展示，避免失败页仍显示“加载中” -->
+    <div v-if="record" class="action-bar">
       <!-- 已完成 / 已提交：只读查看态，不再按填报期规则催办 -->
       <template v-if="isReadonlyMode">
         <van-button type="default" block class="submit-btn" @click="router.back()">
@@ -390,7 +390,7 @@
         </van-button>
         <div class="submit-hint" v-if="!canSubmit">
           <span v-if="totalCheckItems === 0">
-            检查项加载中，请稍候…
+            {{ loadError || (loading ? '检查项加载中，请稍候…' : '暂无检查项，请确认任务已关联检查模板') }}
           </span>
           <span v-else-if="completedCount < totalCheckItems">
             需完成全部 {{ totalCheckItems }} 项检查，当前已完成 {{ completedCount }} 项
@@ -454,6 +454,7 @@ const route = useRoute()
 
 const loading = ref(true)
 const submitting = ref(false)
+const loadError = ref('')
 const record = ref(null)
 const expandedItems = ref([])
 const itemResults = ref({})
@@ -930,6 +931,7 @@ const loadTaskExecution = async (task) => {
       }
     } catch (e) {
       console.error('获取任务模板失败', e)
+      loadError.value = '获取检查模板失败，请确认模板仍可访问'
       showToast('获取检查模板失败，请确认模板仍可访问')
     }
   } else {
@@ -943,6 +945,7 @@ const loadTaskExecution = async (task) => {
  * 用已取到的任务数据渲染执行页。抽出来是为了让离线缓存能复用同一套装配逻辑。
  */
 const applyTaskExecutionData = async (task, rawTemplate, taskRecords = []) => {
+  loadError.value = ''
   executionMode.value = 'task'
   currentTaskId.value = String(task.id)
   actualRecordId.value = String(task.id)
@@ -1129,6 +1132,7 @@ const fetchRecord = async () => {
         return
       }
       if (await loadFromOfflineCache(id)) return
+      loadError.value = taskRes.message || '获取任务失败'
       showToast(taskRes.message || '获取任务失败')
       return
     }
@@ -1156,11 +1160,13 @@ const fetchRecord = async () => {
       }
     } catch (e) {
       console.error('Failed to load task execution:', e)
+      loadError.value = e?.response?.data?.message || e?.message || '获取任务失败'
     }
 
     if (await loadFromOfflineCache(id)) return
 
-    showToast('获取记录失败')
+    loadError.value = loadError.value || '获取记录失败'
+    showToast(loadError.value)
   } catch (error) {
     console.error('获取记录失败:', error)
     if (await loadFromOfflineCache(route.params.id)) return

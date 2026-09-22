@@ -106,8 +106,27 @@ async def delete_user(
     if not user or user.is_deleted:
         raise HTTPException(status_code=404, detail="User not found")
 
+    if user.id == current_user.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+
+    if user.role == "super_admin":
+        from sqlalchemy import func
+
+        active_super_admins = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.role == "super_admin",
+                User.is_deleted == False,  # noqa: E712
+                User.is_active == True,  # noqa: E712
+            )
+        )
+        if active_super_admins <= 1:
+            raise HTTPException(status_code=400, detail="不能删除最后一个超级管理员")
+
     from app.utils.soft_delete import soft_delete
 
+    user.is_active = False
     await soft_delete(db, user, unique_fields=["username", "email"])
     await db.commit()
     return make_response(message="User deleted successfully")

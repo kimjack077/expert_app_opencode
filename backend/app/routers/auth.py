@@ -45,7 +45,7 @@ async def login(
     result = await db.execute(select(User).where(User.username == login_data.username))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(login_data.password, user.hashed_password):
+    if not user or user.is_deleted or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -62,6 +62,7 @@ async def login(
     access_token = create_access_token(data=token_data)
     refresh_token = create_refresh_token(data=token_data)
 
+    user_payload = UserResponse.model_validate(user).model_dump()
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
@@ -70,7 +71,7 @@ async def login(
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_type": "bearer",
-            "user": UserResponse.model_validate(user).model_dump(),
+            "user": user_payload,
         }
     )
 

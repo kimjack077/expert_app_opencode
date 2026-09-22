@@ -200,7 +200,7 @@ InspectionTemplate → TemplateItem (one-to-many)
 InspectionTask → TaskItemRecord (one-to-many)
 TaskItemRecord → TemplateItem (links to check item)
 MediaFile → InspectionTask or TaskItemRecord (optional link)
-Enterprise → EnterpriseQualification, EnterpriseProduct, EnterpriseEquipment, etc.
+Enterprise → EnterpriseQualification, EnterpriseProduct, etc.
 
 # Audit project workflow (certification audits)
 AuditProject → AuditTeamMember, AuditPlanItem, AuditArea, AuditAreaRecord, Nonconformity, AuditReport, CommunicationMeeting

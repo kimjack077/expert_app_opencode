@@ -33,8 +33,6 @@ async def clear_non_user_data():
         
         # 企业相关表
         "rectification_records",
-        "enterprise_personnel",
-        "enterprise_equipment",
         "enterprise_products",
         "enterprise_qualifications",
         "enterprises",

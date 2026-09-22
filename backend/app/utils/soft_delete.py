@@ -228,15 +228,6 @@ FK_CASCADE_POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
         PRESERVE,
         "**有意保留**：企业产品是历史档案，随企业归档保留。",
     ),
-    ("enterprise_equipment", "enterprise_id", "enterprises"): (
-        PRESERVE,
-        "**有意保留**：企业设备是资产档案，企业归档后仍需追溯。"
-        "注：ORM 上声明了 delete-orphan，但企业删除走软删路径，不会触发它。",
-    ),
-    ("enterprise_personnel", "enterprise_id", "enterprises"): (
-        PRESERVE,
-        "**有意保留**：企业人员是历史档案，随企业归档保留。",
-    ),
     ("rectification_records", "enterprise_id", "enterprises"): (
         PRESERVE,
         "**有意保留**：整改记录是企业侧的整改历史，企业归档不得销毁。"
@@ -482,17 +473,34 @@ async def soft_delete(
     obj.is_deleted = True
     obj.deleted_at = datetime.now(timezone.utc)
 
+    # 账号软删必须同步停用，否则 is_active=True 的幽灵账号仍可被鉴权链路碰到
+    if hasattr(obj, "is_active"):
+        obj.is_active = False
+
     if unique_fields:
-        suffix = f"_deleted_{int(datetime.now(timezone.utc).timestamp())}"
+        stamp = int(datetime.now(timezone.utc).timestamp())
+        suffix = f"_deleted_{stamp}"
         for field_name in unique_fields:
             current = getattr(obj, field_name, None)
-            if current and isinstance(current, str) and not current.endswith("_deleted"):
-                # 截断以避免超过字段长度限制
-                max_len = 200  # 保守限制
-                new_val = (current + suffix)
-                if len(new_val) > max_len:
-                    new_val = current[: max_len - len(suffix)] + suffix
-                setattr(obj, field_name, new_val)
+            if not current or not isinstance(current, str):
+                continue
+            if "_deleted_" in current:
+                continue
+            if field_name == "email" and "@" in current:
+                # 保持 EmailStr/唯一约束兼容：local+deleted<ts>@domain
+                local, _, domain = current.partition("@")
+                new_val = f"{local}+deleted{stamp}@{domain}"
+            else:
+                new_val = current + suffix
+            max_len = 200
+            if len(new_val) > max_len:
+                if field_name == "email" and "@" in new_val:
+                    local, _, domain = new_val.partition("@")
+                    keep = max_len - len(domain) - 1
+                    new_val = f"{local[:keep]}@{domain}"
+                else:
+                    new_val = new_val[: max_len - len(suffix)] + suffix
+            setattr(obj, field_name, new_val)
 
     await db.flush()
 

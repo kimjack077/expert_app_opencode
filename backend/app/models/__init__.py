@@ -10,8 +10,6 @@ from .enterprise import (
     Enterprise,
     EnterpriseQualification,
     EnterpriseProduct,
-    EnterpriseEquipment,
-    EnterprisePersonnel,
     RectificationRecord,
 )
 from .knowledge import KnowledgeDocument, InspectionGuideline
@@ -61,8 +59,6 @@ __all__ = [
     "Enterprise",
     "EnterpriseQualification",
     "EnterpriseProduct",
-    "EnterpriseEquipment",
-    "EnterprisePersonnel",
     "RectificationRecord",
     "KnowledgeDocument",
     "InspectionGuideline",

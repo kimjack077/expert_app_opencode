@@ -550,29 +550,44 @@ async def get_template_items(
 ):
     """获取模板的所有检查项目（树形结构）"""
     template = await db.get(InspectionTemplate, template_id)
-    if not template or template.is_deleted:
+    if not template:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # 权限检查：与 get_template 口径一致——存在基于该模板的关联任务时允许只读，
-    # 否则派发给审核专家的现场任务无法渲染检查项（BUG-01）。
-    if not can_access_template(current_user, template):
-        from app.models.task import InspectionTask
+    # 与 get_template 口径一致：软删模板对管理员或存在关联任务的用户仍只读可访问
+    from app.models.task import InspectionTask
 
-        filters = [
-            InspectionTask.template_id == template.id,
-            InspectionTask.is_deleted == False,  # noqa: E712
-        ]
-        if current_user.role == "expert":
-            filters.append(InspectionTask.assigned_to == current_user.id)
-        related = await db.execute(select(InspectionTask.id).where(*filters).limit(1))
-        has_related_task = related.scalar_one_or_none() is not None
-        if not has_related_task:
-            raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+    if current_user.role == "expert":
+        related = await db.execute(
+            select(InspectionTask.id)
+            .where(
+                InspectionTask.template_id == template.id,
+                InspectionTask.assigned_to == current_user.id,
+                InspectionTask.is_deleted == False,  # noqa: E712
+            )
+            .limit(1)
+        )
+    else:
+        related = await db.execute(
+            select(InspectionTask.id)
+            .where(
+                InspectionTask.template_id == template.id,
+                InspectionTask.is_deleted == False,  # noqa: E712
+            )
+            .limit(1)
+        )
+    has_related_task = related.scalar_one_or_none() is not None
 
-    query = select(TemplateItem).where(
-        TemplateItem.template_id == template_id,
-        TemplateItem.is_deleted == False,  # noqa: E712
-    ).order_by(TemplateItem.sort_order)
+    if template.is_deleted and not (is_admin(current_user) or has_related_task):
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if not can_access_template(current_user, template) and not has_related_task:
+        raise HTTPException(status_code=403, detail="您没有权限访问此模板")
+
+    # 软删模板回放历史时保留检查项原始数据，与 get_template 口径一致
+    item_filters = [TemplateItem.template_id == template_id]
+    if not template.is_deleted:
+        item_filters.append(TemplateItem.is_deleted == False)  # noqa: E712
+    query = select(TemplateItem).where(*item_filters).order_by(TemplateItem.sort_order)
     result = await db.execute(query)
     items = result.scalars().all()
 

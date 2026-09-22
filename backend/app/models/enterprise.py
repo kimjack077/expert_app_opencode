@@ -54,8 +54,6 @@ class Enterprise(Base, SoftDeleteMixin):
 
     qualifications = relationship("EnterpriseQualification", back_populates="enterprise", cascade="all, delete-orphan")
     products = relationship("EnterpriseProduct", back_populates="enterprise", cascade="all, delete-orphan")
-    equipment = relationship("EnterpriseEquipment", back_populates="enterprise", cascade="all, delete-orphan")
-    personnel = relationship("EnterprisePersonnel", back_populates="enterprise", cascade="all, delete-orphan")
     rectifications = relationship("RectificationRecord", back_populates="enterprise", cascade="all, delete-orphan")
     industry = relationship("Industry")
 
@@ -96,42 +94,6 @@ class EnterpriseProduct(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     enterprise = relationship("Enterprise", back_populates="products")
-
-
-class EnterpriseEquipment(Base):
-    __tablename__ = "enterprise_equipment"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    enterprise_id = Column(UUID(as_uuid=True), ForeignKey("enterprises.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(200), nullable=False)
-    model = Column(String(100))
-    manufacturer = Column(String(200))
-    purchase_date = Column(Date)
-    status = Column(String(20), default="normal")
-    remarks = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    enterprise = relationship("Enterprise", back_populates="equipment")
-
-
-class EnterprisePersonnel(Base):
-    __tablename__ = "enterprise_personnel"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    enterprise_id = Column(UUID(as_uuid=True), ForeignKey("enterprises.id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(50), nullable=False)
-    position = Column(String(50))
-    phone = Column(String(20))
-    id_card = Column(String(20))
-    education = Column(String(50))
-    certificate = Column(String(100))
-    cert_valid_until = Column(Date)
-    remarks = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    enterprise = relationship("Enterprise", back_populates="personnel")
 
 
 class RectificationRecord(Base):

@@ -21,7 +21,7 @@ class TokenPayload(BaseModel):
 
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
-    email: Optional[EmailStr] = None
+    email: Optional[str] = Field(None, max_length=200)
     phone: Optional[str] = None
     full_name: Optional[str] = None
 
