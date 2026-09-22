@@ -404,7 +404,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       setFlatItems(updatedItems)
       message.success('已保存')
     } catch (error) {
-      message.error('保存失败')
+      message.error((error as any)?.response?.data?.detail || (error as any)?.response?.data?.message || (error as any)?.message || '保存失败')
     } finally {
       setSaving(false)
     }
@@ -464,7 +464,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       }
       message.success('已采纳AI建议')
     } catch (error) {
-      message.error('保存失败')
+      message.error((error as any)?.response?.data?.detail || (error as any)?.response?.data?.message || (error as any)?.message || '保存失败')
     }
 
     setDrawerVisible(false)
