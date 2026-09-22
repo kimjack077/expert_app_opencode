@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import time
 from jose import JWTError, jwt
 import bcrypt
 from fastapi import Depends, HTTPException, status
@@ -87,6 +88,76 @@ def _token_revoked(payload: dict, user: User) -> bool:
     return payload.get("rv") != revoked_at.isoformat()
 
 
+# ---------------------------------------------------------------------------
+# 鉴权用户短 TTL 进程内缓存（PERF）
+#
+# 原实现里每个受保护请求都要执行一次 ``SELECT ... FROM users``（鉴权链路的
+# 第一个查询）。本地开发连公网远程库时，这一次查询就是一次 50~800ms 的网络
+# 往返，是所有页面"转一圈才出来"的主要来源之一。
+#
+# 这里按 username 缓存用户**列值快照**（TTL 默认 60s，可用
+# ``AUTH_USER_CACHE_TTL_SECONDS=0`` 关闭），命中时构造一个**全新的瞬态**
+# ``User`` 实例返回——每次新建而不是共享同一实例，避免瞬态对象被并发请求
+# 意外挂进各自的 Session。
+#
+# 一致性约定（务必遵守）：
+# * 任何**写** user 表的地方（登出吊销会话、改密、管理员改角色/停用、删除），
+#   必须在 commit 后调用 :func:`invalidate_user_cache`。当前已接入：
+#   auth.logout / auth.change_password / users.update_user / users.delete_user。
+# * 直接改库或跨进程写入不会被感知，最长 TTL 秒后生效。
+# * 命中缓存返回的是瞬态对象：只允许**读**列属性；需要修改当前用户时必须
+#   ``await db.get(User, current_user.id)`` 重新取托管实例（auth.py 已示范）。
+# ---------------------------------------------------------------------------
+_USER_CACHE_MAX = 500
+# username -> (monotonic 过期时刻, 列值快照)
+_user_cache: dict[str, tuple[float, dict]] = {}
+
+
+def invalidate_user_cache(username: Optional[str] = None) -> None:
+    """使用户缓存失效。``username=None`` 时清空全部（用户表批量变更时用）。"""
+    if username is None:
+        _user_cache.clear()
+    else:
+        _user_cache.pop(username, None)
+
+
+def _snapshot_user(user: User) -> dict:
+    """提取全部列值为普通 dict，供缓存与瞬态实例重建。"""
+    return {c.name: getattr(user, c.name) for c in User.__table__.columns}
+
+
+async def _load_user_by_username(db: AsyncSession, username: str) -> Optional[User]:
+    """按用户名加载用户，优先命中进程内短 TTL 缓存。
+
+    缓存未命中时走数据库，返回的是 Session 托管实例（与历史行为一致）；
+    命中时返回瞬态实例（只读列属性安全）。未找到用户不做负缓存。
+    """
+    ttl = settings.AUTH_USER_CACHE_TTL_SECONDS
+    if ttl > 0:
+        hit = _user_cache.get(username)
+        if hit is not None:
+            expires_at, snapshot = hit
+            if time.monotonic() < expires_at:
+                return User(**snapshot)
+            _user_cache.pop(username, None)
+
+    result = await db.execute(select(User).where(User.username == username))
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
+
+    if ttl > 0:
+        if len(_user_cache) >= _USER_CACHE_MAX:
+            # 规模兜底：直接清空重建。500 个活跃用户远超本系统实际规模，
+            # 真触发了也只是回到"每请求查库"，不会出错。
+            _user_cache.clear()
+        _user_cache[username] = (
+            time.monotonic() + ttl,
+            _snapshot_user(user),
+        )
+    return user
+
+
 async def get_user_from_token(token: str, db: AsyncSession) -> User:
     """Get user from a token string (used for export endpoints with query param auth)"""
     payload = decode_token(token)
@@ -109,8 +180,7 @@ async def get_user_from_token(token: str, db: AsyncSession) -> User:
             detail="Not authenticated",
         )
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user = await _load_user_by_username(db, username)
     if user is None or user.is_deleted or _token_revoked(payload, user):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -151,8 +221,7 @@ async def get_current_user(
     if username is None:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user = await _load_user_by_username(db, username)
     if user is None or user.is_deleted:
         raise credentials_exception
 
@@ -183,8 +252,7 @@ async def get_current_user_optional(
     username: str = payload.get("sub")
     if username is None:
         return None
-    result = await db.execute(select(User).where(User.username == username))
-    user = result.scalar_one_or_none()
+    user = await _load_user_by_username(db, username)
     if user is None or user.is_deleted or _token_revoked(payload, user) or not user.is_active:
         return None
     return user

@@ -77,37 +77,17 @@ async def get_enterprises(
     if status:
         query = query.where(Enterprise.status == status)
 
-    total_query = select(func.count(Enterprise.id)).where(Enterprise.is_deleted == False)  # noqa: E712
-    if search_keyword:
-        total_query = total_query.where(
-            or_(
-                Enterprise.name.ilike(f"%{search_keyword}%"),
-                Enterprise.credit_code.ilike(f"%{search_keyword}%"),
-            )
-        )
-    if credit_code:
-        total_query = total_query.where(Enterprise.credit_code.ilike(f"%{credit_code}%"))
-    if district:
-        total_query = total_query.where(Enterprise.district == district)
-    if risk_level:
-        total_query = total_query.where(Enterprise.risk_level == risk_level)
-    if status:
-        total_query = total_query.where(Enterprise.status == status)
-
     base_query = query.order_by(Enterprise.created_at.desc())
-    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
-    if skip == 0:
-        result = await db.execute(base_query.offset(0).limit(limit + 1))
-        enterprises = list(result.scalars().all())
-        if len(enterprises) <= limit:
-            total = len(enterprises)
-        else:
-            enterprises = enterprises[:limit]
-            total = (await db.execute(total_query)).scalar() or 0
-    else:
-        total = (await db.execute(total_query)).scalar() or 0
-        result = await db.execute(base_query.offset(skip).limit(limit))
-        enterprises = list(result.scalars().all())
+    # PERF：窗口函数随分页查询一次取回数据 + total，任何页都只需 1 次 DB 往返。
+    rows = (
+        await db.execute(
+            base_query.add_columns(func.count().over().label("_total"))
+            .offset(skip)
+            .limit(limit)
+        )
+    ).all()
+    enterprises = [row[0] for row in rows]
+    total = int(rows[0][1]) if rows else 0
 
     return make_response(
         data={

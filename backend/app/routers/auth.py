@@ -25,6 +25,7 @@ from app.utils.security import (
     decode_token,
     _token_revoked,
     get_current_user,
+    invalidate_user_cache,
     security,
 )
 from app.services import AuditService
@@ -86,13 +87,19 @@ async def logout(
     # 吊销当前登录会话，而不是用户的全部会话。access/refresh token
     # 共享 sid，因此同一设备退出后无法用 refresh token 重新登录，
     # 但用户在其他设备上的会话仍保持有效。
+    #
+    # 注意：current_user 可能来自鉴权缓存（瞬态实例），对它的赋值不会随
+    # db.commit() 落库。必须 db.get 重新取回 Session 托管实例再修改。
     payload = decode_token(credentials.credentials) if credentials else None
     session_id = payload.get("sid") if payload else None
     if session_id:
-        revoked = list(current_user.revoked_sessions or [])
+        managed = await db.get(User, current_user.id)
+        if managed is None or managed.is_deleted:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        revoked = list(managed.revoked_sessions or [])
         if session_id not in revoked:
             revoked.append(session_id)
-        current_user.revoked_sessions = revoked[-50:]
+        managed.revoked_sessions = revoked[-50:]
     await AuditService.log_action(
         db,
         str(current_user.id),
@@ -101,6 +108,8 @@ async def logout(
         ip_address=request.client.host if request.client else None,
     )
     await db.commit()
+    # 让鉴权缓存立刻感知吊销，否则该 sid 最长还能用 AUTH_USER_CACHE_TTL_SECONDS 秒
+    invalidate_user_cache(current_user.username)
     return make_response(message="Logged out successfully")
 
 
@@ -169,11 +178,18 @@ async def change_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not verify_password(password_data.old_password, current_user.hashed_password):
+    # current_user 可能来自鉴权缓存（瞬态实例）：校验与修改都必须在
+    # Session 托管实例上进行，否则旧密码校验读到的是最长 60s 前的快照、
+    # 新密码也不会随 commit 落库。
+    managed = await db.get(User, current_user.id)
+    if managed is None or managed.is_deleted:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not verify_password(password_data.old_password, managed.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect old password")
 
-    current_user.hashed_password = get_password_hash(password_data.new_password)
+    managed.hashed_password = get_password_hash(password_data.new_password)
     await db.commit()
+    invalidate_user_cache(current_user.username)
 
     await AuditService.log_action(
         db,

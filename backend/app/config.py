@@ -46,6 +46,31 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # 连接池 checkout 探活（每次取用连接先 SELECT 1）。
+    # None（默认）= 按连接目标自动判定：
+    #   · 回环/本机（线上 FastAPI 与 PG 同机，成本 <1ms）→ 开启，保留 BUG-17 对
+    #     「空闲连接被中间链路断开」的防护；
+    #   · 远程主机（本地开发连公网库，单次往返 50~800ms）→ 关闭，省掉每个请求
+    #     都要白付一次的网络往返。
+    # 需要固定行为时显式设 True/False 覆盖。
+    # 关闭的代价：连接闲置较久后第一个请求可能拿到死连接报错（重试即恢复），
+    # pool_recycle=1800 仍会每 30 分钟主动回收兜底。
+    DB_POOL_PRE_PING: bool | None = None
+
+    @property
+    def db_pool_pre_ping(self) -> bool:
+        """见 ``DB_POOL_PRE_PING`` 说明：未显式配置时按连接目标自动判定。"""
+        if self.DB_POOL_PRE_PING is not None:
+            return self.DB_POOL_PRE_PING
+        return self.effective_pg_host in ("127.0.0.1", "localhost", "::1")
+
+    # 鉴权用户缓存 TTL（秒）：get_current_user 每个请求原本都要 SELECT users
+    # 一次，本地连公网远程库时等于每请求白付一次网络往返。缓存期内（默认 60s）
+    # 直接从进程内快照构造用户对象。0 = 禁用缓存（恢复每请求查库）。
+    # 一致性约定：本进程内的登出 / 改密 / 改角色 / 删用户会主动失效缓存；
+    # 跨进程或直接在库里改数据，最长 TTL 秒后生效（可接受，见 security.py）。
+    AUTH_USER_CACHE_TTL_SECONDS: int = 60
+
     # CORS 来源白名单（逗号分隔）。
     # 不能用 "*" 搭配 allow_credentials=True —— 该组合违反 CORS 规范，
     # 浏览器会直接拒绝带凭据的请求。

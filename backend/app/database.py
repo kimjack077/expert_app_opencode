@@ -12,8 +12,10 @@ engine = create_async_engine(
     max_overflow=30,
     # BUG-17：远程库空闲连接可能在 1 小时内被中间链路断开；30 分钟主动回收 + 使用前探活，
     # 降低 ConnectionDoesNotExistError / asyncpg TimeoutError 的出现概率。
+    # PERF：探活本身是每次 checkout 一次 SELECT 1 往返，本地连公网远程库时成本高，
+    # 由 settings.db_pool_pre_ping 按「是否回环连接」自动判定（可用 DB_POOL_PRE_PING 覆盖）。
     pool_recycle=1800,
-    pool_pre_ping=True,
+    pool_pre_ping=settings.db_pool_pre_ping,
     pool_timeout=30,
     connect_args={
         "server_settings": {

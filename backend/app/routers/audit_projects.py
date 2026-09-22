@@ -253,37 +253,18 @@ async def list_audit_projects(
             )
         )
 
-    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total = len(items)，免去额外的 COUNT(*) 往返
-    if skip == 0:
-        query = (
-            select(AuditProject)
-            .where(and_(*conditions))
-            .order_by(AuditProject.created_at.desc())
-            .offset(0)
-            .limit(limit + 1)
-        )
-        result = await db.execute(query)
-        projects = list(result.scalars().all())
-        if len(projects) <= limit:
-            total = len(projects)
-        else:
-            projects = projects[:limit]
-            total = (
-                await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
-            ).scalar() or 0
-    else:
-        total = (
-            await db.execute(select(func.count(AuditProject.id)).where(and_(*conditions)))
-        ).scalar() or 0
-        query = (
-            select(AuditProject)
-            .where(and_(*conditions))
-            .order_by(AuditProject.created_at.desc())
-            .offset(skip)
-            .limit(limit)
-        )
-        result = await db.execute(query)
-        projects = list(result.scalars().all())
+    # PERF：窗口函数随分页查询一次取回数据 + total，任何页都只需 1 次 DB 往返。
+    query = (
+        select(AuditProject)
+        .where(and_(*conditions))
+        .add_columns(func.count().over().label("_total"))
+        .order_by(AuditProject.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = (await db.execute(query)).all()
+    projects = [row[0] for row in rows]
+    total = int(rows[0][1]) if rows else 0
 
     return make_response(
         {"items": jsonable_encoder(projects), "total": total}

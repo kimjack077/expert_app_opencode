@@ -8,7 +8,12 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.common import ApiResponse
-from app.utils.security import get_current_user, get_password_hash, get_current_admin_user
+from app.utils.security import (
+    get_current_user,
+    get_password_hash,
+    get_current_admin_user,
+    invalidate_user_cache,
+)
 from app.utils.response import make_response
 
 router = APIRouter()
@@ -79,7 +84,8 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     update_data = data.model_dump(exclude_unset=True)
-    
+
+    old_username = user.username
     if "username" in update_data and update_data["username"] != user.username:
         result = await db.execute(select(User).where(User.username == update_data["username"]))
         if result.scalar_one_or_none():
@@ -88,12 +94,16 @@ async def update_user(
     if "password" in update_data:
         password = update_data.pop("password")
         user.hashed_password = get_password_hash(password)
-        
+
     for key, value in update_data.items():
         setattr(user, key, value)
-        
+
     await db.commit()
     await db.refresh(user)
+    # 角色/停用/改名/改密等变更需立刻反映到鉴权缓存（新旧用户名都要失效）
+    invalidate_user_cache(old_username)
+    if user.username != old_username:
+        invalidate_user_cache(user.username)
     return make_response(data=UserResponse.model_validate(user).model_dump())
 
 @router.delete("/{user_id}", response_model=ApiResponse)
@@ -126,7 +136,11 @@ async def delete_user(
 
     from app.utils.soft_delete import soft_delete
 
+    old_username = user.username
     user.is_active = False
     await soft_delete(db, user, unique_fields=["username", "email"])
     await db.commit()
+    # 软删除改名（追加 _deleted_ 后缀），新旧用户名都失效，避免缓存继续放行
+    invalidate_user_cache(old_username)
+    invalidate_user_cache(user.username)
     return make_response(message="User deleted successfully")

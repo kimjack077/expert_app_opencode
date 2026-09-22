@@ -65,7 +65,10 @@ def _ensure_record_access(record: InspectionRecord, current_user: User, *, write
         return
     if str(record.inspector_id) == str(current_user.id):
         return
-    raise HTTPException(status_code=403, detail="Not authorized")
+    raise HTTPException(
+        status_code=403,
+        detail=("没有权限修改该检查记录" if write else "没有权限查看该检查记录"),
+    )
 
 
 @router.get("", response_model=ApiResponse)
@@ -139,16 +142,12 @@ async def get_records(
         joinedload(InspectionRecord.enterprise),
         joinedload(InspectionRecord.inspector),
     )
-    count_query = select(func.count(InspectionRecord.id))
-    # 按企业名称筛选时两个查询都需要 join Enterprise 表
+    # 按企业名称筛选时需要 join Enterprise 表（多对一 join 不会产生行重复，
+    # 因此窗口计数 count(*) over() 的结果不受影响）
     if enterprise_name:
         query = query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
-        count_query = count_query.outerjoin(
-            Enterprise, InspectionRecord.enterprise_id == Enterprise.id
-        )
 
     query = query.where(*conditions)
-    count_query = count_query.where(*conditions)
 
     # 排序
     sort_column = InspectionRecord.inspection_date
@@ -162,23 +161,17 @@ async def get_records(
     else:
         query = query.order_by(sort_column.desc())
 
-    # 优化：skip == 0 时多取 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
-    if skip == 0:
-        paged_query = query.offset(0).limit(limit + 1)
-        result = await db.execute(paged_query)
-        records = list(result.scalars().all())
-        if len(records) <= limit:
-            total = len(records)
-        else:
-            records = records[:limit]
-            count_result = await db.execute(count_query)
-            total = count_result.scalar() or 0
-    else:
-        count_result = await db.execute(count_query)
-        total = count_result.scalar() or 0
-        paged_query = query.offset(skip).limit(limit)
-        result = await db.execute(paged_query)
-        records = list(result.scalars().all())
+    # PERF：窗口函数随分页查询一次取回数据 + total，任何页都只需 1 次 DB 往返
+    # （此前的 limit+1 试探只在首页且数据不满一页时省一次 COUNT 查询）。
+    rows = (
+        await db.execute(
+            query.add_columns(func.count().over().label("_total"))
+            .offset(skip)
+            .limit(limit)
+        )
+    ).all()
+    records = [row[0] for row in rows]
+    total = int(rows[0][1]) if rows else 0
 
     record_list = []
     for r in records:
@@ -937,8 +930,8 @@ async def submit_record(
     _ensure_record_access(record, current_user, write=True)
 
     # BUG-12：已提交记录不允许重复提交
-    if record.status == "submitted":
-        raise HTTPException(status_code=409, detail="该检查记录已提交，请勿重复提交")
+    if record.status == "submitted" and not is_admin(current_user.role):
+        raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
 
     # 完整性校验：结论 + 必填检查项
     blockers = await _collect_submit_blockers(db, record)
@@ -968,7 +961,7 @@ async def submit_record(
 async def delete_record(
     record_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
+    current_user: User = Depends(get_current_user),
 ):
     """删除检查记录（仅管理员，软删除）
 
@@ -981,6 +974,10 @@ async def delete_record(
     record = await db.get(InspectionRecord, record_id)
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
+
+    # 管理员/超管可删任意记录；普通用户仅可删自己的，否则明确提示没有权限
+    if not is_admin(current_user.role) and str(record.inspector_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="没有权限删除该检查记录")
 
     from app.utils.soft_delete import soft_delete_cascade
 
@@ -1011,7 +1008,7 @@ async def create_or_update_record_item(
     _ensure_record_access(record, current_user, write=True)
 
     # BUG-12：已提交记录为只读，禁止再修改检查条目
-    if record.status == "submitted":
+    if record.status == "submitted" and not is_admin(current_user.role):
         raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
 
     # 查找是否已存在（优先按 id 查找，其次按 template_item_id 查找）

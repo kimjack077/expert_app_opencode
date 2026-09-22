@@ -168,23 +168,18 @@ async def get_tasks(
         .order_by(InspectionTask.created_at.desc())
     )
 
-    # 优化：skip == 0 时多查 1 条；若 <= limit 则 total 即为条数，免去额外的 COUNT(*) 往返
-    if skip == 0:
-        result = await db.execute(base_query.offset(0).limit(limit + 1))
-        tasks = list(result.scalars().all())
-        if len(tasks) <= limit:
-            total = len(tasks)
-        else:
-            tasks = tasks[:limit]
-            total = (
-                await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
-            ).scalar() or 0
-    else:
-        total = (
-            await db.execute(select(func.count(InspectionTask.id)).where(*conditions))
-        ).scalar() or 0
-        result = await db.execute(base_query.offset(skip).limit(limit))
-        tasks = list(result.scalars().all())
+    # PERF：窗口函数随分页查询一次取回数据 + total，任何页都只需 1 次 DB 往返
+    # （本地连公网远程库时每次往返 50~800ms；此前的 limit+1 试探只在首页且
+    # 数据不满一页时才省一次 COUNT 查询，翻页仍需两次往返）。
+    rows = (
+        await db.execute(
+            base_query.add_columns(func.count().over().label("_total"))
+            .offset(skip)
+            .limit(limit)
+        )
+    ).all()
+    tasks = [row[0] for row in rows]
+    total = int(rows[0][1]) if rows else 0
 
     # BUG-05：批量回填审核计划项关联字段（此前列表接口 plan_item_id/audit_project_id 恒为 null，
     # 与详情接口口径不一致），保证 Web / H5 任务卡片能展示所属项目与区域。
