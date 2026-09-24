@@ -31,6 +31,7 @@ from app.utils.item_stats import calculate_item_stats, classify_result, classify
 from app.utils.business_time import business_day_bounds
 from app.utils.item_write_guard import validate_item_payload
 from app.utils.item_completion import resolve_check_type
+from app.utils.tree_builder import build_inspection_record_tree
 from app.services import AuditService
 from app.services.llm_service import llm_service
 from app.utils.response import make_response
@@ -476,166 +477,11 @@ async def get_record(
         if item.item_title:
             record_item_title_map[item.item_title] = item
 
-    # 构建树形结构（使用模板结构，填充记录数据）
-    def build_tree(items, parent_id=None):
-        tree = []
-        for template_item in items:
-            item_parent_id = (
-                str(template_item.parent_id) if template_item.parent_id else None
-            )
-            if item_parent_id == parent_id:
-                # 查找对应的记录项：先按ID查找，如果找不到且标题存在，按标题 fallback（防止项被删后因 FK 置空导致的数据断连）
-                record_item = record_item_map.get(str(template_item.id))
-                if not record_item and template_item.title:
-                    record_item = record_item_title_map.get(template_item.title)
-
-                # 若记录中有冗余字段则优先使用（保护历史记录不因为模板修改而改变显示）
-                title = (
-                    record_item.item_title
-                    if record_item and record_item.item_title
-                    else template_item.title
-                )
-                description = (
-                    record_item.item_description
-                    if record_item and record_item.item_title
-                    else template_item.description
-                )
-                check_method = (
-                    record_item.item_check_method
-                    if record_item and record_item.item_title
-                    else template_item.check_method
-                )
-                legal_basis = (
-                    record_item.item_legal_basis
-                    if record_item and record_item.item_title
-                    else template_item.legal_basis
-                )
-                standard_ref = (
-                    record_item.item_standard_ref
-                    if record_item and record_item.item_title
-                    else template_item.standard_ref
-                )
-                result_options = (
-                    record_item.item_result_options
-                    if record_item and record_item.item_title
-                    else template_item.result_options
-                )
-                min_value = (
-                    float(record_item.item_min_value)
-                    if record_item and record_item.item_min_value is not None
-                    else (
-                        float(template_item.min_value)
-                        if template_item.min_value is not None
-                        else None
-                    )
-                )
-                max_value = (
-                    float(record_item.item_max_value)
-                    if record_item and record_item.item_max_value is not None
-                    else (
-                        float(template_item.max_value)
-                        if template_item.max_value is not None
-                        else None
-                    )
-                )
-                unit = (
-                    record_item.item_unit
-                    if record_item and record_item.item_title
-                    else template_item.unit
-                )
-                score_weight = (
-                    float(record_item.item_score_weight)
-                    if record_item and record_item.item_score_weight is not None
-                    else (
-                        float(template_item.score_weight)
-                        if getattr(template_item, "score_weight", None) is not None
-                        else None
-                    )
-                )
-                default_score = (
-                    float(record_item.item_default_score)
-                    if record_item and record_item.item_default_score is not None
-                    else (
-                        float(template_item.default_score)
-                        if getattr(template_item, "default_score", None) is not None
-                        else None
-                    )
-                )
-                allow_attachment = (
-                    record_item.item_allow_attachment
-                    if record_item and record_item.item_title
-                    else getattr(template_item, "allow_attachment", False)
-                )
-                attachment_required = (
-                    record_item.item_attachment_required
-                    if record_item and record_item.item_title
-                    else getattr(template_item, "attachment_required", False)
-                )
-                ai_prompt_template = (
-                    record_item.item_ai_prompt_template
-                    if record_item and record_item.item_title
-                    else getattr(template_item, "ai_prompt_template", None)
-                )
-                use_ai = (
-                    record_item.item_use_ai
-                    if record_item and record_item.item_title
-                    else getattr(template_item, "use_ai", False)
-                )
-
-                children = build_tree(items, str(template_item.id))
-                node = {
-                    "id": str(record_item.id) if record_item else str(template_item.id),
-                    "template_item_id": str(template_item.id),
-                    "title": title,
-                    "description": description,
-                    "check_method": check_method,
-                    "legal_basis": legal_basis,
-                    "standard_ref": standard_ref,
-                    "result_type": template_item.result_type,
-                    "result_options": result_options,
-                    "min_value": min_value,
-                    "max_value": max_value,
-                    "unit": unit,
-                    "score_weight": score_weight,
-                    "default_score": default_score,
-                    "allow_attachment": allow_attachment,
-                    "attachment_required": attachment_required,
-                    "ai_prompt_template": ai_prompt_template,
-                    "use_ai": use_ai,
-                    "result": record_item.result if record_item else None,
-                    "result_value": record_item.result_value if record_item else None,
-                    "result_text": record_item.result_text if record_item else None,
-                    "radio_value": record_item.radio_value if record_item else None,
-                    "score_value": float(record_item.score_value)
-                    if record_item
-                    and record_item.score_value is not None
-                    and record_item.score_value != ""
-                    else None,
-                    "numeric_value": float(record_item.numeric_value)
-                    if record_item
-                    and record_item.numeric_value is not None
-                    and record_item.numeric_value != ""
-                    else None,
-                    "text_value": record_item.text_value if record_item else None,
-                    "multi_value": record_item.multi_value if record_item else None,
-                    "inspector_note": record_item.inspector_note
-                    if record_item
-                    else None,
-                    "problem_description": record_item.problem_description
-                    if record_item
-                    else None,
-                    "rectification_suggestion": record_item.rectification_suggestion
-                    if record_item
-                    else None,
-                    "ai_suggestion": record_item.ai_suggestion if record_item else None,
-                    "photos": record_item.photos or [] if record_item else [],
-                    # 动态纠偏：只要挂了子节点就一律按分类目录返回，
-                    # 兼容历史脏数据，保证前端不会把根节点当检查项渲染。
-                    "is_category": bool(template_item.is_category) or len(children) > 0,
-                    "children": children,
-                }
-                tree.append(node)
-        return tree
+    # 使用优化的树构建函数（O(N) 时间复杂度，带循环引用检测）
+    # 替代原 build_tree 递归函数（O(N²) 时间复杂度）
+    tree_items = build_inspection_record_tree(
+        template_items, record_item_map, record_item_title_map
+    )
 
     def build_template_tree(items, parent_id=None):
         tree = []
@@ -686,7 +532,7 @@ async def get_record(
             "category": record.template.category,
             "version": record.template.version,
             "is_quantified": record.template.is_quantified,
-            "items": build_tree(template_items),
+            "items": tree_items,
         }
     elif record.template_snapshot:
         template_data = {
@@ -695,7 +541,7 @@ async def get_record(
             "category": record.template_snapshot.get("category"),
             "version": record.template_snapshot.get("version"),
             "is_quantified": record.template_snapshot.get("is_quantified", False),
-            "items": build_tree(template_items),
+            "items": tree_items,
         }
 
     record_data = {
