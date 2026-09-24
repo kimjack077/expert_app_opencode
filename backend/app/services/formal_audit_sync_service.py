@@ -307,7 +307,14 @@ async def sync_task_to_formal_record(
         from app.models.audit_project import AuditProject
 
         project = await db.get(AuditProject, plan_item.project_id)
-    enterprise = getattr(project, "enterprise", None) if project else None
+
+    # BUG-FIX: 同样不要访问 project.enterprise，也会触发懒加载
+    # 通过 project.enterprise_id 异步加载
+    enterprise = None
+    if project and project.enterprise_id:
+        from app.models.enterprise import Enterprise
+
+        enterprise = await db.get(Enterprise, project.enterprise_id)
     overall = "pass"
     if task.remarks and "\u4e0d\u5408\u683c" in task.remarks:
         overall = "fail"
