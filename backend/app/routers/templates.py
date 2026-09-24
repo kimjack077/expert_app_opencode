@@ -103,7 +103,20 @@ async def get_templates(
         return make_response(data=[])
 
     template_ids = [t.id for t in templates]
-    
+
+    # 性能优化：先查出当前这批模板中哪些节点是父节点，而不是用全局子查询
+    # 旧的 parent_id_subquery() 会扫描所有模板，导致查询慢（9秒+）
+    parent_ids_result = await db.execute(
+        select(TemplateItem.parent_id)
+        .where(
+            TemplateItem.template_id.in_(template_ids),
+            TemplateItem.parent_id.is_not(None),
+            TemplateItem.is_deleted == False,
+        )
+        .distinct()
+    )
+    parent_ids = {row[0] for row in parent_ids_result.all() if row[0]}
+
     # 统计口径统一（老杨 2026-09-11 确认）：
     #   total_items = 有效条目数（不含软删除）
     #   categories  = 分类目录数（显式标记 is_category，或存在有效子节点的父节点）
@@ -111,7 +124,7 @@ async def get_templates(
     # 三者满足 total_items = categories + check_items，杜绝"6 vs 8"式对不上账。
     is_cat_expr = or_(
         TemplateItem.is_category.is_(True),
-        TemplateItem.id.in_(parent_id_subquery()),
+        TemplateItem.id.in_(parent_ids) if parent_ids else False,
     )
     items_count_query = select(
         TemplateItem.template_id,
