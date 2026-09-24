@@ -300,8 +300,10 @@ async def sync_task_to_formal_record(
             .limit(1)
         )
     ).scalars().first()
-    project = plan_item.project if getattr(plan_item, "project", None) else None
-    if project is None and plan_item.project_id:
+    # BUG-FIX: 不要直接访问 plan_item.project，会触发懒加载导致 MissingGreenlet 错误
+    # 始终通过 project_id 异步加载
+    project = None
+    if plan_item.project_id:
         from app.models.audit_project import AuditProject
 
         project = await db.get(AuditProject, plan_item.project_id)
