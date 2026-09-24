@@ -40,11 +40,17 @@ export default function Records() {
   })
   const [templates, setTemplates] = useState<any[]>([])
   const [activeFilterKeys, setActiveFilterKeys] = useState<string[]>([])
+  const [searchTrigger, setSearchTrigger] = useState(0) // 搜索触发器
 
+  // 仅在组件挂载时拉取一次模板列表（静态下拉选项数据）
+  useEffect(() => {
+    fetchTemplates()
+  }, [])
+
+  // 分页/排序/搜索触发时重新拉取记录
   useEffect(() => {
     fetchRecords()
-    fetchTemplates()
-  }, [pagination.current, pagination.pageSize, sorter.field, sorter.order])
+  }, [pagination.current, pagination.pageSize, sorter.field, sorter.order, searchTrigger])
 
   // 获取模板列表用于筛选
   const fetchTemplates = async () => {
@@ -115,7 +121,7 @@ export default function Records() {
   // 执行搜索
   const handleSearch = () => {
     setPagination(prev => ({ ...prev, current: 1 }))
-    fetchRecords()
+    setSearchTrigger(prev => prev + 1) // 触发搜索
   }
 
   // 计算当前激活的筛选条件数量
