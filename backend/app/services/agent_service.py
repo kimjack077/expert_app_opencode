@@ -1731,6 +1731,56 @@ class AgentService:
             "recommendations": recommendations
         }
 
+    def _generate_fallback_briefing(self, briefing_data: dict) -> str:
+        """当 LLM 不可用时，生成基于规则的静态简报（降级方案）。"""
+        enterprise_name = briefing_data.get("enterprise_name", "企业")
+        risk_level = briefing_data.get("risk_level", "未知")
+        outstanding_issues = briefing_data.get("outstanding_issues", [])
+
+        # 风险等级描述
+        risk_desc = {
+            "A": "低风险",
+            "B": "中等风险",
+            "C": "较高风险",
+            "D": "高风险"
+        }.get(risk_level, "未知风险")
+
+        # 构建简报文本
+        briefing = f"""# 检查准备简报
+
+## 企业概况
+**{enterprise_name}**（风险等级：{risk_desc}）
+
+## 重点关注清单
+"""
+
+        if outstanding_issues:
+            briefing += "\n### 历史遗留问题（需重点核查）\n"
+            for i, issue in enumerate(outstanding_issues[:5], 1):
+                title = issue.get("title", "未知检查项")
+                problem = issue.get("problem", "无描述")
+                date = issue.get("date", "")
+                briefing += f"{i}. **{title}**\n"
+                briefing += f"   - 发现时间：{date}\n"
+                briefing += f"   - 问题描述：{problem[:100]}{'...' if len(problem) > 100 else ''}\n"
+                briefing += f"   - 建议：现场核查整改情况\n\n"
+        else:
+            briefing += "1. 按标准检查模板逐项核查\n"
+            briefing += "2. 重点关注设备运行状态和安全管理制度落实\n"
+            briefing += "3. 查阅相关资质证书的有效性\n"
+            briefing += "4. 检查人员培训和持证上岗情况\n"
+            briefing += "5. 核对应急预案和演练记录\n\n"
+
+        briefing += """## 需要携带的法规依据
+- 相关行业标准和规范
+- 企业资质管理办法
+- 安全生产相关法律法规
+
+---
+*本简报由系统规则生成（AI服务暂时不可用）*
+"""
+        return briefing
+
     async def _prepare_briefing(
         self,
         enterprise_id: str,
@@ -1860,17 +1910,15 @@ class AgentService:
             tokens_used = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
             if not briefing_text.strip():
                 error_text = "empty briefing content"
-                return {
-                    "error": "所选模型未返回简报内容，请切换模型后重试",
-                    "status_code": 502,
-                }
+                # 降级：模型返回空内容时，使用规则简报
+                print(f"[Agent] Model returned empty briefing, falling back to rule-based briefing")
+                briefing_text = self._generate_fallback_briefing(briefing)
         except Exception as e:
             error_text = f"{type(e).__name__}: {e}"
-            print(f"[Agent] Briefing generation failed: {type(e).__name__}")
-            return {
-                "error": "AI 简报服务暂时不可用，请切换模型或稍后重试",
-                "status_code": 502,
-            }
+            print(f"[Agent] Briefing generation failed: {type(e).__name__}, falling back to rule-based briefing")
+            # 降级：当 LLM 不可用时，生成基于规则的静态简报
+            briefing_text = self._generate_fallback_briefing(briefing)
+            tokens_used = 0  # 降级简报无 token 消耗
         finally:
             logged_model = served_model_name or selected_model
             if used_fallback and served_model_name:
