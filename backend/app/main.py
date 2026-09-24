@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -187,6 +189,19 @@ async def value_error_handler(request: Request, exc: ValueError):
         return _error_response(404, "资源不存在")
     print(f"[API] ValueError: {exc}")
     return _error_response(500, "服务器暂时无法处理该请求，请稍后重试")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    """路径中的非法 UUID 统一按资源不存在处理，其余校验仍保持 FastAPI 422。"""
+    invalid_path_uuid = any(
+        error.get("type") in {"uuid_parsing", "uuid_type"}
+        and tuple(error.get("loc", ()))[:1] == ("path",)
+        for error in exc.errors()
+    )
+    if invalid_path_uuid:
+        return _error_response(404, "资源不存在")
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(Exception)

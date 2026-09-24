@@ -18,6 +18,7 @@ from app.schemas import (
     RecordUpdate,
     RecordResponse,
     InspectionRecordDetail,
+    InspectionRecordItemCorrection,
     InspectionRecordItemCreate,
     InspectionRecordItemUpdate,
     InspectionRecordItemResponse,
@@ -814,6 +815,14 @@ async def update_record(
 
     # 更新字段
     update_data = record_data.model_dump(exclude_unset=True)
+    if record.status == "submitted" and update_data:
+        raise HTTPException(status_code=409, detail="该检查记录已提交，不可再修改")
+
+    # 提交只能走 POST /{record_id}/submit。禁止普通更新端点直接改变状态，
+    # 尤其不能把 submitted 回退成 draft/in_progress 绕过提交态只读保护。
+    if "status" in update_data:
+        raise HTTPException(status_code=422, detail="记录状态不能通过普通更新接口修改")
+
     for field, value in update_data.items():
         setattr(record, field, value)
 
@@ -929,9 +938,10 @@ async def submit_record(
     # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
     _ensure_record_access(record, current_user, write=True)
 
-    # BUG-12：已提交记录不允许重复提交
-    if record.status == "submitted" and not is_admin(current_user.role):
-        raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
+    # 提交是幂等状态转换。所有角色重复提交都返回冲突，避免管理员重复操作
+    # 重写 inspection_date，破坏首次提交时间留痕。
+    if record.status == "submitted":
+        raise HTTPException(status_code=409, detail="该检查记录已提交，请勿重复提交")
 
     # 完整性校验：结论 + 必填检查项
     blockers = await _collect_submit_blockers(db, record)
@@ -1007,8 +1017,9 @@ async def create_or_update_record_item(
     # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
     _ensure_record_access(record, current_user, write=True)
 
-    # BUG-12：已提交记录为只读，禁止再修改检查条目
-    if record.status == "submitted" and not is_admin(current_user.role):
+    # BUG-12：已提交记录为只读；管理员也应通过专用更正入口操作，
+    # 不能从检查项写入端点绕过提交态保护。
+    if record.status == "submitted":
         raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
 
     # 查找是否已存在（优先按 id 查找，其次按 template_item_id 查找）
@@ -1131,6 +1142,105 @@ async def create_or_update_record_item(
             "id": str(record_item.id),
             "template_item_id": str(record_item.template_item_id),
         }
+    )
+
+
+@router.patch("/{record_id}/items/{item_id}/correction", response_model=ApiResponse)
+async def correct_submitted_record_item(
+    record_id: str,
+    item_id: str,
+    correction: InspectionRecordItemCorrection,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """管理员更正已提交记录条目，并保留原因与字段差异审计。"""
+    record = await db.get(InspectionRecord, record_id)
+    if not record or record.is_deleted:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if record.status != "submitted":
+        raise HTTPException(status_code=409, detail="仅已提交记录需要使用更正接口")
+
+    result = await db.execute(
+        select(InspectionRecordItem).where(
+            InspectionRecordItem.record_id == record_id,
+            InspectionRecordItem.id == item_id,
+        )
+    )
+    record_item = result.scalar_one_or_none()
+    if not record_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    update_data = correction.model_dump(exclude_unset=True, exclude={"reason"})
+    if not update_data:
+        raise HTTPException(status_code=422, detail="请至少提供一个需要更正的字段")
+
+    check_type = record_item.item_check_type
+    template_item = None
+    if record_item.template_item_id:
+        template_item = await db.get(TemplateItem, record_item.template_item_id)
+        if not check_type and template_item:
+            check_type = resolve_check_type(template_item)
+
+    result_fields = {
+        "score_value",
+        "radio_value",
+        "multi_value",
+        "numeric_value",
+        "text_value",
+    }
+    if result_fields.intersection(update_data):
+        guard_errors = validate_item_payload(
+            check_type=check_type,
+            payload={field: update_data.get(field) for field in result_fields},
+            result_options=(
+                record_item.item_result_options
+                if record_item.item_result_options is not None
+                else (template_item.result_options if template_item else None)
+            ),
+            min_value=(
+                record_item.item_min_value
+                if record_item.item_min_value is not None
+                else (template_item.min_value if template_item else None)
+            ),
+            max_value=(
+                record_item.item_max_value
+                if record_item.item_max_value is not None
+                else (template_item.max_value if template_item else None)
+            ),
+        )
+        if guard_errors:
+            raise HTTPException(status_code=422, detail=guard_errors)
+
+    changes = {}
+    for field, value in update_data.items():
+        old_value = getattr(record_item, field)
+        if old_value != value:
+            changes[field] = {"old": old_value, "new": value}
+            setattr(record_item, field, value)
+
+    if not changes:
+        raise HTTPException(status_code=409, detail="更正内容与原记录一致")
+
+    record_item.updated_at = datetime.now(timezone.utc)
+    await AuditService.log_action(
+        db,
+        str(current_user.id),
+        current_user.username,
+        "correct_submitted_record_item",
+        "inspection_record_item",
+        item_id,
+        detail={
+            "record_id": str(record.id),
+            "reason": correction.reason.strip(),
+            "changes": changes,
+        },
+    )
+    await db.commit()
+    await db.refresh(record_item)
+
+    return make_response(
+        message="Record item corrected",
+        data={"id": str(record_item.id), "corrected_fields": list(changes)},
     )
 
 

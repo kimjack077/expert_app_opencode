@@ -4,7 +4,6 @@ import { PrinterOutlined, ShareAltOutlined, FilePdfOutlined, DownloadOutlined } 
 import dayjs from 'dayjs'
 import { recordApi } from '../../services/api'
 import { hasQuantifiedItems, resultLabel } from '../../utils/display'
-import { useAuthStore } from '@/stores/auth'
 
 interface Props {
     open: boolean
@@ -109,9 +108,8 @@ export default function InspectionReport({ open, record, onClose }: Props) {
         if (!content) return
         const styles = `
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Noto Serif SC', 'SimSun', serif; color: #111; background: #fff; padding: 20mm 18mm; }
+        body { font-family: 'SimSun', 'Songti SC', serif; color: #111; background: #fff; padding: 20mm 18mm; }
         .report-cover { text-align: center; padding: 24mm 0 20mm; border-bottom: 2px solid #222; margin-bottom: 10mm; }
         .report-cover h1 { font-size: 28pt; font-weight: 700; letter-spacing: 4px; margin-bottom: 6mm; }
         .report-cover .subtitle { font-size: 14pt; color: #555; }
@@ -162,17 +160,9 @@ export default function InspectionReport({ open, record, onClose }: Props) {
     const handleDownloadPdf = async () => {
         setDownloading(true)
         try {
-            const token = useAuthStore.getState().token || localStorage.getItem('token')
-            const response = await fetch(`/api/records/${record.id}/report/pdf`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                },
-            })
-            if (!response.ok) {
-                const errJson = await response.json().catch(() => null)
-                throw new Error(errJson?.detail || errJson?.message || '下载失败')
-            }
-            const blob = await response.blob()
+            // 统一请求层会自动携带令牌，并在令牌过期时刷新后重试。
+            // 不再使用原生 fetch，避免报告下载与其他接口的认证行为不一致。
+            const blob = await recordApi.downloadRecordReport(record.id) as unknown as Blob
             const url = window.URL.createObjectURL(blob)
             const a = document.createElement('a')
             a.href = url
@@ -184,7 +174,25 @@ export default function InspectionReport({ open, record, onClose }: Props) {
             message.success('PDF下载成功')
         } catch (error: any) {
             console.error('下载PDF失败:', error)
-            message.error(error.message || '下载PDF失败')
+            const status = error?.response?.status
+            let errorText = error?.response?.data?.detail || error?.response?.data?.message
+            if (error?.response?.data instanceof Blob) {
+                const body = await error.response.data.text().catch(() => '')
+                try {
+                    const parsed = JSON.parse(body)
+                    errorText = parsed?.detail || parsed?.message
+                } catch {
+                    // 非 JSON 错误体按状态码降级展示。
+                }
+            }
+            if (!errorText) {
+                errorText = status === 404
+                    ? '报告不存在或已被删除'
+                    : status === 500
+                        ? '报告生成失败，请稍后重试'
+                        : 'PDF下载失败，请稍后重试'
+            }
+            message.error(errorText)
         } finally {
             setDownloading(false)
         }

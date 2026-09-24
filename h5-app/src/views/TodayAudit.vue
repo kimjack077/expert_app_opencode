@@ -152,7 +152,7 @@
               <span class="task-row__context">{{ taskContextText(task) }}</span>
               <strong>{{ task.area_name || '审核任务' }}</strong>
               <small>{{ formatSchedule(task) }} · {{ systemText(task) }}</small>
-              <span class="record-progress-label">
+              <span v-if="task.status !== 'completed'" class="record-progress-label">
                 {{ taskProgressText(task) }} · {{ taskCompletionRate(task) }}%
               </span>
               <span v-if="hasTaskException(task)" class="exception-label">

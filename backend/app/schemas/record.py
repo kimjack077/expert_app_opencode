@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Literal, Optional, List
 from datetime import datetime
 from uuid import UUID
@@ -118,6 +118,28 @@ class InspectionRecordItemUpdate(BaseModel):
     rectification_suggestion: Optional[str] = None
     inspector_note: Optional[str] = None
     photos: Optional[List[str]] = None
+
+
+class InspectionRecordItemCorrection(InspectionRecordItemUpdate):
+    """管理员更正已提交记录条目时的请求体。"""
+
+    @field_validator("score_value", "numeric_value", mode="before")
+    @classmethod
+    def serialize_number(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float, Decimal)):
+            if not Decimal(str(value)).is_finite():
+                raise ValueError("数值必须为有限数字")
+            return str(value)
+        return value
+
+    reason: str = Field(
+        ...,
+        min_length=2,
+        max_length=500,
+        description="更正原因（写入审计日志）",
+    )
 
 
 class InspectionRecordItemResponse(InspectionRecordItemBase):

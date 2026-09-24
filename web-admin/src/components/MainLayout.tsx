@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import AgentSidebar from '@/components/agent/AgentSidebar'
 import { roleLabel } from '@/utils/display'
+import { isAdminRole } from '@/utils/roles'
 import { EasyAuditLogoIcon } from '@/components/brand/EasyAuditLogo'
 
 const { Header, Sider, Content } = Layout
@@ -45,7 +46,7 @@ export default function MainLayout() {
   }
 
   // 根据角色过滤菜单
-  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
+  const isAdmin = isAdminRole(user?.role)
 
   // 分组菜单：现场工作 / 项目管理 / 基础配置
   const menuItems = [

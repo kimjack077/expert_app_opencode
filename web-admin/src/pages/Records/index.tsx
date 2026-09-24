@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Button, Tag, Space, message, Modal, Drawer, Popconfirm, Alert, Collapse, Form, Input, Select, DatePicker, Row, Col, Badge, Tooltip } from 'antd'
+import { Card, Table, Button, Tag, Space, message, Modal, Drawer, Popconfirm, Alert, Collapse, Form, Input, Select, DatePicker, Row, Col, Badge, Tooltip, InputNumber } from 'antd'
 import { EyeOutlined, DeleteOutlined, CheckCircleOutlined, FileTextOutlined, FilePdfOutlined, SearchOutlined, ReloadOutlined, FilterOutlined, FolderFilled, UpOutlined, DownOutlined } from '@ant-design/icons'
 import { recordApi, templateApi } from '@/services/api'
 import dayjs from 'dayjs'
@@ -7,11 +7,15 @@ import { useNavigate } from 'react-router-dom'
 import InspectionReport from './InspectionReport'
 import { hasQuantifiedItems, resultLabel, resultTagColor } from '@/utils/display'
 import { isItemAssessed } from '@/utils/completion'
+import { useAuthStore } from '@/stores/auth'
 
 const { RangePicker } = DatePicker
 
 export default function Records() {
   const navigate = useNavigate()
+  const user = useAuthStore((state) => state.user)
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
+  const [correctionForm] = Form.useForm()
   const [records, setRecords] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -19,6 +23,9 @@ export default function Records() {
   const [detailDrawer, setDetailDrawer] = useState(false)
   const [reportRecord, setReportRecord] = useState<any>(null)
   const [reportVisible, setReportVisible] = useState(false)
+  const [correctionItem, setCorrectionItem] = useState<any>(null)
+  const [correctionVisible, setCorrectionVisible] = useState(false)
+  const [correctionSaving, setCorrectionSaving] = useState(false)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 })
   const [sorter, setSorter] = useState<{ field: string | null; order: 'ascend' | 'descend' | null }>({ field: null, order: null })
@@ -129,6 +136,40 @@ export default function Records() {
     } catch (error) {
       console.error('Failed to fetch record detail:', error)
       message.error('获取记录详情失败')
+    }
+  }
+
+  const openCorrection = (item: any) => {
+    setCorrectionItem(item)
+    correctionForm.setFieldsValue({
+      radio_value: item.radio_value ?? item.result ?? undefined,
+      score_value: item.score_value ?? undefined,
+      numeric_value: item.numeric_value ?? undefined,
+      text_value: item.text_value ?? undefined,
+      problem_description: item.problem_description ?? undefined,
+      inspector_note: item.inspector_note ?? undefined,
+      reason: '',
+    })
+    setCorrectionVisible(true)
+  }
+
+  const handleCorrection = async () => {
+    if (!selectedRecord || !correctionItem) return
+    try {
+      const values = await correctionForm.validateFields()
+      setCorrectionSaving(true)
+      await recordApi.correctSubmittedRecordItem(selectedRecord.id, correctionItem.id, values)
+      message.success('已更正并记录审计信息')
+      setCorrectionVisible(false)
+      setCorrectionItem(null)
+      const refreshed: any = await recordApi.getRecord(selectedRecord.id)
+      setSelectedRecord(refreshed.data)
+      fetchRecords()
+    } catch (error: any) {
+      if (error?.errorFields) return
+      message.error(error?.response?.data?.detail || '更正失败，请检查权限和输入内容')
+    } finally {
+      setCorrectionSaving(false)
     }
   }
 
@@ -799,6 +840,8 @@ export default function Records() {
                     item={item}
                     index={index}
                     isQuantified={selectedRecord.template?.is_quantified}
+                    canCorrect={isAdmin && selectedRecord.status === 'submitted'}
+                    onCorrect={openCorrection}
                   />
                 ))}
               </div>
@@ -806,6 +849,52 @@ export default function Records() {
           </div>
         )}
       </Drawer>
+      <Modal
+        title={`更正已提交记录：${correctionItem?.title || ''}`}
+        open={correctionVisible}
+        onCancel={() => {
+          setCorrectionVisible(false)
+          setCorrectionItem(null)
+          correctionForm.resetFields()
+        }}
+        onOk={handleCorrection}
+        confirmLoading={correctionSaving}
+        okText="提交更正"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="此操作会修改已提交记录，并将更正原因及字段变更写入审计日志。"
+        />
+        <Form form={correctionForm} layout="vertical">
+          {(correctionItem?.result_type === 'radio' || correctionItem?.result_type === 'audit_3level' || correctionItem?.radio_value || correctionItem?.result) && (
+            <Form.Item name="radio_value" label="检查结论">
+              <Select allowClear options={(correctionItem?.result_options?.options || correctionItem?.result_options || [
+                { value: 'pass', label: '合格' }, { value: 'fail', label: '不合格' }, { value: 'na', label: '不适用' },
+              ]).map((option: any) => typeof option === 'string' ? ({ value: option, label: option }) : option)} />
+            </Form.Item>
+          )}
+          {(correctionItem?.result_type === 'score' || correctionItem?.score_value !== null && correctionItem?.score_value !== undefined) && (
+            <Form.Item name="score_value" label="评分"><InputNumber style={{ width: '100%' }} /></Form.Item>
+          )}
+          {(correctionItem?.result_type === 'number' || correctionItem?.result_type === 'numeric' || correctionItem?.numeric_value !== null && correctionItem?.numeric_value !== undefined) && (
+            <Form.Item name="numeric_value" label={`数值${correctionItem?.unit ? `（${correctionItem.unit}）` : ''}`}>
+              <InputNumber style={{ width: '100%' }} min={correctionItem?.min_value} max={correctionItem?.max_value} />
+            </Form.Item>
+          )}
+          {(correctionItem?.result_type === 'text' || correctionItem?.text_value) && (
+            <Form.Item name="text_value" label="文本结果"><Input.TextArea rows={3} /></Form.Item>
+          )}
+          <Form.Item name="problem_description" label="问题描述"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="inspector_note" label="审核记录"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="reason" label="更正原因" rules={[{ required: true, min: 2, max: 500, message: '请填写 2–500 字的更正原因' }]}>
+            <Input.TextArea rows={3} maxLength={500} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
       <InspectionReport
         open={reportVisible}
         record={reportRecord}
@@ -820,11 +909,15 @@ function TreeItem({
   item,
   index,
   isQuantified,
+  canCorrect = false,
+  onCorrect,
   parentIndex = '',
 }: {
   item: any
   index: number
   isQuantified?: boolean
+  canCorrect?: boolean
+  onCorrect?: (item: any) => void
   parentIndex?: string
 }) {
   const hasChildren = item.children && item.children.length > 0
@@ -985,6 +1078,8 @@ function TreeItem({
                 item={child}
                 index={cIdx}
                 isQuantified={isQuantified}
+                canCorrect={canCorrect}
+                onCorrect={onCorrect}
                 parentIndex={currentIndex}
               />
             ))}
@@ -1129,6 +1224,17 @@ function TreeItem({
               <div style={{ display: 'flex', gap: 8 }}>
                 <b style={{ color: '#1e293b', flexShrink: 0 }}>审核记录：</b>
                 <span>{item.inspector_note}</span>
+              </div>
+            )}
+
+            {canCorrect && item.id && onCorrect && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                <Button size="small" type="primary" onClick={(event) => {
+                  event.stopPropagation()
+                  onCorrect(item)
+                }}>
+                  更正此项
+                </Button>
               </div>
             )}
 

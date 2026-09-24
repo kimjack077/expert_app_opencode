@@ -60,7 +60,7 @@ async def create_user(
 ):
     result = await db.execute(select(User).where(User.username == data.username))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Username already exists")
+        raise HTTPException(status_code=409, detail="Username already exists")
         
     user_data = data.model_dump()
     password = user_data.pop("password")
@@ -89,7 +89,7 @@ async def update_user(
     if "username" in update_data and update_data["username"] != user.username:
         result = await db.execute(select(User).where(User.username == update_data["username"]))
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Username already exists")
+            raise HTTPException(status_code=409, detail="Username already exists")
 
     if "password" in update_data:
         password = update_data.pop("password")

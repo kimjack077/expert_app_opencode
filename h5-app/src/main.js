@@ -11,27 +11,26 @@ import './styles/global.css'
 
 // 路由
 import Login from './views/Login.vue'
-import Home from './views/Home.vue'
-import Tasks from './views/Tasks.vue'
-import TaskDetail from './views/TaskDetail.vue'
-import InspectionExecution from './views/InspectionExecution.vue'
-import InspectList from './views/InspectList.vue'
-import InspectItem from './views/InspectItem.vue'
-import Profile from './views/Profile.vue'
-import Records from './views/Records.vue'
-import RecordDetail from './views/RecordDetail.vue'
-import SelectEnterprise from './views/SelectEnterprise.vue'
-import SelectTemplate from './views/SelectTemplate.vue'
-import Statistics from './views/Statistics.vue'
-import Settings from './views/Settings.vue'
-import About from './views/About.vue'
-import ReportPreview from './views/ReportPreview.vue'
-// 审核项目模块
-import AuditTasks from './views/AuditTasks.vue'
-import AuditTaskDetail from './views/AuditTaskDetail.vue'
-import TodayAudit from './views/TodayAudit.vue'
-import AiAuditSession from './views/AiAuditSession.vue'
-import AuditSessionResult from './views/AuditSessionResult.vue'
+
+const Home = () => import('./views/Home.vue')
+const Tasks = () => import('./views/Tasks.vue')
+const TaskDetail = () => import('./views/TaskDetail.vue')
+const InspectionExecution = () => import('./views/InspectionExecution.vue')
+const InspectItem = () => import('./views/InspectItem.vue')
+const Profile = () => import('./views/Profile.vue')
+const Records = () => import('./views/Records.vue')
+const RecordDetail = () => import('./views/RecordDetail.vue')
+const SelectEnterprise = () => import('./views/SelectEnterprise.vue')
+const SelectTemplate = () => import('./views/SelectTemplate.vue')
+const Statistics = () => import('./views/Statistics.vue')
+const Settings = () => import('./views/Settings.vue')
+const About = () => import('./views/About.vue')
+const ReportPreview = () => import('./views/ReportPreview.vue')
+const AuditTasks = () => import('./views/AuditTasks.vue')
+const AuditTaskDetail = () => import('./views/AuditTaskDetail.vue')
+const TodayAudit = () => import('./views/TodayAudit.vue')
+const AiAuditSession = () => import('./views/AiAuditSession.vue')
+const AuditSessionResult = () => import('./views/AuditSessionResult.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },

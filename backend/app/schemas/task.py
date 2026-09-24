@@ -60,6 +60,10 @@ class InspectionRecordBase(BaseModel):
     result_text: Optional[str] = None
     inspector_note: Optional[str] = None
 
+    # 任务填报是数据写入入口。未知字段若被静默忽略，会让调用方收到“成功”但
+    # 实际没有保存（例如误传 radio_value）；应直接返回 422 暴露契约错误。
+    model_config = ConfigDict(extra="forbid")
+
 
 class InspectionRecordCreate(InspectionRecordBase):
     pass
@@ -70,6 +74,8 @@ class InspectionRecordUpdate(BaseModel):
     result_value: Optional[str] = None
     result_text: Optional[str] = None
     inspector_note: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class InspectionRecordResponse(InspectionRecordBase):

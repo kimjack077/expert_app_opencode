@@ -8,7 +8,7 @@ from ..database import get_db
 from ..models import Industry
 from ..schemas.industry import IndustryCreate, IndustryUpdate, IndustryResponse, IndustryTreeResponse
 from ..schemas.common import ApiResponse
-from app.utils.security import get_current_user
+from app.utils.security import get_current_admin_user, get_current_user
 from app.utils.response import make_response
 
 router = APIRouter()
@@ -63,12 +63,19 @@ async def get_industry_tree(
 
 @router.get("", response_model=ApiResponse)
 async def get_industries(
+    skip: int = Query(0, ge=0),
+    limit: Optional[int] = Query(None, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    result = await db.execute(
-        select(Industry).where(Industry.is_deleted == False).order_by(Industry.sort_order.asc())  # noqa: E712
+    query = select(Industry).where(Industry.is_deleted == False).order_by(  # noqa: E712
+        Industry.sort_order.asc(), Industry.id.asc()
     )
+    if skip:
+        query = query.offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    result = await db.execute(query)
     industries = result.scalars().all()
     return make_response(data=[IndustryResponse.model_validate(i).model_dump() for i in industries])
 
@@ -87,7 +94,7 @@ async def get_industry(
 async def create_industry(
     data: IndustryCreate, 
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_admin_user)
 ):
     if data.code:
         result = await db.execute(select(Industry).where(Industry.code == data.code))
@@ -105,7 +112,7 @@ async def update_industry(
     industry_id: UUID, 
     data: IndustryUpdate, 
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_admin_user)
 ):
     ind = await db.get(Industry, industry_id)
     if not ind or ind.is_deleted:
@@ -128,7 +135,7 @@ async def update_industry(
 async def delete_industry(
     industry_id: UUID, 
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_admin_user)
 ):
     ind = await db.get(Industry, industry_id)
     if not ind or ind.is_deleted:

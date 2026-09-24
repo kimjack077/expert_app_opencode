@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Spin } from 'antd'
 import { useAuthStore } from '@/stores/auth'
-import MainLayout from '@/components/MainLayout'
+import { isAdminRole } from '@/utils/roles'
 
 const PageLoading = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: '360px' }}>
@@ -11,6 +11,7 @@ const PageLoading = () => (
 )
 
 const Login = lazy(() => import('@/pages/Login'))
+const MainLayout = lazy(() => import('@/components/MainLayout'))
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
 const Templates = lazy(() => import('@/pages/Templates'))
 const Tasks = lazy(() => import('@/pages/Tasks'))
@@ -43,6 +44,11 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((state) => state.user?.role)
+  return isAdminRole(role) ? <>{children}</> : <Navigate to="/dashboard" replace />
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -72,8 +78,8 @@ function App() {
             <Route path="enterprises" element={<Enterprises />} />
             <Route path="knowledge" element={<Knowledge />} />
             <Route path="records" element={<Records />} />
-            <Route path="users" element={<Users />} />
-            <Route path="industries" element={<Industries />} />
+            <Route path="users" element={<AdminRoute><Users /></AdminRoute>} />
+            <Route path="industries" element={<AdminRoute><Industries /></AdminRoute>} />
             {/* 审核项目模块 */}
             <Route path="audit-projects" element={<AuditProjects />} />
             <Route path="audit-projects/create" element={<CreateAuditProject />} />

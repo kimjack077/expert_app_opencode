@@ -13,7 +13,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import selectinload
 
 from app.models.record import InspectionRecord, InspectionRecordItem
@@ -188,9 +188,20 @@ class ReportService:
           供 PDF 表格分组、/report 接口输出与第三方集成使用（BUG-29）。
         - 兼容扁平结构（数据库模板快照中的扁平 items，无 children 嵌套但带 parent_id）。
         """
-        # 检查是否全部无嵌套 children 且非空
+        def loaded_children(item: Any) -> Any:
+            """只读取已经加载的 children，禁止在同步报告生成中触发 ORM IO。"""
+            if isinstance(item, dict):
+                return item.get('children')
+
+            state = inspect(item, raiseerr=False)
+            if state is not None and 'children' in state.unloaded:
+                return None
+            return getattr(item, 'children', None)
+
+        # 检查是否全部无嵌套 children 且非空。模板 ORM 查询返回的是全量扁平
+        # items，children 通常未预加载；此处必须避免读取该关系触发异步懒加载。
         has_nested_children = any(
-            bool(it.get('children') if isinstance(it, dict) else getattr(it, 'children', None))
+            bool(loaded_children(it))
             for it in items
         )
         if not has_nested_children and items:
@@ -255,10 +266,10 @@ class ReportService:
             # 兼容字典和 SQLAlchemy 对象
             if isinstance(item, dict):
                 is_category = item.get('is_category', False)
-                children = item.get('children')
+                children = loaded_children(item)
             else:
                 is_category = getattr(item, 'is_category', False)
-                children = getattr(item, 'children', None)
+                children = loaded_children(item)
                 # 将 SQLAlchemy 对象转换为字典
                 item = {
                     'id': str(getattr(item, 'id', '')),
@@ -679,8 +690,8 @@ class ReportService:
             'inspection': {
                 'date': record.inspection_date.isoformat() if record.inspection_date else None,
                 'inspector': record.inspector.full_name or record.inspector.username if record.inspector else '-',
-                'template_name': record.template.name if record.template else (record.template_snapshot.get('name') if record.template_snapshot else '-'),
-                'template_version': record.template.version if record.template else (record.template_snapshot.get('version') if record.template_snapshot else '-'),
+                'template_name': (record.template.name if record.template else None) or (record.template_snapshot or {}).get('name') or '-',
+                'template_version': (record.template.version if record.template else None) or (record.template_snapshot or {}).get('version') or '-',
                 'overall_result': record.overall_result,
                 'overall_result_text': self._get_result_text(record.overall_result),
                 'total_score': float(record.total_score) if record.total_score else None,
@@ -705,4 +716,3 @@ class ReportService:
 
 
 report_service = ReportService()
-

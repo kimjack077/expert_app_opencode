@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, Tree, message, Space, Tag, Radio, InputNumber, Switch, Empty, Row, Col, Tooltip, Divider, RadioChangeEvent, Alert } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, CheckCircleOutlined, FolderOutlined, FileTextOutlined, PlusCircleOutlined, SaveOutlined, CloseOutlined, ArrowLeftOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons'
 import { templateApi } from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
+import { canManageTemplates } from '@/utils/roles'
 import AiExtractModal from './AiExtractModal'
 import TemplateEditorV2 from './TemplateEditorV2'
 
@@ -73,6 +75,8 @@ interface TreeNodeData {
 }
 
 export default function Templates() {
+  const role = useAuthStore((state) => state.user?.role)
+  const canCreateTemplates = canManageTemplates(role)
   const [templates, setTemplates] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [templateModal, setTemplateModal] = useState(false)
@@ -102,6 +106,7 @@ export default function Templates() {
   // 旧版仅作兼容保留，可由 V2 内的「切换旧版」按钮进入。
   // 默认停在旧版会让演示人员点进来后看不到防呆效果。
   const [editorVersion, setEditorVersion] = useState<'v1' | 'v2'>('v2')
+  const canEditSelectedTemplate = canCreateTemplates && selectedTemplate?.can_edit === true
 
   useEffect(() => {
     fetchTemplates()
@@ -768,8 +773,8 @@ export default function Templates() {
           )}
         </div>
 
-        {/* 操作按钮 - 直接显示 */}
-        <Space size={4}>
+        {/* 当前用户对该模板只读时，不显示任何项目写入口。 */}
+        {canEditSelectedTemplate && <Space size={4}>
           <Tooltip title="添加子项">
             <Button
               type="text"
@@ -826,7 +831,7 @@ export default function Templates() {
               }}
             />
           </Tooltip>
-        </Space>
+        </Space>}
       </div>
     )
   }
@@ -853,7 +858,9 @@ export default function Templates() {
       dataIndex: 'version',
       key: 'version',
       render: (version: string) => (
-        <Tag color="default" style={{ borderRadius: 4 }}>v{version || '1.0'}</Tag>
+        <Tag color="default" style={{ borderRadius: 4 }}>
+          v{String(version || '1.0').replace(/^v/i, '')}
+        </Tag>
       )
     },
     {
@@ -899,60 +906,68 @@ export default function Templates() {
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: any) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => fetchTemplateDetail(record.id)}
-          >
-            编辑检查项
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
-          >
-            编辑信息
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<CopyOutlined />}
-            onClick={() => handleCopyTemplate(record.id)}
-          >
-            复制
-          </Button>
-          {!record.is_published && (
+      render: (_: any, record: any) => {
+        const canEditRecord = canCreateTemplates && record.can_edit === true
+
+        return (
+          <Space>
             <Button
               type="link"
               size="small"
-              icon={<CheckCircleOutlined />}
-              onClick={() => handlePublish(record.id)}
+              icon={<EyeOutlined />}
+              onClick={() => fetchTemplateDetail(record.id)}
             >
-              发布
+              {canEditRecord ? '编辑检查项' : '查看检查项'}
             </Button>
-          )}
-          <Button
-            type="link"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
-          >
-            删除
-          </Button>
-        </Space>
-      ),
+            {canEditRecord && <>
+              <Button
+                type="link"
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
+              >
+                编辑信息
+              </Button>
+              {!record.is_published && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<CheckCircleOutlined />}
+                  onClick={() => handlePublish(record.id)}
+                >
+                  发布
+                </Button>
+              )}
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleDelete(record.id)}
+              >
+                删除
+              </Button>
+            </>}
+            {canCreateTemplates && (
+              <Button
+                type="link"
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={() => handleCopyTemplate(record.id)}
+              >
+                复制
+              </Button>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
   // 如果选中了模板，显示模板详情页面
   if (selectedTemplate) {
     // 如果选择了新版编辑器
-    if (editorVersion === 'v2') {
+    if (editorVersion === 'v2' && canEditSelectedTemplate) {
       return (
         <TemplateEditorV2
           selectedTemplate={selectedTemplate}
@@ -1005,7 +1020,7 @@ export default function Templates() {
               </Tag>
             </div>
           </div>
-          <Space size={12}>
+          {canEditSelectedTemplate && <Space size={12}>
             <Radio.Group
               value={editorVersion}
               onChange={(e: RadioChangeEvent) => setEditorVersion(e.target.value)}
@@ -1061,7 +1076,7 @@ export default function Templates() {
                 marginLeft: 16
               }}
             />
-          </Space>
+          </Space>}
         </div>
 
         {selectedTemplate.description && (
@@ -1088,7 +1103,7 @@ export default function Templates() {
           style={{ flex: 1, overflow: 'auto' }} variant="borderless"
         >
           {/* 添加顶级项目表单 */}
-          {addingNodeId === 'root' && (
+          {canEditSelectedTemplate && addingNodeId === 'root' && (
             <div style={{
               background: '#e6f7ff',
               padding: '16px',
@@ -1214,7 +1229,7 @@ export default function Templates() {
               description="暂无检查项目"
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             >
-              <Button
+              {canEditSelectedTemplate && <Button
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={() => {
@@ -1223,7 +1238,7 @@ export default function Templates() {
                 }}
               >
                 添加第一个项目
-              </Button>
+              </Button>}
             </Empty>
           ) : null}
         </Card>
@@ -1247,7 +1262,7 @@ export default function Templates() {
     <div>
       <div className="page-header">
         <h1 className="page-title">检查模板管理</h1>
-        <Button
+        {canCreateTemplates && <Button
           type="primary"
           icon={<PlusOutlined />}
           onClick={() => setTemplateModal(true)}
@@ -1257,7 +1272,7 @@ export default function Templates() {
           }}
         >
           新建模板
-        </Button>
+        </Button>}
       </div>
 
       <Card variant="borderless">
@@ -1279,7 +1294,7 @@ export default function Templates() {
       {/* 创建/编辑模板弹窗 */}
       <Modal
         title={editingTemplate ? '编辑模板' : '新建模板'}
-        open={templateModal}
+        open={canCreateTemplates && templateModal}
         onCancel={() => {
           setTemplateModal(false)
           templateForm.resetFields()

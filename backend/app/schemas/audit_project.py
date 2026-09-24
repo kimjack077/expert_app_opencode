@@ -379,11 +379,13 @@ class AuditReportCreate(AuditReportBase):
     project_id 可选：以 URL 路径中的 project_id 为准（BUG-36）。
     传入时若与路径不一致将返回 422。
     """
+    model_config = ConfigDict(extra="forbid")
     project_id: Optional[UUID] = Field(None, description="所属审核项目 ID（可选，默认取路径参数）")
 
 
 class AuditReportUpdate(BaseModel):
     """更新审核报告"""
+    model_config = ConfigDict(extra="forbid")
     report_type: Optional[str] = None
     audit_summary: Optional[dict] = None
     system_evaluation: Optional[dict] = None

@@ -224,11 +224,15 @@ export const recordApi = {
   createRecordItem: (recordId: string, data: any) => api.post(`/records/${recordId}/items`, data),
   updateRecordItem: (recordId: string, itemId: string, data: any) =>
     api.put(`/records/${recordId}/items/${itemId}`, data),
+  correctSubmittedRecordItem: (recordId: string, itemId: string, data: any) =>
+    api.patch(`/records/${recordId}/items/${itemId}/correction`, data),
   deleteRecordItem: (recordId: string, itemId: string) =>
     api.delete(`/records/${recordId}/items/${itemId}`),
 
   // 报告相关
   getRecordReport: (recordId: string) => api.get(`/records/${recordId}/report`),
+  downloadRecordReport: (recordId: string) =>
+    api.get(`/records/${recordId}/report/pdf`, { responseType: 'blob' }),
 }
 
 export const aiExtractApi = {

@@ -27,6 +27,7 @@ from app.utils.category import (
 )
 from app.services import AuditService
 from app.utils.response import make_response
+from app.utils.roles import FIELD_ROLES, is_admin as is_admin_role
 
 router = APIRouter()
 
@@ -35,7 +36,7 @@ router = APIRouter()
 
 def is_admin(user: User) -> bool:
     """检查用户是否为管理员"""
-    return user.role in ["admin", "super_admin"]
+    return is_admin_role(user.role)
 
 
 def can_access_template(user: User, template: InspectionTemplate) -> bool:
@@ -57,7 +58,7 @@ def can_modify_template(user: User, template: InspectionTemplate) -> bool:
     if is_admin(user):
         return True
     # 专家只能修改自己创建的模板
-    return str(template.created_by) == str(user.id)
+    return user.role in FIELD_ROLES and str(template.created_by) == str(user.id)
 
 
 @router.get("", response_model=ApiResponse)
@@ -150,15 +151,18 @@ async def get_templates(
 async def create_template(
     template_data: InspectionTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),  # 允许所有登录用户创建模板
+    current_user: User = Depends(get_current_user),
 ):
     """创建检查模板
 
     权限规则：
-    - 所有登录用户都可以创建模板
+    - 管理员与专家可以创建模板；只读复核角色不可写入
     - 专家创建的模板默认为个人模板(is_public=False)
     - 管理员可以创建公共模板
     """
+    if not is_admin(current_user) and current_user.role not in FIELD_ROLES:
+        raise HTTPException(status_code=403, detail="只读复核角色不能创建模板")
+
     # 检查 code 唯一性（如果提供了 code）
     if template_data.code:
         existing = await db.execute(
@@ -210,10 +214,9 @@ async def get_template(
     - 额外：若专家被分配了使用该模板的检查任务，也允许查看（现场执行需要）
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # 已软删除的模板：若管理员或存在关联任务，仍允许只读加载（历史任务执行）
     from app.models.task import InspectionTask
 
     if current_user.role == "expert":
@@ -237,18 +240,14 @@ async def get_template(
         )
     has_related_task = related.scalar_one_or_none() is not None
 
-    if template.is_deleted and not (is_admin(current_user) or has_related_task):
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    # 权限检查（未删除模板仍走常规权限；历史任务关联可只读）
+    # 权限检查；关联任务只为有效模板补充现场执行只读权限。
     if not can_access_template(current_user, template) and not has_related_task:
         raise HTTPException(status_code=403, detail="您没有权限访问此模板")
 
-    # 加载所有检查项目（历史模板即使软删项也尽量返回，便于旧任务回放）
-    item_filters = [TemplateItem.template_id == template_id]
-    if not template.is_deleted:
-        item_filters.append(TemplateItem.is_deleted == False)  # noqa: E712
-    query = select(TemplateItem).where(*item_filters).order_by(TemplateItem.sort_order)
+    query = select(TemplateItem).where(
+        TemplateItem.template_id == template_id,
+        TemplateItem.is_deleted == False,  # noqa: E712
+    ).order_by(TemplateItem.sort_order)
     result = await db.execute(query)
     items = result.scalars().all()
 
@@ -429,14 +428,18 @@ async def copy_template(
     template_id: str,
     name: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),  # 允许所有登录用户复制模板
+    current_user: User = Depends(get_current_user),
 ):
     """复制模板（包含所有检查项目）
 
     权限规则：
     - 管理员：可以复制所有模板
     - 专家：只能复制公共模板和自己创建的模板
+    - 只读复核角色不可复制
     """
+    if not is_admin(current_user) and current_user.role not in FIELD_ROLES:
+        raise HTTPException(status_code=403, detail="只读复核角色不能复制模板")
+
     # 获取源模板
     source_template = await db.get(InspectionTemplate, template_id)
     if not source_template or source_template.is_deleted:
@@ -550,10 +553,9 @@ async def get_template_items(
 ):
     """获取模板的所有检查项目（树形结构）"""
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    # 与 get_template 口径一致：软删模板对管理员或存在关联任务的用户仍只读可访问
     from app.models.task import InspectionTask
 
     if current_user.role == "expert":
@@ -577,17 +579,13 @@ async def get_template_items(
         )
     has_related_task = related.scalar_one_or_none() is not None
 
-    if template.is_deleted and not (is_admin(current_user) or has_related_task):
-        raise HTTPException(status_code=404, detail="Template not found")
-
     if not can_access_template(current_user, template) and not has_related_task:
         raise HTTPException(status_code=403, detail="您没有权限访问此模板")
 
-    # 软删模板回放历史时保留检查项原始数据，与 get_template 口径一致
-    item_filters = [TemplateItem.template_id == template_id]
-    if not template.is_deleted:
-        item_filters.append(TemplateItem.is_deleted == False)  # noqa: E712
-    query = select(TemplateItem).where(*item_filters).order_by(TemplateItem.sort_order)
+    query = select(TemplateItem).where(
+        TemplateItem.template_id == template_id,
+        TemplateItem.is_deleted == False,  # noqa: E712
+    ).order_by(TemplateItem.sort_order)
     result = await db.execute(query)
     items = result.scalars().all()
 
@@ -628,7 +626,7 @@ async def create_item(
     - 若新增节点本身为分类目录，禁止录入检查项内容
     """
     template = await db.get(InspectionTemplate, template_id)
-    if not template:
+    if not template or template.is_deleted:
         raise HTTPException(status_code=404, detail="Template not found")
 
     # 权限检查
@@ -641,7 +639,11 @@ async def create_item(
     parent_item = None
     if item_data.parent_id:
         parent_item = await db.get(TemplateItem, item_data.parent_id)
-        if not parent_item or str(parent_item.template_id) != str(template_id):
+        if (
+            not parent_item
+            or parent_item.is_deleted
+            or str(parent_item.template_id) != str(template_id)
+        ):
             raise HTTPException(status_code=404, detail="父节点不存在或不属于当前模板")
 
     item = TemplateItem(
@@ -719,12 +721,14 @@ async def update_item(
     - 只要该节点下存在有效子项，一律强制为分类目录（is_category=True），禁止录入检查项内容
     """
     item = await db.get(TemplateItem, item_id)
-    if not item:
+    if not item or getattr(item, "is_deleted", False):
         raise HTTPException(status_code=404, detail="Item not found")
 
     # 获取所属模板进行权限检查
     template = await db.get(InspectionTemplate, item.template_id)
-    if template and not can_modify_template(current_user, template):
+    if not template or template.is_deleted:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限修改此模板的项目")
 
     # 检查该节点是否拥有子节点
@@ -773,7 +777,9 @@ async def delete_item(
 
     # 获取所属模板进行权限检查
     template = await db.get(InspectionTemplate, item.template_id)
-    if template and not can_modify_template(current_user, template):
+    if not template or template.is_deleted:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限删除此模板的项目")
 
     # 递归收集所有子孙节点 ID（BFS）

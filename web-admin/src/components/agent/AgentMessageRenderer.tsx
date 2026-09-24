@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Button, Card, Collapse, Tag, Tooltip, Typography, message as antdMessage } from 'antd'
 import {
   BookOutlined,
@@ -8,8 +9,9 @@ import {
   ToolOutlined,
 } from '@ant-design/icons'
 
-import MarkdownView from '@/components/common/MarkdownView'
 import type { AgentAction } from './AgentActionConfirm'
+
+const MarkdownView = lazy(() => import('@/components/common/MarkdownView'))
 
 const { Paragraph } = Typography
 
@@ -96,7 +98,9 @@ export default function AgentMessageRenderer({ message }: Props) {
 
       <div className={`message-bubble ${message.role}`}>
         {message.role === 'assistant' ? (
-          <MarkdownView content={message.content} />
+          <Suspense fallback={<div className="message-text">{message.content}</div>}>
+            <MarkdownView content={message.content} />
+          </Suspense>
         ) : (
           <div className="message-text">{message.content}</div>
         )}

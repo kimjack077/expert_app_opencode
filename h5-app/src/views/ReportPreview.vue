@@ -226,7 +226,9 @@
       </div>
     </div>
 
-    <van-empty v-else description="报告数据加载失败" />
+    <van-empty v-else :description="reportError || '报告数据加载失败'">
+      <van-button type="primary" size="small" @click="fetchReportData">重新加载</van-button>
+    </van-empty>
   </div>
 </template>
 
@@ -241,6 +243,7 @@ const router = useRouter()
 
 const loading = ref(true)
 const reportData = ref(null)
+const reportError = ref('')
 
 const getProgressColor = computed(() => {
   if (!reportData.value) return '#22c55e'
@@ -328,15 +331,38 @@ const getItemResultText = (item) => {
   return '—'
 }
 
+const getRequestErrorMessage = async (error, fallback) => {
+  const status = error?.response?.status
+  let data = error?.response?.data
+  if (data instanceof Blob) {
+    const body = await data.text().catch(() => '')
+    try {
+      data = JSON.parse(body)
+    } catch {
+      data = null
+    }
+  }
+  const detail = data?.detail || data?.message
+  if (typeof detail === 'string' && /[\u4e00-\u9fa5]/.test(detail)) {
+    return detail
+  }
+  if (status === 404) return '报告不存在或已被删除'
+  if (status === 500) return '报告生成失败，请稍后重试'
+  return fallback
+}
+
 const fetchReportData = async () => {
   loading.value = true
+  reportError.value = ''
   try {
     const recordId = route.params.id
-    const res = await request.get(`/records/${recordId}/report`)
+    const res = await request.get(`/records/${recordId}/report`, { skipErrorToast: true })
     reportData.value = res.data
   } catch (error) {
     console.error('获取报告数据失败:', error)
-    showToast('获取报告数据失败')
+    reportData.value = null
+    reportError.value = await getRequestErrorMessage(error, '报告加载失败，请稍后重试')
+    showToast(reportError.value)
   } finally {
     loading.value = false
   }
@@ -344,22 +370,13 @@ const fetchReportData = async () => {
 
 const downloadPdf = async () => {
   const recordId = route.params.id
-  const token = localStorage.getItem('token')
-  
   try {
     showToast('正在生成PDF...')
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-    const response = await fetch(`${API_BASE_URL}/api/records/${recordId}/report/pdf`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+    // 通过统一请求层下载，复用令牌自动刷新与 API 地址配置。
+    const blob = await request.get(`/records/${recordId}/report/pdf`, {
+      responseType: 'blob',
+      skipErrorToast: true,
     })
-    
-    if (!response.ok) {
-      throw new Error('下载失败')
-    }
-    
-    const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -372,7 +389,7 @@ const downloadPdf = async () => {
     showSuccessToast('PDF下载成功')
   } catch (error) {
     console.error('下载PDF失败:', error)
-    showToast('下载PDF失败')
+    showToast(await getRequestErrorMessage(error, 'PDF下载失败，请稍后重试'))
   }
 }
 
