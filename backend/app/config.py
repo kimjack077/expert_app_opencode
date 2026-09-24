@@ -104,9 +104,9 @@ class Settings(BaseSettings):
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
 
-    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + DeepSeek-V3.2 非推理模型）
+    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + DeepSeek-V4-Flash 推理模型）
     LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
-    LLM_BACKUP_MODEL: str = "DeepSeek-V3.2"
+    LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
