@@ -157,13 +157,16 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
    * 这里统一生成带标记的文本，读取侧按同一套标记解析，
    * 避免把任务备注原文误当成判定说明回显。
    */
-  const buildTaskRemark = (result: string, remarks: string) =>
-    [
+  const buildTaskRemark = (result: string, remarks: string) => {
+    // 先剥离已有的「判定说明:」前缀（可能多层累加），避免重复累加
+    const cleanRemarks = remarks.replace(/^(判定说明\s*[:：]\s*)+/gi, '').trim()
+    return [
       result ? `最终判定:${verdictToCn(result)}` : '',
-      remarks ? `判定说明:${remarks}` : '',
+      cleanRemarks ? `判定说明:${cleanRemarks}` : '',
     ]
       .filter(Boolean)
       .join(' | ')
+  }
 
   /** 从任务备注中解析出「最终判定 + 判定说明」；无标记时返回 null（不回填） */
   const parseTaskRemark = (raw: string) => {
