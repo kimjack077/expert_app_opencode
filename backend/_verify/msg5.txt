@@ -1,0 +1,9 @@
+fix(web-admin): 删除带 ?token= 的死代码并透传保存错误原因
+
+1) services/api.ts：删除 downloadReportPdf（src 下无任何引用，且把 access
+   token 拼进 URL query 存在泄漏风险；报告导出应走 Authorization 头）。
+2) components/InspectionForm：保存失败时透传后端 detail/message，原来无论
+   什么原因都只显示「保存失败」，用户无法自助定位。
+
+其中 (2) 为工作区既有未提交工作（非本轮性能优化任务产出），随本轮一并
+提交以便 GitHub 与线上部署内容一致。

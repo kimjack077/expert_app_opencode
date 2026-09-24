@@ -1,0 +1,112 @@
+>>> PAT='[v]ite preview'; n=$(pgrep -fc "$PAT" || true); if [ "${n:-0}" != "0" ]; then pkill -f "$PAT" || true; sleep 3; echo "已清理 ${n} 个遗留预览进程"; else echo '无遗留预览进程'; fi
+无遗留预览进程
+
+upload web-admin 137
+>>> cd /home/ubuntu/expert_app/web-admin && npm install
+
+up to date, audited 260 packages in 4s
+
+98 packages are looking for funding
+  run `npm fund` for details
+
+13 vulnerabilities (1 low, 6 moderate, 6 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+>>> cd /home/ubuntu/expert_app/web-admin && npm run build
+
+> efis-web-admin@1.0.0 build
+> tsc && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 3409 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                              1.29 kB │ gzip:   0.83 kB
+dist/assets/index-CT83M7km.css               9.30 kB │ gzip:   2.50 kB
+dist/assets/index-jToAI50L.css              11.39 kB │ gzip:   2.76 kB
+dist/assets/index-sijpI4d0.css              34.80 kB │ gzip:   6.87 kB
+dist/assets/completion-BQ1C_Cvq.js           1.54 kB │ gzip:   0.71 kB
+dist/assets/index-C3TTELqs.js                2.89 kB │ gzip:   1.40 kB
+dist/assets/index-5gdB90_5.js                3.69 kB │ gzip:   1.73 kB
+dist/assets/index-DYLZG8O_.js                4.31 kB │ gzip:   2.11 kB
+dist/assets/index-D80cZdXH.js                4.98 kB │ gzip:   2.34 kB
+dist/assets/auditProjectApi-CNyAZprq.js      5.19 kB │ gzip:   1.68 kB
+dist/assets/Create-C7kfqDb_.js               5.34 kB │ gzip:   2.50 kB
+dist/assets/index-Dybq3CL2.js                5.54 kB │ gzip:   2.52 kB
+dist/assets/index-DPA35fC6.js                6.10 kB │ gzip:   2.00 kB
+dist/assets/index-BOCI9apn.js                6.30 kB │ gzip:   2.59 kB
+dist/assets/index-pL2PBf0M.js                8.22 kB │ gzip:   2.76 kB
+dist/assets/index-OfTTKjFf.js                9.50 kB │ gzip:   3.56 kB
+dist/assets/index-Z2ldp5IT.js               11.52 kB │ gzip:   4.18 kB
+dist/assets/index-DZ0rHB85.js               12.36 kB │ gzip:   4.83 kB
+dist/assets/index-3vWSOsTy.js               12.38 kB │ gzip:   3.37 kB
+dist/assets/index-DuXtFlCX.js               12.57 kB │ gzip:   4.05 kB
+dist/assets/index-BVnGbjOa.js               15.34 kB │ gzip:   5.90 kB
+dist/assets/index-DpDAWeAH.js               18.77 kB │ gzip:   5.31 kB
+dist/assets/vendor-react-DsNQGZ_B.js        19.53 kB │ gzip:   7.38 kB
+dist/assets/index-CjunpCC9.js               23.82 kB │ gzip:   8.57 kB
+dist/assets/index-D5mRqQEn.js               26.02 kB │ gzip:   7.88 kB
+dist/assets/index-BMkz72f7.js               30.67 kB │ gzip:  17.12 kB
+dist/assets/index-ClAJzu6X.js               38.13 kB │ gzip:  11.94 kB
+dist/assets/vendor-utils-4ayCNER7.js        40.30 kB │ gzip:  16.15 kB
+dist/assets/vendor-icons-DycThdkb.js        54.59 kB │ gzip:  15.78 kB
+dist/assets/index-D9DnNR5X.js               62.59 kB │ gzip:  22.30 kB
+dist/assets/index-DcdGFfeU.js               64.71 kB │ gzip:  17.41 kB
+dist/assets/Detail-R5sAwUzP.js              74.06 kB │ gzip:  24.92 kB
+dist/assets/vendor-markdown-hJ2Nsw_r.js    157.76 kB │ gzip:  47.91 kB
+dist/assets/vendor-antd-CpKjsuUq.js      1,366.94 kB │ gzip: 427.89 kB
+✓ built in 11.22s
+
+stderr: 
+(!) Some chunks are larger than 1000 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+>>> cd /home/ubuntu/expert_app/web-admin/dist && want=$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' index.html | head -1 | cut -d/ -f2); got=$(curl -s --max-time 15 http://127.0.0.1:3000/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 | cut -d/ -f2); echo "  dist/index.html=$want  http=$got"; [ -n "$want" ] && [ "$want" = "$got" ] && echo '  [OK] web-admin 产物已生效' || { echo '  [FAIL] web-admin 线上产物与 dist 不一致'; exit 1; }
+  dist/index.html=index-D9DnNR5X.js  http=index-D9DnNR5X.js
+  [OK] web-admin 产物已生效
+
+upload h5-app 62
+>>> cd /home/ubuntu/expert_app/h5-app && npm run build
+
+> h5-app@0.0.0 build
+> run-p type-check "build-only {@}" --
+
+
+> h5-app@0.0.0 type-check
+> vue-tsc --build
+
+
+> h5-app@0.0.0 build-only
+> vite build
+
+vite v7.3.1 building client environment for production...
+transforming...
+✓ 418 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   1.07 kB │ gzip:   0.73 kB
+dist/assets/index-DX-2CA_l.css  344.19 kB │ gzip:  75.07 kB
+dist/assets/index-DOmwrn8-.js   577.48 kB │ gzip: 189.50 kB
+✓ built in 5.29s
+
+stderr: 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+
+>>> cd /home/ubuntu/expert_app/h5-app/dist && want=$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' index.html | head -1 | cut -d/ -f2); got=$(curl -s --max-time 15 http://127.0.0.1:5173/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1 | cut -d/ -f2); echo "  dist/index.html=$want  http=$got"; [ -n "$want" ] && [ "$want" = "$got" ] && echo '  [OK] h5-app 产物已生效' || { echo '  [FAIL] h5-app 线上产物与 dist 不一致'; exit 1; }
+  dist/index.html=index-DOmwrn8-.js  http=index-DOmwrn8-.js
+  [OK] h5-app 产物已生效
+
+DONE（前端由 nginx 静态托管，无需重启进程）

@@ -1,0 +1,14 @@
+--- 线上健康检查 ---
+health: 200 {"status":"healthy","timestamp":"2026-09-22T10:09:23.294558+00:00"}
+
+--- 关键接口（含分页 total 正确性）---
+200     118ms  /api/auth/me                 keys=['username', 'email', 'phone', 'full_name', 'id']  msg=success
+200     122ms  /api/templates               list[7]  msg=success
+200     245ms  /api/tasks                   total=34, items=20  msg=success
+200     102ms  /api/tasks?skip=20           total=34, items=14  msg=success
+200     171ms  /api/records                 total=40, items=20  msg=success
+200     166ms  /api/records?skip=20         total=40, items=20  msg=success
+200     102ms  /api/enterprises             total=8, items=8  msg=success
+200      96ms  /api/audit-projects          total=11, items=11  msg=success
+200     324ms  /api/users                   list[10]  msg=success
+200      83ms  /api/statistics/overview     total=11, items=0  msg=success

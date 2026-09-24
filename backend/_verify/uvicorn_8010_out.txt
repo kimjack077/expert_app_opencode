@@ -1,0 +1,12 @@
+[LLM] Initializing with base_url=https://token.sensenova.cn/v1, model=deepseek-v4-flash
+[LLM] API key configured: True
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[AIExtract-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+INFO:     127.0.0.1:43410 - "GET /api/templates/c742a65e-1828-4ae3-a8ca-833928a1043c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:9983 - "GET /api/templates/c742a65e-1828-4ae3-a8ca-833928a1043c/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40283 - "GET /api/templates/c742a65e-1828-4ae3-a8ca-833928a1043c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52014 - "GET /api/templates/c742a65e-1828-4ae3-a8ca-833928a1043c/items HTTP/1.1" 200 OK
+INFO:     127.0.0.1:31651 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized

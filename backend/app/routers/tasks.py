@@ -992,43 +992,51 @@ async def update_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    record = await db.get(InspectionRecord, record_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
+    try:
+        record = await db.get(InspectionRecord, record_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Record not found")
 
-    # 默认拒绝：父任务缺失（孤儿记录）时不能放行，否则任何登录用户都能改
-    task = await db.get(InspectionTask, record.task_id) if record.task_id else None
-    if not task:
-        raise HTTPException(status_code=404, detail="Parent task not found")
-    if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
-        raise HTTPException(status_code=403, detail="Not authorized")
+        # 默认拒绝：父任务缺失（孤儿记录）时不能放行，否则任何登录用户都能改
+        task = await db.get(InspectionTask, record.task_id) if record.task_id else None
+        if not task:
+            raise HTTPException(status_code=404, detail="Parent task not found")
+        if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
+            raise HTTPException(status_code=403, detail="Not authorized")
 
-    # BUG-11：已完成的填报记录默认只读，防止事后篡改。
-    # 复审/再认证场景由管理角色显式放行，同 create_or_update_record 的口径。
-    if task.status == "completed" and current_user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
+        # BUG-11：已完成的填报记录默认只读，防止事后篡改。
+        # 复审/再认证场景由管理角色显式放行，同 create_or_update_record 的口径。
+        if task.status == "completed" and current_user.role not in ADMIN_ROLES:
+            raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
 
-    update_data = record_data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(record, key, value)
-    if "result" in update_data or "result_value" in update_data:
-        record.result = await _normalize_numeric_verdict(
-            db,
-            record.template_item_id,
-            record.result,
-            record.result_value,
+        update_data = record_data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(record, key, value)
+        if "result" in update_data or "result_value" in update_data:
+            record.result = await _normalize_numeric_verdict(
+                db,
+                record.template_item_id,
+                record.result,
+                record.result_value,
+            )
+        record.updated_at = datetime.now(timezone.utc)
+
+        await db.commit()
+        await db.refresh(record)
+
+        # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
+        await _sync_reaudited_task_to_formal_record(db, task, current_user)
+
+        return make_response(
+            data=InspectionRecordResponse.model_validate(record).model_dump()
         )
-    record.updated_at = datetime.now(timezone.utc)
-
-    await db.commit()
-    await db.refresh(record)
-
-    # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
-    await _sync_reaudited_task_to_formal_record(db, task, current_user)
-
-    return make_response(
-        data=InspectionRecordResponse.model_validate(record).model_dump()
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"ERROR in update_record: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"更新记录失败: {str(e)}")
 
 
 @router.get("/{task_id}/summary", response_model=ApiResponse)

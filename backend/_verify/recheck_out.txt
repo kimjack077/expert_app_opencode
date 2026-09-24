@@ -1,0 +1,29 @@
+[污染邮箱（email 含 _deleted_ 或 +deleted）]
+    {'count': 25}
+[软删且仍启用的用户]
+    {'count': 0}
+[软删用户的 email 样本（验证新改名格式）]
+    {'email': 'test_user_1784265993@test.com_deleted_1784266037'}
+    {'email': 'crud_test@test.com_deleted_1784199570'}
+    {'email': 'sd_1784266882@test.com_deleted_1784266884'}
+    {'email': 'test_user_1784266806@test.com_deleted_1784266895'}
+    {'email': 'crud_1784266821@test.com_deleted_1784266896'}
+[孤儿计划项（父项目已软删）]
+    {'count': 27}
+[孤儿组员（父项目已软删）]
+    {'count': 40}
+[孤儿记录明细（父记录已软删）] ERROR: column i.is_deleted does not exist
+HINT:  Perhaps you meant to reference the column "r.is_deleted".
+[bak 备份表数量]
+    {'count': 14}
+[软删模板 c742a65e 的状态]
+    {'id': UUID('c742a65e-1828-4ae3-a8ca-833928a1043c'), 'name': 'ISO 9001质量管理体系审核检查表', 'is_deleted': True, 'deleted_at': datetime.datetime(2026, 7, 16, 10, 21, 32, 505546, tzinfo=datetime.timezone.utc)}
+[引用该模板的有效任务]
+    {'task_no': 'TASK-20260715-963288', 'is_deleted': False, 'status': 'completed', 'assigned_to': UUID('642db41e-6c3c-4ef3-bb8b-cb26ca0aab8c')}
+    {'task_no': 'TASK-20260326-961088', 'is_deleted': False, 'status': 'completed', 'assigned_to': UUID('4d7549ee-e8a9-4c85-be45-08a8b7635e01')}
+    {'task_no': 'TASK-20260326-799799', 'is_deleted': False, 'status': 'completed', 'assigned_to': UUID('4d7549ee-e8a9-4c85-be45-08a8b7635e01')}
+[有效用户清单（角色分布）]
+    {'role': 'admin', 'count': 2}
+    {'role': 'auditor', 'count': 1}
+    {'role': 'expert', 'count': 5}
+    {'role': 'super_admin', 'count': 2}

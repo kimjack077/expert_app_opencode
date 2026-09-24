@@ -1,0 +1,8 @@
+[LLM] Initializing with base_url=https://token.sensenova.cn/v1, model=deepseek-v4-flash
+[LLM] API key configured: True
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[AIExtract-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+[LLM-Fallback] backup configured: https://api.edgefn.net/v1 / DeepSeek-V3.2
+IMPORT_OK in 40.3s

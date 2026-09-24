@@ -1,0 +1,62 @@
+========================================================================
+EFIS 仅后端部署
+========================================================================
+  目标：ubuntu@49.232.213.79:22/home/ubuntu/expert_app/backend
+  模式：实际执行
+
+[1/5] 连接服务器……
+  连接成功
+
+[2/5] 上传 backend/ ……
+  上传完成：None 个文件
+
+  同步 backend/.env ……
+  backend/.env 同步完成
+1922580
+
+
+[3/5] 重启后端（重启前 PID：1922580）……
+000
+
+started
+
+1946792
+
+  已启动，PID：1946792
+  重启前 PID：1922580
+
+[4/5] 健康检查……
+000
+
+  等待中…… HTTP 000（第 1 次）
+000
+
+  等待中…… HTTP 000（第 2 次）
+200
+
+  http://localhost:8000/api/health → 200（第 3 次探测）
+
+[5/5] 校验部署内容……
+YES
+
+  [OK] 新文件已就位：app/utils/business_time.py
+YES
+
+  [OK] 新文件已就位：app/utils/item_write_guard.py
+5
+
+  [OK] app/utils/soft_delete.py 含标记 INDIRECT_CASCADE_POLICY（5 处）
+2
+
+  [OK] app/utils/item_stats.py 含标记 classify_item（2 处）
+1946792       00:12 /home/ubuntu/expert_app/backend/.venv/bin/python3 /home/ubuntu/expert_app/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  运行中的后端进程：1946792       00:12 /home/ubuntu/expert_app/backend/.venv/bin/python3 /home/ubuntu/expert_app/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+========================================================================
+部署完成，内容校验全部通过。
+========================================================================
+  后端 API:   http://49.232.213.79:8000
+  Web Admin:  http://49.232.213.79:3000   （未改动）
+  H5 App:     http://49.232.213.79:5173   （未改动）
+  后端日志:   /home/ubuntu/expert_app/backend.log

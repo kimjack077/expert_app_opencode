@@ -1,0 +1,35 @@
+import time: self [us] | cumulative | imported package
+import time:       105 |        105 | winreg
+import time:       180 |        180 |   _io
+import time:        56 |         56 |   marshal
+import time:       175 |        175 |   nt
+import time:      4098 |       4508 | _frozen_importlib_external
+import time:       783 |        783 |   time
+import time:      1392 |       2174 | zipimport
+import time:        51 |         51 |     _codecs
+import time:      1777 |       1827 |   codecs
+import time:      1355 |       1355 |   encodings.aliases
+import time:      5037 |       8219 | encodings
+import time:       605 |        605 | encodings.utf_8
+import time:        32 |         32 |   _codecs_cn
+import time:        58 |         58 |   _multibytecodec
+import time:      2049 |       2138 | encodings.gbk
+import time:        40 |         40 | _signal
+import time:        26 |         26 |     _abc
+import time:       421 |        446 |   abc
+import time:       537 |        982 | io
+import time:       105 |        105 |       _stat
+import time:       317 |        422 |     stat
+import time:       548 |        548 |     _collections_abc
+import time:        30 |         30 |       genericpath
+import time:        77 |         77 |       _winapi
+import time:       791 |        897 |     ntpath
+import time:       885 |       2750 |   os
+import time:        70 |         70 |   _sitebuiltins
+import time:      2709 |       2709 |   _distutils_hack
+import time:       586 |        586 |   sitecustomize
+import time:      2923 |       9035 | site
+  File "<string>", line 1
+    from
+        ^
+SyntaxError: invalid syntax

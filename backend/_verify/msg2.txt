@@ -1,0 +1,4 @@
+chore(web-admin): 删除无调用方且用 ?token= 拼 URL 的 downloadReportPdf 死代码
+
+该函数在 src 下无任何引用，且把 access token 拼进 URL query，存在泄漏风险
+（报告导出应走 Authorization 头）。同文件的 getRecordReport 保留。

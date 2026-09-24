@@ -1,0 +1,10 @@
+   1628 ms  200  total=list[7]  /api/templates
+    384 ms  200  total=list[7]  /api/templates
+   7066 ms  200  total=34  /api/tasks
+    243 ms  200  total=40  /api/records
+   2121 ms  200  total=8  /api/enterprises
+   1069 ms  200  total=11  /api/audit-projects
+    684 ms  200  total=list[10]  /api/users
+   1077 ms  200  total=11  /api/statistics/overview
+    483 ms  200  total=34  /api/tasks?skip=20
+   1229 ms  200  total=40  /api/records?skip=20

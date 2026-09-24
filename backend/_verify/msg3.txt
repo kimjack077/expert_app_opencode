@@ -1,0 +1,9 @@
+feat(records): 日常检查任务完成时同步写入 inspection_records
+
+「检查记录与报告」菜单读的是 inspection_records，此前完成任务只写
+audit_area_records，导致日常检查完成后该菜单仍为空。现在同步创建/更新
+inspection_record（以 remarks 中的 [task:<id>] 标记幂等去重），并把区域
+记录条目挂到该记录下。
+
+注：本改动为工作区既有未提交工作（非本次性能优化任务产出），随本轮一并
+提交以便 GitHub 与线上部署内容一致。

@@ -1,0 +1,20 @@
+perf(api): 列表改窗口函数计数、鉴权用户进程内缓存、连接池探活按回环自动判定
+
+本地开发连公网远程库（单次往返实测 50~800ms）时，每个请求要串行打好几次
+DB 往返，是所有列表「转一圈才出来」的根因。本次压缩每次请求的往返次数：
+
+1) 列表 + 总数合并为窗口函数 count(*) over()，任何页都只 1 次 DB 往返
+   （tasks / records / enterprises / audit-projects；此前的
+   「skip==0 多查 1 条」试探只在首页且数据不满一页时才省一次 COUNT）。
+2) get_current_user 等三个鉴权入口加进程内短 TTL 缓存（默认 60s，可用
+   AUTH_USER_CACHE_TTL_SECONDS=0 关闭），命中时构造全新瞬态实例，避免并发
+   共享同一对象。登出 / 改密 / 改角色 / 删用户会主动失效缓存；auth.py 中
+   对 current_user 的两处写入改为先 db.get 取托管实例，防止瞬态对象赋值
+   不落库。
+3) pool_pre_ping 改为按连接目标自动判定：回环（线上同机，成本 <1ms）→ 开启
+   保留 BUG-17 断连防护；远程（本地开发）→ 关闭，省掉每请求一次白付往返。
+   可用 DB_POOL_PRE_PING 显式覆盖。
+
+实测（同一时刻新旧对比）：/api/templates 第二次请求 9148ms→287ms，
+/api/records 4404ms→243ms，/api/tasks?skip=20 3677ms→483ms，各列表 total
+与旧实现完全一致。pytest -m "contract or unit" 191 passed。
