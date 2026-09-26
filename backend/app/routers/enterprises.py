@@ -218,6 +218,11 @@ async def create_qualification(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
+    # 先检查父企业是否存在且未删除
+    enterprise = await db.get(Enterprise, enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
     qual_data.enterprise_id = enterprise_id
     qualification = EnterpriseQualification(**qual_data.model_dump())
     db.add(qualification)
@@ -297,6 +302,11 @@ async def create_product(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
+    # 先检查父企业是否存在且未删除
+    enterprise = await db.get(Enterprise, enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
     product_data.enterprise_id = enterprise_id
     product = EnterpriseProduct(**product_data.model_dump())
     db.add(product)

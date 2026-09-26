@@ -95,14 +95,21 @@ async def _recalculate_task_statistics(
             updated_remarks
         )
 
-        # 如果有不符合项，确保判定结论正确
+        # 根据不符合项数量更新判定结论
         if fail_count > 0:
-            # 如果原来写的是"均符合要求"，替换为实际情况
+            # 有不符合项：将"均符合要求"替换为实际情况
             if '均符合要求' in updated_remarks:
                 updated_remarks = updated_remarks.replace(
                     '均符合要求',
                     f'发现 {fail_count} 项不符合要求'
                 )
+        else:
+            # 无不符合项：将"发现X项不符合要求"还原为"均符合要求"
+            updated_remarks = re.sub(
+                r'发现\s*\d+\s*项不符合要求',
+                '均符合要求',
+                updated_remarks
+            )
 
         task.remarks = updated_remarks
 
