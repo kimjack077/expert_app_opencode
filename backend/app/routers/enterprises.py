@@ -191,6 +191,11 @@ async def get_qualifications(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 先检查父企业是否存在且未删除
+    enterprise = await db.get(Enterprise, enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
     result = await db.execute(
         select(EnterpriseQualification)
         .where(
@@ -268,6 +273,11 @@ async def get_products(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 先检查父企业是否存在且未删除
+    enterprise = await db.get(Enterprise, enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
     result = await db.execute(
         select(EnterpriseProduct)
         .where(EnterpriseProduct.enterprise_id == enterprise_id)

@@ -47,6 +47,66 @@ router = APIRouter()
 
 
 
+async def _recalculate_task_statistics(
+    db: AsyncSession,
+    task: InspectionTask,
+) -> None:
+    """重新计算任务的统计数据并更新remarks。
+
+    当记录被更新时调用，确保remarks中的统计数据与实际记录保持一致。
+    """
+    # 查询该任务的所有记录
+    result = await db.execute(
+        select(TaskItemRecord)
+        .where(TaskItemRecord.task_id == task.id)
+    )
+    records = result.scalars().all()
+
+    if not records:
+        return
+
+    # 统计各类结果
+    pass_count = sum(1 for r in records if r.result == "pass")
+    fail_count = sum(1 for r in records if r.result == "fail")
+    na_count = sum(1 for r in records if r.result == "na")
+    total = len(records)
+
+    # 如果remarks存在且包含统计信息，则更新统计部分
+    if task.remarks:
+        # 更新统计数据：替换"符合项 X 项，不符合项 Y 项"的模式
+        updated_remarks = re.sub(
+            r'符合项\s*\d+\s*项',
+            f'符合项 {pass_count} 项',
+            task.remarks
+        )
+        updated_remarks = re.sub(
+            r'不符合项\s*\d+\s*项',
+            f'不符合项 {fail_count} 项',
+            updated_remarks
+        )
+        updated_remarks = re.sub(
+            r'不适用项\s*\d+\s*项',
+            f'不适用项 {na_count} 项',
+            updated_remarks
+        )
+        updated_remarks = re.sub(
+            r'共检查\s*\d+\s*项',
+            f'共检查 {total} 项',
+            updated_remarks
+        )
+
+        # 如果有不符合项，确保判定结论正确
+        if fail_count > 0:
+            # 如果原来写的是"均符合要求"，替换为实际情况
+            if '均符合要求' in updated_remarks:
+                updated_remarks = updated_remarks.replace(
+                    '均符合要求',
+                    f'发现 {fail_count} 项不符合要求'
+                )
+
+        task.remarks = updated_remarks
+
+
 async def _normalize_numeric_verdict(
     db: AsyncSession,
     template_item_id: Optional[str],
@@ -967,6 +1027,10 @@ async def create_or_update_record(
         await db.commit()
         await db.refresh(record)
 
+        # 重新计算任务统计数据
+        await _recalculate_task_statistics(db, task)
+        await db.commit()
+
         # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
         await _sync_reaudited_task_to_formal_record(db, task, current_user)
 
@@ -992,6 +1056,10 @@ async def create_or_update_record(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+
+    # 重新计算任务统计数据
+    await _recalculate_task_statistics(db, task)
+    await db.commit()
 
     # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
     await _sync_reaudited_task_to_formal_record(db, task, current_user)
