@@ -221,6 +221,7 @@ class RAGService:
 
         # Only searchable global knowledge: not soft-deleted, and currently effective.
         # Embeddings for deleted docs may still exist until cleaned up — filter at query time.
+        # Performance optimization: Limit initial fetch to reduce memory load
         stmt = (
             select(KnowledgeEmbedding)
             .join(
@@ -232,6 +233,7 @@ class RAGService:
                 KnowledgeDocument.status == "effective",
             )
             .options(selectinload(KnowledgeEmbedding.document))
+            .limit(500)  # Limit to prevent full table scan on large datasets
         )
 
         if doc_type:

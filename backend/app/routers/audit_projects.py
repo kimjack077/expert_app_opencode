@@ -200,6 +200,11 @@ async def create_audit_project(
     current_user: User = Depends(get_current_user),
 ):
     """创建审核项目"""
+    # 检查企业是否存在且未删除
+    enterprise = await db.get(Enterprise, project.enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
     # 生成项目编号
     project_no = f"AUDIT-{datetime.now().strftime('%Y%m%d')}-{datetime.now().microsecond}"
 

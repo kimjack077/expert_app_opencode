@@ -1,6 +1,6 @@
 from typing import Optional, List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, or_, func, Integer, case
 from sqlalchemy.orm import selectinload
@@ -63,8 +63,8 @@ def can_modify_template(user: User, template: InspectionTemplate) -> bool:
 
 @router.get("", response_model=ApiResponse)
 async def get_templates(
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
     category: Optional[str] = None,
     is_published: Optional[bool] = None,
     db: AsyncSession = Depends(get_db),

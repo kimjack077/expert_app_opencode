@@ -324,6 +324,12 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
+    # 如果指定了模板，检查模板是否存在且未删除
+    if task_data.template_id:
+        template = await db.get(InspectionTemplate, task_data.template_id)
+        if not template or template.is_deleted:
+            raise HTTPException(status_code=404, detail="Template not found")
+
     # 不能用 count(*)+1：并发创建会生成相同编号（且会把软删行计入，删除后编号回退重复）。
     # 改用随机短码，保证唯一且无需额外往返。
     task_no = f"TASK-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid4().hex[:6].upper()}"
