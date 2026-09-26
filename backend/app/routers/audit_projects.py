@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select, and_, or_, func, case
@@ -65,6 +65,8 @@ from app.schemas.audit_project import (
     CommunicationMeetingCreate,
     CommunicationMeetingUpdate,
     CommunicationMeetingResponse,
+    AiNcSuggestRequest,
+    AiEvidenceEvaluationRequest,
 )
 from app.utils.security import get_current_user, get_current_user_optional, get_user_from_token
 from app.utils.item_stats import classify_item
@@ -1408,16 +1410,23 @@ async def ai_prepare_audit_stream(
 @router.post("/{project_id}/ai/evaluate-evidence")
 async def ai_evaluate_evidence(
     project_id: UUID,
-    evidence: str,
-    clause_no: str,
-    certification_system: str,
+    evidence: Optional[str] = Query(None, description="审核现场证据（兼容 query 参数）"),
+    clause_no: Optional[str] = Query(None, description="标准条款号（兼容 query 参数）"),
+    certification_system: Optional[str] = Query(None, description="认证体系代码（兼容 query 参数）"),
+    body: Optional[AiEvidenceEvaluationRequest] = Body(None, description="请求体参数"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """AI 证据充分性评估"""
+    """AI 证据充分性评估（同时兼容 JSON Body 与 Query 参数）"""
     await ensure_project_access(db, project_id, current_user)
+    ev = (body.evidence if body and body.evidence is not None else None) or evidence
+    cl = (body.clause_no if body and body.clause_no is not None else None) or clause_no
+    cs = (body.certification_system if body and body.certification_system is not None else None) or certification_system
+    if not ev or not cl or not cs:
+        raise HTTPException(status_code=422, detail="缺少必需参数: evidence, clause_no, certification_system")
+
     try:
-        result = await evaluate_evidence_with_ai(db, evidence, clause_no, certification_system, user_id=str(current_user.id))
+        result = await evaluate_evidence_with_ai(db, ev, cl, cs, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")
@@ -1472,16 +1481,23 @@ async def ai_generate_report_stream(
 @router.post("/{project_id}/ai/suggest-nc")
 async def ai_suggest_nonconformity(
     project_id: UUID,
-    evidence: str,
-    clause_no: str,
-    certification_system: str,
+    evidence: Optional[str] = Query(None, description="审核现场证据（兼容 query 参数）"),
+    clause_no: Optional[str] = Query(None, description="标准条款号（兼容 query 参数）"),
+    certification_system: Optional[str] = Query(None, description="认证体系代码（兼容 query 参数）"),
+    body: Optional[AiNcSuggestRequest] = Body(None, description="请求体参数"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """AI 建议不符合项"""
+    """AI 建议不符合项（同时兼容 JSON Body 与 Query 参数）"""
     await ensure_project_access(db, project_id, current_user)
+    ev = (body.evidence if body and body.evidence is not None else None) or evidence
+    cl = (body.clause_no if body and body.clause_no is not None else None) or clause_no
+    cs = (body.certification_system if body and body.certification_system is not None else None) or certification_system
+    if not ev or not cl or not cs:
+        raise HTTPException(status_code=422, detail="缺少必需参数: evidence, clause_no, certification_system")
+
     try:
-        result = await suggest_nc_with_ai(db, evidence, clause_no, certification_system, user_id=str(current_user.id))
+        result = await suggest_nc_with_ai(db, ev, cl, cs, user_id=str(current_user.id))
         return {"code": 200, "message": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 服务失败: {str(e)}")

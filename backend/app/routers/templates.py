@@ -185,7 +185,7 @@ async def create_template(
             )
         )
         if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail=f"模板编码 '{template_data.code}' 已存在")
+            raise HTTPException(status_code=409, detail=f"模板编码 '{template_data.code}' 已存在")
 
     template = InspectionTemplate(
         name=template_data.name,

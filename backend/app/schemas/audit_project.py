@@ -463,3 +463,17 @@ class CommunicationMeetingResponse(CommunicationMeetingBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AiNcSuggestRequest(BaseModel):
+    """AI 不符合项建议请求体"""
+    evidence: Optional[str] = Field(None, description="审核现场证据")
+    clause_no: Optional[str] = Field(None, description="标准条款号")
+    certification_system: Optional[str] = Field(None, description="认证体系代码")
+
+
+class AiEvidenceEvaluationRequest(BaseModel):
+    """AI 证据评估请求体"""
+    evidence: Optional[str] = Field(None, description="审核现场证据")
+    clause_no: Optional[str] = Field(None, description="标准条款号")
+    certification_system: Optional[str] = Field(None, description="认证体系代码")

@@ -11,7 +11,7 @@ This service provides:
 import json
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, Integer
 from sqlalchemy.orm import selectinload
 
 from app.config import settings

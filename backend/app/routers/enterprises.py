@@ -326,6 +326,33 @@ async def update_product(
     return make_response(data=ProductResponse.model_validate(product).model_dump())
 
 
+@router.delete("/{enterprise_id}/products/{product_id}", response_model=ApiResponse)
+async def delete_product(
+    enterprise_id: str,
+    product_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """删除企业关联产品服务"""
+    enterprise = await db.get(Enterprise, enterprise_id)
+    if not enterprise or enterprise.is_deleted:
+        raise HTTPException(status_code=404, detail="Enterprise not found")
+
+    result = await db.execute(
+        select(EnterpriseProduct).where(
+            EnterpriseProduct.id == product_id,
+            EnterpriseProduct.enterprise_id == enterprise_id,
+        )
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    await db.delete(product)
+    await db.commit()
+    return make_response(message="Product deleted successfully")
+
+
 @router.get("/rectifications/", response_model=ApiResponse)
 async def get_rectifications(
     enterprise_id: Optional[str] = Query(None),
