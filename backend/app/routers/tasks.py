@@ -160,7 +160,13 @@ async def get_tasks(
         conditions.append(InspectionTask.assigned_to == current_user.id)
 
     if status:
-        conditions.append(InspectionTask.status == status)
+        if status == "todo":
+            conditions.append(InspectionTask.status.in_(["pending", "in_progress"]))
+        elif "," in status:
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            conditions.append(InspectionTask.status.in_(statuses))
+        else:
+            conditions.append(InspectionTask.status == status)
 
     base_query = (
         select(InspectionTask)
@@ -802,15 +808,17 @@ async def get_task_records(
     payload = []
     for r in records:
         ti = r.template_item
-        if ti is not None:
-            # 分类目录一律不参与检查项统计与展示：
-            # 不论历史上是否被误填过结果，都不能作为检查项返回，
-            # 否则条目总数会与模板叶子口径对不上（P0-02 / P0-03）。
-            if is_category_node(ti, template_parent_ids):
-                continue
-            # 模板条目已被软删除且本记录未填写 → 孤儿空记录，一并剔除
-            if ti.is_deleted and not r.result:
-                continue
+        if ti is None:
+            # 孤儿记录（关联模板项不存在或被删除）：直接跳过，避免引发树遍历死锁或前端白屏
+            continue
+        # 分类目录一律不参与检查项统计与展示：
+        # 不论历史上是否被误填过结果，都不能作为检查项返回，
+        # 否则条目总数会与模板叶子口径对不上（P0-02 / P0-03）。
+        if is_category_node(ti, template_parent_ids):
+            continue
+        # 模板条目已被软删除且本记录未填写 → 孤儿空记录，一并剔除
+        if ti.is_deleted and not r.result:
+            continue
 
         item = InspectionRecordResponse.model_validate(r).model_dump()
         # 附件（现场照片等）随记录一起返回，供前端回显
@@ -882,7 +890,9 @@ async def get_task_records(
     def _walk(parent_key):
         for node in children_by_parent.get(parent_key, []):
             ordered.append(node)
-            _walk(_item_meta(node).get("id"))
+            child_id = _item_meta(node).get("id")
+            if child_id is not None:
+                _walk(child_id)
 
     _walk(None)
 
@@ -922,41 +932,47 @@ async def create_or_update_record(
     if task.status == "completed" and current_user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=409, detail="任务已完成，填报记录不可再修改")
 
-    if record_data.template_item_id:
-        result = await db.execute(
-            select(InspectionRecord).where(
-                InspectionRecord.task_id == task_id,
-                InspectionRecord.template_item_id == record_data.template_item_id,
-            )
+    if not record_data.template_item_id:
+        raise HTTPException(status_code=422, detail="template_item_id is required")
+
+    tpl_item = await db.get(TemplateItem, record_data.template_item_id)
+    if not tpl_item or tpl_item.is_deleted:
+        raise HTTPException(status_code=404, detail="Template item not found")
+
+    result = await db.execute(
+        select(InspectionRecord).where(
+            InspectionRecord.task_id == task_id,
+            InspectionRecord.template_item_id == record_data.template_item_id,
         )
-        record = result.scalar_one_or_none()
+    )
+    record = result.scalar_one_or_none()
 
-        if record:
-            if record_data.result is not None:
-                record.result = await _normalize_numeric_verdict(
-                    db,
-                    record_data.template_item_id or record.template_item_id,
-                    record_data.result,
-                    record_data.result_value
-                    if record_data.result_value is not None
-                    else record.result_value,
-                )
-            if record_data.result_value is not None:
-                record.result_value = record_data.result_value
-            if record_data.result_text is not None:
-                record.result_text = record_data.result_text
-            if record_data.inspector_note is not None:
-                record.inspector_note = record_data.inspector_note
-            record.updated_at = datetime.now(timezone.utc)
-            await db.commit()
-            await db.refresh(record)
-
-            # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
-            await _sync_reaudited_task_to_formal_record(db, task, current_user)
-
-            return make_response(
-                data=InspectionRecordResponse.model_validate(record).model_dump()
+    if record:
+        if record_data.result is not None:
+            record.result = await _normalize_numeric_verdict(
+                db,
+                record_data.template_item_id or record.template_item_id,
+                record_data.result,
+                record_data.result_value
+                if record_data.result_value is not None
+                else record.result_value,
             )
+        if record_data.result_value is not None:
+            record.result_value = record_data.result_value
+        if record_data.result_text is not None:
+            record.result_text = record_data.result_text
+        if record_data.inspector_note is not None:
+            record.inspector_note = record_data.inspector_note
+        record.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(record)
+
+        # 复审场景：已完成任务的填报被修改后，同步回正式审核记录
+        await _sync_reaudited_task_to_formal_record(db, task, current_user)
+
+        return make_response(
+            data=InspectionRecordResponse.model_validate(record).model_dump()
+        )
 
     normalized_result = await _normalize_numeric_verdict(
         db,

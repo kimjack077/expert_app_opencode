@@ -1422,8 +1422,21 @@ async def ai_evaluate_evidence(
     ev = (body.evidence if body and body.evidence is not None else None) or evidence
     cl = (body.clause_no if body and body.clause_no is not None else None) or clause_no
     cs = (body.certification_system if body and body.certification_system is not None else None) or certification_system
-    if not ev or not cl or not cs:
-        raise HTTPException(status_code=422, detail="缺少必需参数: evidence, clause_no, certification_system")
+    missing = []
+    if not ev:
+        missing.append("evidence")
+    if not cl:
+        missing.append("clause_no")
+    if not cs:
+        missing.append("certification_system")
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {"loc": ["body" if body else "query", f], "msg": "Field required", "type": "missing"}
+                for f in missing
+            ],
+        )
 
     try:
         result = await evaluate_evidence_with_ai(db, ev, cl, cs, user_id=str(current_user.id))
@@ -1493,8 +1506,21 @@ async def ai_suggest_nonconformity(
     ev = (body.evidence if body and body.evidence is not None else None) or evidence
     cl = (body.clause_no if body and body.clause_no is not None else None) or clause_no
     cs = (body.certification_system if body and body.certification_system is not None else None) or certification_system
-    if not ev or not cl or not cs:
-        raise HTTPException(status_code=422, detail="缺少必需参数: evidence, clause_no, certification_system")
+    missing = []
+    if not ev:
+        missing.append("evidence")
+    if not cl:
+        missing.append("clause_no")
+    if not cs:
+        missing.append("certification_system")
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=[
+                {"loc": ["body" if body else "query", f], "msg": "Field required", "type": "missing"}
+                for f in missing
+            ],
+        )
 
     try:
         result = await suggest_nc_with_ai(db, ev, cl, cs, user_id=str(current_user.id))

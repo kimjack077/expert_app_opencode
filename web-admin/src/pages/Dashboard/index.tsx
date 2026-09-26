@@ -315,7 +315,7 @@ export default function Dashboard() {
         <Col xs={24} sm={12} lg={6}>
           <div
             className="dashboard-kpi-card"
-            onClick={() => navigate('/tasks?status=in_progress')}
+            onClick={() => navigate('/tasks?status=todo')}
           >
             <div>
               <div className="dashboard-kpi-header">
@@ -334,7 +334,21 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="dashboard-kpi-footer">
-              <span>进行中 {stats?.tasks?.in_progress || 0} · 待开始 {stats?.tasks?.pending || 0}</span>
+              <span>
+                <span
+                  style={{ cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); navigate('/tasks?status=in_progress') }}
+                >
+                  进行中 {stats?.tasks?.in_progress || 0}
+                </span>
+                {' · '}
+                <span
+                  style={{ cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); navigate('/tasks?status=pending') }}
+                >
+                  待开始 {stats?.tasks?.pending || 0}
+                </span>
+              </span>
               <span style={{ color: '#0284c7', fontWeight: 600 }}>去处理 →</span>
             </div>
           </div>

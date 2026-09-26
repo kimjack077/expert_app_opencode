@@ -264,12 +264,13 @@ export default function Tasks() {
           <Select
             placeholder="状态"
             allowClear
-            style={{ width: 120 }}
+            style={{ width: 160 }}
             value={statusFilter}
             onChange={(value) => handleStatusChange(value)}
             options={[
-              { value: 'pending', label: '待开始' },
+              { value: 'todo', label: '待处理 (全部待办)' },
               { value: 'in_progress', label: '进行中' },
+              { value: 'pending', label: '待开始' },
               { value: 'completed', label: '已完成' },
             ]}
           />
