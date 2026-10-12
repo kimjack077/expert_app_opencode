@@ -22,6 +22,7 @@ from typing import Any, AsyncGenerator, Optional
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.utils.llm_fallback import create_main_llm_client
 
 
 class LLMTier(str, Enum):
@@ -32,11 +33,7 @@ class LLMTier(str, Enum):
 
 class LLMGateway:
     def __init__(self) -> None:
-        self._text_client = AsyncOpenAI(
-            api_key=settings.LLM_API_KEY,
-            base_url=settings.LLM_BASE_URL,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self._text_client = create_main_llm_client()
         # 视觉模型可能是独立 endpoint / key
         self._vision_client = AsyncOpenAI(
             api_key=settings.VISION_LLM_API_KEY or settings.LLM_API_KEY,
@@ -44,7 +41,7 @@ class LLMGateway:
             timeout=settings.LLM_TIMEOUT,
         )
 
-    def _resolve(self, tier: LLMTier) -> tuple[AsyncOpenAI, str]:
+    def _resolve(self, tier: LLMTier) -> tuple[Any, str]:
         if tier == LLMTier.VISION:
             return self._vision_client, settings.VISION_LLM_MODEL
         if tier == LLMTier.CHEAP:

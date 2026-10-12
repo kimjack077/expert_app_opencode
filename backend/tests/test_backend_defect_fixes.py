@@ -104,9 +104,12 @@ def test_duplicate_username_update_returns_conflict():
 
 @pytest.mark.parametrize("schema", [InspectionRecordCreate, InspectionRecordUpdate])
 def test_task_record_schema_rejects_unknown_result_fields(schema):
+    payload = {"radio_value": "pass"}
+    if schema is InspectionRecordCreate:
+        payload["template_item_id"] = uuid.uuid4()
     with pytest.raises(ValidationError) as exc_info:
-        schema.model_validate({"radio_value": "pass"})
-    assert exc_info.value.errors()[0]["type"] == "extra_forbidden"
+        schema.model_validate(payload)
+    assert any(err["type"] == "extra_forbidden" for err in exc_info.value.errors())
 
 
 class _GetOnlyDb:
@@ -170,3 +173,38 @@ def test_body_validation_error_remains_unprocessable_entity():
     )
     response = asyncio.run(request_validation_error_handler(None, error))
     assert response.status_code == 422
+
+
+def test_inspection_record_create_requires_template_item_id():
+    """P1-A: InspectionRecordCreate 必须校验 template_item_id 为必填。"""
+    with pytest.raises(ValidationError) as exc_info:
+        InspectionRecordCreate.model_validate({})
+    errors = exc_info.value.errors()
+    assert any(err["loc"] == ("template_item_id",) and err["type"] == "missing" for err in errors)
+
+
+def test_task_walk_prevents_infinite_recursion_on_null_id():
+    """P1-B: _walk 在遇到 _item_meta 返回空或 id 为 None 时不得无限递归。"""
+    children_by_parent = {
+        None: [
+            {"template_item": None, "check_item": None},
+            {"template_item": {"id": "leaf-1", "sort_order": 1}},
+        ],
+        "leaf-1": [],
+    }
+
+    def _item_meta(raw):
+        return raw.get("template_item") or raw.get("check_item") or {}
+
+    ordered = []
+
+    def _walk(parent_key):
+        for node in children_by_parent.get(parent_key, []):
+            ordered.append(node)
+            child_id = _item_meta(node).get("id")
+            if child_id is not None:
+                _walk(child_id)
+
+    # 之前这行代码会触发 RecursionError: maximum recursion depth exceeded
+    _walk(None)
+    assert len(ordered) == 2

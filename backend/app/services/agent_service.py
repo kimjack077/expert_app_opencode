@@ -704,13 +704,13 @@ class AgentService:
         models = [
             {
                 "id": self.model,
-                "name": "DeepSeek V4 Flash",
-                "capabilities": ["text"],
-                "recommended_for": "文字问答和检查准备简报",
+                "name": "DeepSeek Flash",
+                "capabilities": ["text", "vision"],
+                "recommended_for": "文字问答、检查准备简报与多模态分析",
             },
             {
                 "id": self.vision_model,
-                "name": "SenseNova 6.7 Flash Lite",
+                "name": "SenseNova Vision",
                 "capabilities": ["text", "vision"],
                 "recommended_for": "图片识别和多模态分析",
             },

@@ -99,8 +99,8 @@ class _CompletionsProxy:
         backup_kwargs = dict(kwargs)
         if self._backup_model and "model" in backup_kwargs:
             backup_kwargs["model"] = self._backup_model
-        # 移除 reasoning_effort，避免对端网关报 400 (例如 none 不合法)
-        backup_kwargs.pop("reasoning_effort", None)
+        # 备用模型统一关闭思考模式（针对 DeepSeek-V4-Flash 等推理模型使用 reasoning_effort='none'，保证最快响应速度）
+        backup_kwargs["reasoning_effort"] = "none"
         # 移除 stream_options 避免网关兼容性问题
         backup_kwargs.pop("stream_options", None)
         return backup_kwargs
@@ -120,11 +120,11 @@ class _CompletionsProxy:
             reason = f"{type(e).__name__}: {e}"
             logger.warning(
                 f"[{self._tag}] 主模型调用失败 ({reason}); "
-                f"正在自动切换至备用模型: {self._backup_model}"
+                f"正在自动切换至备用模型: {self._backup_model} (reasoning_effort=none)"
             )
             print(
                 f"[{self._tag}] primary failed ({type(e).__name__}: {e}); "
-                f"switching to backup model={self._backup_model}"
+                f"switching to backup model={self._backup_model}, reasoning_effort=none"
             )
             response = await self._backup.chat.completions.create(*args, **backup_kwargs)
             return mark_fallback_response(response, self._backup_model, reason)
@@ -145,11 +145,11 @@ class _CompletionsProxy:
             backup_kwargs = self._prepare_backup_kwargs(kwargs)
             logger.warning(
                 f"[{self._tag}] 主模型流式连接失败 ({type(e).__name__}: {e}); "
-                f"正在自动降级切换至备用模型: {self._backup_model}"
+                f"正在自动降级切换至备用模型: {self._backup_model} (reasoning_effort=none)"
             )
             print(
                 f"[{self._tag}] primary stream failed ({type(e).__name__}: {e}); "
-                f"switching to backup model={self._backup_model}"
+                f"switching to backup model={self._backup_model}, reasoning_effort=none"
             )
             backup_stream = await self._backup.chat.completions.create(*args, **backup_kwargs)
             async for chunk in backup_stream:

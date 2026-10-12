@@ -91,12 +91,12 @@ class Settings(BaseSettings):
     def CORS_ORIGIN_LIST(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
-    # DeepSeek V4 (via EdgeFN / SenseNova): up to 1024K context, JSON Output / Tool Calls.
-    LLM_BASE_URL: str = "https://api.edgefn.net/v1"
-    LLM_PROVIDER: str = "edgefn"
-    LLM_MODEL: str = "DeepSeek-V4-Flash-0731"
-    LLM_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
-    LLM_MAX_TOKENS: int = 128000
+    # DeepSeek Flash (via SenseNova): 原生支持多模态（文本与图片）、长上下文、JSON 输出与工具调用。
+    LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
+    LLM_PROVIDER: str = "sensenova"
+    LLM_MODEL: str = "deepseek-flash"
+    LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    LLM_MAX_TOKENS: int = 65536
     LLM_TEMPERATURE: float = 0.3
     LLM_TOP_P: float = 0.95
     LLM_TIMEOUT: int = 180
@@ -104,9 +104,9 @@ class Settings(BaseSettings):
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
 
-    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + GLM-5.3-Flash）
+    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + DeepSeek-V4-Flash 关闭思考模式快速响应）
     LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
-    LLM_BACKUP_MODEL: str = "GLM-5.3-Flash"
+    LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
@@ -150,25 +150,22 @@ class Settings(BaseSettings):
     MINIMAX_MODEL: str = "DeepSeek-V3.2"
     MINIMAX_GROUP_ID: str = ""
 
-    # Vision/multimodal model uses a separate setting because text-only models
-    # cannot process inspection photos.
+    # Vision/multimodal model (deepseek-flash 原生支持多模态)
     VISION_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
-    VISION_LLM_MODEL: str = "sensenova-6.7-flash-lite"
+    VISION_LLM_MODEL: str = "deepseek-flash"
     VISION_LLM_API_KEY: str = ""
 
-    # AI 文档解析辅助录入专用模型（SenseNova 网关，流式稳定、速度快）
+    # AI 文档解析辅助录入专用模型（SenseNova 网关 deepseek-flash，流式稳定、速度快）
     AI_EXTRACT_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
-    AI_EXTRACT_LLM_MODEL: str = "sensenova-6.8-flash-lite"
+    AI_EXTRACT_LLM_MODEL: str = "deepseek-flash"
     AI_EXTRACT_LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
     # 推理力度：low/medium/high/none/空（仅推理模型生效）
-    # - sensenova-6.8-flash-lite / DeepSeek-V4-Flash：设 low/medium/high 控制思考深度
-    # - 非推理模型（DeepSeek-V3.2）：留空或 none，不传 reasoning_effort
-    # - DeepSeek 思考模式默认开启无法关闭；none/空时不传 reasoning_effort，走 DeepSeek 默认 medium
+    # - deepseek-flash / DeepSeek-V4-Flash：设 low/medium/high 控制思考深度
     AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
 
-    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级，edgefn 网关 + DeepSeek-V3.2 非推理模型）
+    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级，edgefn 网关 + DeepSeek-V4-Flash 关闭思考模式快速响应）
     AI_EXTRACT_LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
-    AI_EXTRACT_LLM_BACKUP_MODEL: str = "DeepSeek-V3.2"
+    AI_EXTRACT_LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     AI_EXTRACT_LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
@@ -184,8 +181,8 @@ class Settings(BaseSettings):
     def ai_extract_is_thinking_model(self) -> bool:
         """判断当前 AI_EXTRACT 模型是否为推理模型（需要 thinking 开关控制）。"""
         model = (self.AI_EXTRACT_LLM_MODEL or "").lower()
-        # DeepSeek-V4 / DeepSeek-R1 等带 reasoning_content 的推理模型
-        return "v4" in model or "r1" in model or "reasoning" in model
+        # deepseek-flash / DeepSeek-V4 / DeepSeek-R1 等带 reasoning_content 的推理模型
+        return "v4" in model or "r1" in model or "reasoning" in model or "flash" in model
 
     @property
     def ai_extract_is_sensenova_reasoning_model(self) -> bool:
@@ -197,10 +194,9 @@ class Settings(BaseSettings):
     def ai_extract_reasoning_kwargs(self) -> dict:
         """返回给 OpenAI SDK create() 的推理相关参数。
 
-        - sensenova-6.8-flash-lite / DeepSeek-V4-Flash: 传 reasoning_effort=low/medium/high
+        - deepseek-flash / DeepSeek-V4-Flash: 传 reasoning_effort=low/medium/high
           （none 时不传，DeepSeek 默认 medium，sensenova 也默认 medium）
-        - 非推理模型（DeepSeek-V3.2）: 返回空 dict
-        - DeepSeek 关思考：官方未暴露关闭接口，思考模式默认开启无法关闭
+        - 降级时统一在 llm_fallback 中置为 none 快速响应
         """
         effort = (self.AI_EXTRACT_LLM_REASONING_EFFORT or "").strip().lower()
         if not effort or effort == "none":
