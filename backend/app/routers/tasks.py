@@ -462,6 +462,8 @@ async def update_task(
         # 专家仅允许更新 remarks，其余字段仍不可改。
         if task_data.remarks is not None:
             task.remarks = task_data.remarks
+        if task_data.template_id is not None:
+            task.template_id = task_data.template_id
         if task_data.status:
             # 与 POST /{task_id}/complete 同一口径：没有最终判定结论不允许置为已完成
             if task_data.status == "completed" and not re.search(
@@ -520,6 +522,43 @@ async def update_task(
             if plan_item:
                 plan_item.status = "completed"
                 await _sync_project_status_after_plan_item(db, plan_item.project_id)
+
+    # 模板绑定与同步：若任务绑定了模板，自动同步至关联计划项，并在无检查项时自动补齐
+    if task.template_id:
+        try:
+            task_uuid = UUID(task_id)
+            plan_res = await db.execute(
+                select(AuditPlanItem).where(
+                    AuditPlanItem.inspection_task_id == task_uuid,
+                    AuditPlanItem.is_deleted == False,  # noqa: E712
+                )
+            )
+            linked_plan = plan_res.scalar_one_or_none()
+            if linked_plan and not linked_plan.template_id:
+                linked_plan.template_id = task.template_id
+        except Exception:
+            pass
+
+        existing_items_count = (await db.execute(
+            select(func.count(InspectionRecord.id)).where(InspectionRecord.task_id == task.id)
+        )).scalar() or 0
+        if existing_items_count == 0:
+            template_parent_ids = await load_parent_ids(db, template_id=task.template_id)
+            items_result = await db.execute(
+                select(TemplateItem)
+                .where(
+                    TemplateItem.template_id == task.template_id,
+                    TemplateItem.is_deleted == False,  # noqa: E712
+                    TemplateItem.is_category.is_not(True),
+                )
+                .order_by(TemplateItem.sort_order)
+            )
+            leaf_items = [
+                i for i in items_result.scalars().all()
+                if not is_category_node(i, template_parent_ids)
+            ]
+            for it in leaf_items:
+                db.add(InspectionRecord(task_id=task.id, template_item_id=it.id))
 
     # Older clients complete tasks through PUT instead of POST /complete.
     # Route both paths through the formal-record bridge before committing.
@@ -819,6 +858,25 @@ async def get_task_records(
         .order_by(InspectionRecord.recorded_at)
     )
     records = result.scalars().all()
+
+    # 若任务未设置 template_id，尝试从关联的审核计划项回填
+    if not task.template_id:
+        try:
+            task_uuid = UUID(str(task_id))
+            from app.models.audit_project import AuditPlanItem
+            plan_res = await db.execute(
+                select(AuditPlanItem).where(
+                    AuditPlanItem.inspection_task_id == task_uuid,
+                    AuditPlanItem.is_deleted == False,  # noqa: E712
+                )
+            )
+            linked_plan = plan_res.scalar_one_or_none()
+            if linked_plan and linked_plan.template_id:
+                task.template_id = linked_plan.template_id
+                await db.commit()
+                await db.refresh(task)
+        except Exception:
+            pass
 
     # 任务已关联模板但没有可用检查项时，按模板自动补齐（兼容历史脏数据）
     has_linked_items = any(r.template_item_id for r in records)

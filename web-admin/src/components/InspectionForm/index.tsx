@@ -9,9 +9,9 @@ import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
   BulbOutlined, CameraOutlined,
   LoadingOutlined, SaveOutlined, SendOutlined, InfoCircleOutlined,
-  SafetyCertificateOutlined, RobotOutlined
+  SafetyCertificateOutlined, RobotOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons'
-import { recordApi, llmApi, mediaApi, taskApi } from '@/services/api'
+import { recordApi, llmApi, mediaApi, taskApi, templateApi } from '@/services/api'
 import { resultTagColor, resolveOptionLabel, resultLabel } from '@/utils/display'
 import { classifyItem, countBuckets } from '@/utils/completion'
 import { useAuthStore } from '@/stores/auth'
@@ -67,6 +67,41 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const [llmLoading, setLlmLoading] = useState(false)
   const [llmContent, setLlmContent] = useState<string | null>(null)
   const [drawerVisible, setDrawerVisible] = useState(false)
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([])
+  const [selectedTemplateIdForBind, setSelectedTemplateIdForBind] = useState<string | undefined>()
+  const [bindingTemplate, setBindingTemplate] = useState(false)
+
+  useEffect(() => {
+    templateApi.getTemplates({ limit: 100 }).then((res: any) => {
+      const list = res.data?.items || res.data || []
+      setAvailableTemplates(list)
+      if (list.length > 0) {
+        setSelectedTemplateIdForBind(list[0].id)
+      }
+    }).catch((err: any) => console.error('加载模板列表失败:', err))
+  }, [])
+
+  const handleBindTemplateAndGenerate = async () => {
+    if (!selectedTemplateIdForBind) {
+      message.warning('请先选择检查模板')
+      return
+    }
+    const currentTaskId = taskId || id
+    if (!currentTaskId) {
+      message.error('无法获取任务ID')
+      return
+    }
+    setBindingTemplate(true)
+    try {
+      await taskApi.updateTask(currentTaskId, { template_id: selectedTemplateIdForBind })
+      message.success('已成功绑定检查模板并自动生成检查项！')
+      await fetchData()
+    } catch (err: any) {
+      message.error(err.response?.data?.message || err.response?.data?.detail || '绑定模板失败')
+    } finally {
+      setBindingTemplate(false)
+    }
+  }
 
   const [finalJudgment, setFinalJudgment] = useState({
     result: '',
@@ -908,7 +943,48 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
       </div>
 
       <div style={{ padding: '0 24px', maxWidth: 1200, margin: '0 auto' }}>
-        {/* 检查项快捷导航 */}
+        {flatItems.length === 0 ? (
+          <Card style={{ marginBottom: 16, textAlign: 'center', padding: '40px 20px', borderRadius: 8 }}>
+            <div style={{ maxWidth: 600, margin: '0 auto' }}>
+              <ExclamationCircleOutlined style={{ fontSize: 52, color: '#faad14', marginBottom: 16 }} />
+              <h2 style={{ fontSize: 20, fontWeight: 600, color: '#1e293b', marginBottom: 12 }}>
+                当前任务未关联模板（暂无检查项）
+              </h2>
+              <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+                该审核计划项制定时未选定检查模板，导致当前无检查条目可执行。您可以直接在下方选择合适的检查模板并绑定，系统将自动载入全部检查项：
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <Select
+                  placeholder="请选择要绑定的检查模板..."
+                  style={{ width: 340, textAlign: 'left' }}
+                  value={selectedTemplateIdForBind}
+                  onChange={(val) => setSelectedTemplateIdForBind(val)}
+                  options={availableTemplates.map((t) => ({
+                    value: t.id,
+                    label: `${t.name} (${t.item_count || t.items?.length || 0}项)`,
+                  }))}
+                />
+                <Button
+                  type="primary"
+                  loading={bindingTemplate}
+                  disabled={!selectedTemplateIdForBind}
+                  onClick={handleBindTemplateAndGenerate}
+                >
+                  绑定模板并生成检查项
+                </Button>
+              </div>
+
+              <div style={{ marginTop: 24 }}>
+                <Button onClick={() => navigate(backPath || '/tasks')}>
+                  返回上一页
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : (
+          <>
+            {/* 检查项快捷导航 */}
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {flatItems.map((item, idx) => {
@@ -1144,6 +1220,8 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
               </Button>
             </div>
           </Card>
+        )}
+          </>
         )}
 
         {/* 最终判定区域：记录草稿，或任务模式（含已完成可改） */}

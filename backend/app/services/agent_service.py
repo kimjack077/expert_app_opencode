@@ -106,8 +106,9 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的智审Agent（审核员智能现场�
   3. 当用户询问已有的首末次会议时，**调用 get_communication_meetings** 查询并展示。
 - 当用户要求"制定审核计划"、"生成审核计划"、"录入审核计划"或询问排期安排时：
   1. 参考项目的体系（如 Q/E/S）、审核组成员（如张建国负责 Q/S、王芳负责 E）及排期；
-  2. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片；
-  3. 在回复中列出清晰完整的 Markdown 审核计划方案，并明确提示审核员"点击下方卡片即可一键将该计划批量录入到系统的审核计划表中"
+  2. **核心要求：必须为每一个审核计划项（尤其是现场检查/各部门审核活动）匹配并锁定具体的检查模板（template_name）**。系统内置模板包括：'ISO 9001体系审核检查表'（适用质量/Q体系）、'某企业QESEn多体系认证审核模板（客户演示）'（适用综合/多体系）、'食品安全检查模板20260821'（食品安全）、'施工安全检查模板（客户演示）'（施工/安全）等。缺少模板会导致现场检查变成空白项无法执行，因此必须为每个审核项指定 template_name 或 template_id；
+  3. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片；
+  4. 在回复中列出清晰完整的 Markdown 审核计划方案（包含审核日期、时间、部门、审核员、审核条款及对应的检查模板名称），并明确提示审核员"点击下方卡片即可一键将该计划及关联检查模板批量录入到系统的审核计划表中"
 - 当用户询问当前项目的审核计划时，**调用 get_audit_plan_items** 查询并展示
 - 当用户明确表达了判定意见（如"这项不合格，问题是缺少校验记录"）时，**必须调用 apply_check_result** 生成确认卡片，而不是只用文字描述——审核员需要能一键采纳
 - 任何写入类工具（apply_check_result / apply_final_verdict / propose_add_team_member / propose_create_audit_plan / propose_create_meeting）只是生成待确认的卡片，绝不代表真正写入，必须清楚告知用户"请在卡片上确认"
@@ -589,6 +590,14 @@ TOOLS.extend(
                                         "type": "string",
                                         "enum": ["normal", "opening_meeting", "closing_meeting", "night_inspection", "internal_meeting"],
                                         "description": "活动类型",
+                                    },
+                                    "template_name": {
+                                        "type": "string",
+                                        "description": "关联的检查模板名称，如 'ISO 9001体系审核检查表'、'某企业QESEn多体系认证审核模板（客户演示）'、'食品安全检查模板20260821'。系统将自动匹配现有模板库并锁定",
+                                    },
+                                    "template_id": {
+                                        "type": "string",
+                                        "description": "关联的检查模板ID（UUID，若明确知道可填入）",
                                     },
                                     "remarks": {
                                         "type": "string",
@@ -2728,7 +2737,7 @@ class AgentService:
         if not raw_items or not isinstance(raw_items, list):
             return {"error": "缺少有效的计划项列表"}
 
-        # 加载项目成员映射
+        # 加载项目中成员映射
         team_rows = await db.execute(
             select(AuditTeamMember, User)
             .join(User, AuditTeamMember.member_id == User.id)
@@ -2744,6 +2753,112 @@ class AgentService:
                 name_to_user[u.full_name] = u
             if u.username:
                 name_to_user[u.username] = u
+
+        # 加载系统中可用的检查模板（含检查项数量，排除软删除）
+        from app.models.template import InspectionTemplate, TemplateItem
+        tpl_rows = await db.execute(
+            select(
+                InspectionTemplate.id,
+                InspectionTemplate.name,
+                InspectionTemplate.certification_system,
+                InspectionTemplate.category,
+                func.count(TemplateItem.id).label("item_count"),
+            )
+            .outerjoin(
+                TemplateItem,
+                (TemplateItem.template_id == InspectionTemplate.id)
+                & (TemplateItem.is_deleted == False)  # noqa: E712
+                & (TemplateItem.is_category.is_not(True)),
+            )
+            .where(InspectionTemplate.is_deleted == False)  # noqa: E712
+            .group_by(InspectionTemplate.id)
+            .order_by(InspectionTemplate.is_published.desc(), func.count(TemplateItem.id).desc())
+        )
+        available_templates: list[dict[str, Any]] = []
+        for tid, tname, tsys, tcat, icnt in tpl_rows.all():
+            available_templates.append({
+                "id": str(tid),
+                "name": tname,
+                "certification_system": tsys or "",
+                "category": tcat or "",
+                "item_count": int(icnt or 0),
+            })
+
+        def match_template(
+            specified_id: Optional[str],
+            specified_name: Optional[str],
+            item_systems: list[str],
+            item_area: str,
+            proj_systems: list[str],
+        ) -> tuple[Optional[str], Optional[str]]:
+            if not available_templates:
+                return None, None
+
+            # 1. 直接通过 ID 匹配
+            if specified_id:
+                try:
+                    norm_id = str(UUID(str(specified_id)))
+                    for tpl in available_templates:
+                        if tpl["id"] == norm_id:
+                            return tpl["id"], tpl["name"]
+                except Exception:
+                    pass
+
+            # 2. 通过名称模糊或关键词匹配
+            if specified_name:
+                name_clean = str(specified_name).strip().lower()
+                for tpl in available_templates:
+                    if tpl["name"].lower() == name_clean:
+                        return tpl["id"], tpl["name"]
+                for tpl in available_templates:
+                    if name_clean in tpl["name"].lower() or tpl["name"].lower() in name_clean:
+                        return tpl["id"], tpl["name"]
+
+            # 3. 智能按体系和业务关键词推导匹配
+            all_systems = set([s.upper() for s in (item_systems or proj_systems or [])])
+            has_q = "Q" in all_systems or any("9001" in s or "质量" in s for s in all_systems)
+            has_e = "E" in all_systems or any("14001" in s or "环境" in s for s in all_systems)
+            has_s = "S" in all_systems or any("45001" in s or "职业健康" in s or "安全" in s for s in all_systems)
+            is_multi = len(all_systems) > 1 or (has_q and (has_e or has_s))
+
+            # 多体系优先匹配 QES / 多体系模板
+            if is_multi:
+                for tpl in available_templates:
+                    if any(k in tpl["name"] for k in ["QES", "多体系", "综合"]) and tpl["item_count"] > 0:
+                        return tpl["id"], tpl["name"]
+
+            # 质量体系优先匹配 ISO 9001
+            if has_q:
+                for tpl in available_templates:
+                    if any(k in tpl["name"] for k in ["9001", "质量"]) and tpl["item_count"] > 0:
+                        return tpl["id"], tpl["name"]
+
+            # 环境/安全
+            if has_e or has_s:
+                for tpl in available_templates:
+                    if any(k in tpl["name"] for k in ["14001", "45001", "安全", "施工"]) and tpl["item_count"] > 0:
+                        return tpl["id"], tpl["name"]
+
+            # 行业/部门关键词匹配
+            area_lower = item_area.lower()
+            if any(k in area_lower for k in ["食品", "餐饮", "食堂"]):
+                for tpl in available_templates:
+                    if "食品" in tpl["name"] and tpl["item_count"] > 0:
+                        return tpl["id"], tpl["name"]
+            if any(k in area_lower for k in ["施工", "工地", "建设"]):
+                for tpl in available_templates:
+                    if "施工" in tpl["name"] and tpl["item_count"] > 0:
+                        return tpl["id"], tpl["name"]
+
+            # 兜底：挑选带检查项的有效模板（优先9001或多体系，否则取第一个有item的模板）
+            for tpl in available_templates:
+                if ("9001" in tpl["name"] or "QES" in tpl["name"]) and tpl["item_count"] > 0:
+                    return tpl["id"], tpl["name"]
+            for tpl in available_templates:
+                if tpl["item_count"] > 0:
+                    return tpl["id"], tpl["name"]
+
+            return available_templates[0]["id"], available_templates[0]["name"]
 
         from datetime import date, timedelta
         base_date = project.scheduled_start or date.today()
@@ -2799,6 +2914,19 @@ class AgentService:
             activity_type = str(item.get("activity_type") or "normal")
             remarks = str(item.get("remarks") or "")
 
+            # 智能匹配并锁定检查模板：会议类活动不强制，现场检查活动必须锁定模板
+            matched_tpl_id = None
+            matched_tpl_name = None
+            is_pure_meeting = activity_type in ["opening_meeting", "closing_meeting", "internal_meeting"]
+            if not is_pure_meeting or item.get("template_id") or item.get("template_name"):
+                matched_tpl_id, matched_tpl_name = match_template(
+                    item.get("template_id"),
+                    item.get("template_name") or item.get("template"),
+                    systems,
+                    area_name,
+                    project.certification_systems or [],
+                )
+
             clean_items.append({
                 "plan_date": date_str,
                 "time_start": time_start,
@@ -2810,6 +2938,8 @@ class AgentService:
                 "certification_systems": systems,
                 "clauses": clauses,
                 "activity_type": activity_type,
+                "template_id": matched_tpl_id,
+                "template_name": matched_tpl_name,
                 "remarks": remarks,
             })
 

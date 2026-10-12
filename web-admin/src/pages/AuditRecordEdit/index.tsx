@@ -8,6 +8,7 @@ import {
   ArrowLeftOutlined, SaveOutlined, SendOutlined, CameraOutlined,
   BulbOutlined, BookOutlined, EyeOutlined, CheckCircleOutlined,
   FolderOpenOutlined, FileTextOutlined, ProjectOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { auditRecordApi, auditPlanApi, auditAIApi, auditProjectApi } from '@/services/auditProjectApi'
@@ -824,7 +825,41 @@ export default function AuditRecordEdit() {
           </Card>
 
           {/* 检查项列表卡片（支持模板层级展示） */}
-          {template && (
+          {!template ? (
+            <Card
+              variant="borderless"
+              style={{ marginBottom: 16, borderRadius: 8, textAlign: 'center', padding: '36px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
+            >
+              <ExclamationCircleOutlined style={{ fontSize: 44, color: '#faad14', marginBottom: 12 }} />
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 8 }}>
+                当前审核记录尚未关联检查模板
+              </div>
+              <p style={{ color: '#64748b', fontSize: 13, marginBottom: 20 }}>
+                暂无检查项。请选择适用的检查模板进行绑定，以加载对应标准条款及检查项：
+              </p>
+              {!readOnly && (
+                <Space>
+                  <Select
+                    placeholder="请选择检查模板..."
+                    style={{ width: 320, textAlign: 'left' }}
+                    value={form.getFieldValue('template_id')}
+                    onChange={(val) => handleSelectTemplate(val)}
+                    options={templates.map((t: any) => ({
+                      value: t.id,
+                      label: `${t.name} (${t.item_count || 0}项)`,
+                    }))}
+                  />
+                  <Button
+                    type="primary"
+                    onClick={() => handleSelectTemplate(form.getFieldValue('template_id'))}
+                    disabled={!form.getFieldValue('template_id')}
+                  >
+                    载入检查项
+                  </Button>
+                </Space>
+              )}
+            </Card>
+          ) : (
             <Card
               title={
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

@@ -810,6 +810,32 @@ async def update_plan_item(
             # 更新检查任务模板
             if plan_item.template_id:
                 inspection_task.template_id = plan_item.template_id
+                # 检查关联任务是否缺少检查项记录，若缺少则根据模板自动生成
+                existing_recs_count = (await db.execute(
+                    select(func.count(TaskItemRecord.id)).where(TaskItemRecord.task_id == inspection_task.id)
+                )).scalar() or 0
+                if existing_recs_count == 0:
+                    parent_ids = await load_parent_ids(db, template_id=plan_item.template_id)
+                    items_result = await db.execute(
+                        select(TemplateItem)
+                        .where(
+                            TemplateItem.template_id == plan_item.template_id,
+                            TemplateItem.is_deleted == False,  # noqa: E712
+                            TemplateItem.is_category.is_not(True),
+                        )
+                        .order_by(TemplateItem.sort_order)
+                    )
+                    leaf_items = [
+                        i for i in items_result.scalars().all()
+                        if not is_category_node(i, parent_ids)
+                    ]
+                    for item in leaf_items:
+                        record = TaskItemRecord(
+                            task_id=inspection_task.id,
+                            template_item_id=item.id,
+                        )
+                        db.add(record)
+                    await db.flush()
 
             # 更新检查任务时间
             if plan_item.plan_date:
@@ -825,6 +851,72 @@ async def update_plan_item(
     await db.commit()
     await db.refresh(plan_item)
     return make_response(plan_item)
+
+
+@router.post("/plan/{plan_item_id}/bind-template")
+async def bind_plan_item_template(
+    plan_item_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """为审核计划项绑定检查模板，并自动生成关联任务的检查条目"""
+    result = await db.execute(
+        select(AuditPlanItem).where(
+            AuditPlanItem.id == plan_item_id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+        )
+    )
+    plan_item = result.scalar_one_or_none()
+    if not plan_item:
+        raise HTTPException(status_code=404, detail="审核计划项不存在")
+    await ensure_project_access(db, plan_item.project_id, current_user, require_manage=True)
+
+    template_id_raw = payload.get("template_id")
+    if not template_id_raw:
+        raise HTTPException(status_code=400, detail="缺少 template_id 参数")
+    template_id = UUID(str(template_id_raw))
+
+    from app.models.template import InspectionTemplate
+    template = await db.get(InspectionTemplate, template_id)
+    if not template or template.is_deleted:
+        raise HTTPException(status_code=404, detail="检查模板不存在")
+
+    plan_item.template_id = template_id
+
+    # 同步关联的检查任务
+    if plan_item.inspection_task_id:
+        inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
+        if inspection_task:
+            inspection_task.template_id = template_id
+            existing_recs_count = (await db.execute(
+                select(func.count(TaskItemRecord.id)).where(TaskItemRecord.task_id == inspection_task.id)
+            )).scalar() or 0
+            if existing_recs_count == 0:
+                parent_ids = await load_parent_ids(db, template_id=template_id)
+                items_result = await db.execute(
+                    select(TemplateItem)
+                    .where(
+                        TemplateItem.template_id == template_id,
+                        TemplateItem.is_deleted == False,  # noqa: E712
+                        TemplateItem.is_category.is_not(True),
+                    )
+                    .order_by(TemplateItem.sort_order)
+                )
+                leaf_items = [
+                    i for i in items_result.scalars().all()
+                    if not is_category_node(i, parent_ids)
+                ]
+                for item in leaf_items:
+                    db.add(TaskItemRecord(
+                        task_id=inspection_task.id,
+                        template_item_id=item.id,
+                    ))
+                await db.flush()
+
+    await db.commit()
+    await db.refresh(plan_item)
+    return make_response(data=plan_item, message="成功绑定检查模板并生成检查条目")
 
 
 @router.delete("/plan/{plan_item_id}")

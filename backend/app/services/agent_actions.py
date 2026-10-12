@@ -389,6 +389,17 @@ async def _action_create_audit_plan(
     enterprise = await db.get(Enterprise, project.enterprise_id) if project.enterprise_id else None
     base_date = project.scheduled_start or date.today()
 
+    from app.models.template import InspectionTemplate, TemplateItem
+    from app.utils.category import load_parent_ids, is_category_node
+
+    tpl_rows = await db.execute(
+        select(InspectionTemplate)
+        .where(InspectionTemplate.is_deleted == False)  # noqa: E712
+        .order_by(InspectionTemplate.is_published.desc())
+    )
+    all_tpls = tpl_rows.scalars().all()
+    tpl_id_map: dict[str, InspectionTemplate] = {str(t.id): t for t in all_tpls}
+
     created_items = []
     for idx, item in enumerate(raw_items):
         if not isinstance(item, dict):
@@ -456,6 +467,52 @@ async def _action_create_audit_plan(
         activity_type = str(item.get("activity_type") or "normal")
         remarks = str(item.get("remarks") or "")
 
+        # 解析检查模板：优先按传参 template_id，其次 template_name，最后按体系/业务关键词兜底锁定
+        raw_tid = item.get("template_id")
+        raw_tname = item.get("template_name")
+        target_template_id: Optional[UUID] = None
+
+        if raw_tid:
+            try:
+                cand_tid_str = str(UUID(str(raw_tid)))
+                if cand_tid_str in tpl_id_map:
+                    target_template_id = UUID(cand_tid_str)
+            except Exception:
+                pass
+
+        if not target_template_id and raw_tname:
+            tname_clean = str(raw_tname).strip().lower()
+            for tpl in all_tpls:
+                if tpl.name.lower() == tname_clean or tname_clean in tpl.name.lower() or tpl.name.lower() in tname_clean:
+                    target_template_id = tpl.id
+                    break
+
+        is_pure_meeting = activity_type in ["opening_meeting", "closing_meeting", "internal_meeting"]
+        if not target_template_id and not is_pure_meeting:
+            all_sys = set([s.upper() for s in (systems or project.certification_systems or [])])
+            has_q = "Q" in all_sys or any("9001" in s or "质量" in s for s in all_sys)
+            has_e = "E" in all_sys or any("14001" in s or "环境" in s for s in all_sys)
+            has_s = "S" in all_sys or any("45001" in s or "安全" in s for s in all_sys)
+            is_multi = len(all_sys) > 1 or (has_q and (has_e or has_s))
+
+            if is_multi:
+                for tpl in all_tpls:
+                    if any(k in tpl.name for k in ["QES", "多体系", "综合"]):
+                        target_template_id = tpl.id
+                        break
+            if not target_template_id and has_q:
+                for tpl in all_tpls:
+                    if any(k in tpl.name for k in ["9001", "质量"]):
+                        target_template_id = tpl.id
+                        break
+            if not target_template_id and (has_e or has_s):
+                for tpl in all_tpls:
+                    if any(k in tpl.name for k in ["14001", "45001", "安全", "施工"]):
+                        target_template_id = tpl.id
+                        break
+            if not target_template_id and all_tpls:
+                target_template_id = all_tpls[0].id
+
         random_suffix = "".join([str(random.randint(0, 9)) for _ in range(6)])
         task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{random_suffix}"
         task_title = f"{project.title} - {area_name} - {plan_date}"
@@ -463,7 +520,7 @@ async def _action_create_audit_plan(
         inspection_task = InspectionTask(
             task_no=task_no,
             title=task_title,
-            template_id=None,
+            template_id=target_template_id,
             assigned_to=assigned_member_ids[0] if assigned_member_ids else user.id,
             assigned_by=user.id,
             target_name=enterprise.name if enterprise else project.title,
@@ -474,9 +531,34 @@ async def _action_create_audit_plan(
         db.add(inspection_task)
         await db.flush()
 
+        # 生成该任务对应的检查条目记录
+        if target_template_id:
+            parent_ids = await load_parent_ids(db, template_id=target_template_id)
+            items_result = await db.execute(
+                select(TemplateItem)
+                .where(
+                    TemplateItem.template_id == target_template_id,
+                    TemplateItem.is_deleted == False,  # noqa: E712
+                    TemplateItem.is_category.is_not(True),
+                )
+                .order_by(TemplateItem.sort_order)
+            )
+            leaf_items = [
+                i for i in items_result.scalars().all()
+                if not is_category_node(i, parent_ids)
+            ]
+            for leaf_item in leaf_items:
+                record = TaskItemRecord(
+                    task_id=inspection_task.id,
+                    template_item_id=leaf_item.id,
+                )
+                db.add(record)
+            await db.flush()
+
         db_plan_item = AuditPlanItem(
             project_id=project_id,
             inspection_task_id=inspection_task.id,
+            template_id=target_template_id,
             plan_date=plan_date,
             time_start=time_start,
             time_end=time_end,
@@ -493,6 +575,7 @@ async def _action_create_audit_plan(
         db.add(db_plan_item)
         await db.flush()
 
+        tpl_obj = tpl_id_map.get(str(target_template_id)) if target_template_id else None
         created_items.append({
             "id": str(db_plan_item.id),
             "area_name": area_name,
@@ -501,6 +584,8 @@ async def _action_create_audit_plan(
             "time_end": time_end,
             "certification_systems": systems,
             "clauses": clauses,
+            "template_id": str(target_template_id) if target_template_id else None,
+            "template_name": tpl_obj.name if tpl_obj else None,
         })
 
     await db.commit()

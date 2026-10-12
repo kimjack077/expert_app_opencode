@@ -464,6 +464,14 @@ const cancelTask = async () => {
 }
 
 const goToExecution = () => {
+  if (!task.value?.template_id) {
+    showToast({
+      type: 'fail',
+      message: '该任务尚未关联检查模板，请先在管理端审核计划中绑定模板',
+      duration: 3000,
+    })
+    return
+  }
   router.push(`/task/${task.value.id}/execute`)
 }
 

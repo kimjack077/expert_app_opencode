@@ -137,6 +137,28 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
                 ),
               },
               {
+                title: '检查模板',
+                key: 'template',
+                width: 140,
+                render: (_: any, r: any) => (
+                  <div style={{ fontSize: 12 }}>
+                    {r.template_name ? (
+                      <Tag
+                        color="cyan"
+                        style={{ margin: 0, fontSize: 11, padding: '0 4px', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', verticalAlign: 'middle' }}
+                        title={r.template_name}
+                      >
+                        {r.template_name}
+                      </Tag>
+                    ) : (
+                      <Tag color="warning" style={{ margin: 0, fontSize: 11, padding: '0 4px' }}>
+                        未锁定模板
+                      </Tag>
+                    )}
+                  </div>
+                ),
+              },
+              {
                 title: '审核员',
                 key: 'auditor',
                 width: 75,

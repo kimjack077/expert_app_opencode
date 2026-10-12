@@ -27,6 +27,7 @@ import {
   TableOutlined,
   ClockCircleOutlined,
   UserOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { auditPlanApi, auditTeamApi, auditProjectApi } from '@/services/auditProjectApi'
@@ -268,7 +269,20 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
       key: 'template_id',
       width: 150,
       ellipsis: true,
-      render: (templateId: string) => getTemplateName(templateId),
+      render: (templateId: string, record: any) => {
+        const name = getTemplateName(templateId)
+        if (templateId && name && name !== templateId) {
+          return <span title={name}>{name}</span>
+        }
+        return (
+          <Space size={2}>
+            <Tag color="warning">未选模板</Tag>
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => handleEdit(record)}>
+              去选择
+            </Button>
+          </Space>
+        )
+      },
     },
     {
       title: '活动类型',
@@ -318,7 +332,20 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
               type="link"
               size="small"
               icon={<EyeOutlined />}
-              onClick={() => navigate(`/inspection/${record.inspection_task_id}`)}
+              onClick={() => {
+                if (!record.template_id) {
+                  Modal.confirm({
+                    title: '未选择检查模板',
+                    icon: <ExclamationCircleOutlined />,
+                    content: '该审核计划项尚未选择检查模板，直接执行检查将无法加载检查项。是否立即选择模板？',
+                    okText: '去选择模板',
+                    cancelText: '取消',
+                    onOk: () => handleEdit(record),
+                  })
+                  return
+                }
+                navigate(`/inspection/${record.inspection_task_id}`)
+              }}
             >
               {record.status === 'completed' ? '查看/修改检查' : '执行检查'}
             </Button>
@@ -650,6 +677,17 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                                         icon={<EyeOutlined />}
                                         onClick={(e) => {
                                           e.stopPropagation()
+                                          if (!item.template_id) {
+                                            Modal.confirm({
+                                              title: '未选择检查模板',
+                                              icon: <ExclamationCircleOutlined />,
+                                              content: '该审核计划项尚未选择检查模板，直接执行检查将无法加载检查项。是否立即选择模板？',
+                                              okText: '去选择模板',
+                                              cancelText: '取消',
+                                              onOk: () => handleEdit(item),
+                                            })
+                                            return
+                                          }
                                           navigate(`/inspection/${item.inspection_task_id}`)
                                         }}
                                       />
