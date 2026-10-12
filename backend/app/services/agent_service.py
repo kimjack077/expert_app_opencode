@@ -6,7 +6,7 @@ from uuid import UUID
 
 from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
@@ -16,6 +16,7 @@ from app.utils.llm_fallback import (
     was_fallback as fb_was_fallback,
 )
 from app.utils.item_stats import FAIL_VALUES, classify_item
+from app.utils.activity import is_meeting_activity
 from app.utils.business_time import BUSINESS_TZ, meeting_time_for_schedule
 from app.models.user import User
 from app.models.record import InspectionRecord, InspectionRecordItem
@@ -106,7 +107,7 @@ AGENT_SYSTEM_PROMPT = """你是EFIS系统的智审Agent（审核员智能现场�
   3. 当用户询问已有的首末次会议时，**调用 get_communication_meetings** 查询并展示。
 - 当用户要求"制定审核计划"、"生成审核计划"、"录入审核计划"或询问排期安排时：
   1. 参考项目的体系（如 Q/E/S）、审核组成员（如张建国负责 Q/S、王芳负责 E）及排期；
-  2. **核心要求：必须为每一个审核计划项（尤其是现场检查/各部门审核活动）匹配并锁定具体的检查模板（template_name）**。系统内置模板包括：'ISO 9001体系审核检查表'（适用质量/Q体系）、'某企业QESEn多体系认证审核模板（客户演示）'（适用综合/多体系）、'食品安全检查模板20260821'（食品安全）、'施工安全检查模板（客户演示）'（施工/安全）等。缺少模板会导致现场检查变成空白项无法执行，因此必须为每个审核项指定 template_name 或 template_id；
+  2. **核心要求：除会议类活动外，每一个审核计划项都必须匹配并锁定具体的检查模板（template_name）**。系统内置模板包括：'ISO 9001体系审核检查表'（适用质量/Q体系）、'某企业QESEn多体系认证审核模板（客户演示）'（适用综合/多体系）、'食品安全检查模板20260821'（食品安全）、'施工安全检查模板（客户演示）'（施工/安全）等。缺少模板会导致现场检查变成空白项无法执行，因此每个检查类计划项都必须给出 template_name 或 template_id；**若某计划项确实匹配不到任何模板，应停下来向用户说明并请其先创建/指定模板，不要生成缺模板的确认卡片**；
   3. **必须调用 propose_create_audit_plan** 生成结构化的审核计划确认卡片；
   4. 在回复中列出清晰完整的 Markdown 审核计划方案（包含审核日期、时间、部门、审核员、审核条款及对应的检查模板名称），并明确提示审核员"点击下方卡片即可一键将该计划及关联检查模板批量录入到系统的审核计划表中"
 - 当用户询问当前项目的审核计划时，**调用 get_audit_plan_items** 查询并展示
@@ -593,7 +594,7 @@ TOOLS.extend(
                                     },
                                     "template_name": {
                                         "type": "string",
-                                        "description": "关联的检查模板名称，如 'ISO 9001体系审核检查表'、'某企业QESEn多体系认证审核模板（客户演示）'、'食品安全检查模板20260821'。系统将自动匹配现有模板库并锁定",
+                                        "description": "关联的检查模板名称，如 'ISO 9001体系审核检查表'、'某企业QESEn多体系认证审核模板（客户演示）'、'食品安全检查模板20260821'。系统将自动匹配现有模板库并锁定。除会议类活动外，每个计划项都必须能匹配到模板，否则整批计划会被拒绝",
                                     },
                                     "template_id": {
                                         "type": "string",
@@ -2858,7 +2859,9 @@ class AgentService:
                 if tpl["item_count"] > 0:
                     return tpl["id"], tpl["name"]
 
-            return available_templates[0]["id"], available_templates[0]["name"]
+            # 没有任何带检查项的模板时返回空：由执行层判定为「无法匹配模板」并整批拒绝，
+            # 而不是绑一个空模板，让现场检查变成空白项。
+            return None, None
 
         from datetime import date, timedelta
         base_date = project.scheduled_start or date.today()
@@ -2914,11 +2917,12 @@ class AgentService:
             activity_type = str(item.get("activity_type") or "normal")
             remarks = str(item.get("remarks") or "")
 
-            # 智能匹配并锁定检查模板：会议类活动不强制，现场检查活动必须锁定模板
+            # 智能匹配并锁定检查模板：会议类活动不参与现场检查，强制不绑模板；
+            # 其余活动必须锁定模板，匹配不到时由执行层拒绝整批写入。
             matched_tpl_id = None
             matched_tpl_name = None
-            is_pure_meeting = activity_type in ["opening_meeting", "closing_meeting", "internal_meeting"]
-            if not is_pure_meeting or item.get("template_id") or item.get("template_name"):
+            is_pure_meeting = is_meeting_activity(activity_type)
+            if not is_pure_meeting:
                 matched_tpl_id, matched_tpl_name = match_template(
                     item.get("template_id"),
                     item.get("template_name") or item.get("template"),
@@ -2945,6 +2949,23 @@ class AgentService:
 
         if not clean_items:
             return {"error": "未能成功解析出有效的审核计划项"}
+
+        # 检查类活动必须锁定模板：任一计划项匹配不到模板就整批拒绝，
+        # 不生成「所见即所执行」的确认卡片——否则确认后会落库为空白检查任务。
+        missing_template = [
+            it["area_name"]
+            for it in clean_items
+            if not is_meeting_activity(it["activity_type"]) and not it["template_id"]
+        ]
+        if missing_template:
+            return {
+                "error": (
+                    "以下计划项未能匹配到检查模板："
+                    + "、".join(missing_template)
+                    + "。请先在系统内创建可用的检查模板，或在计划项上显式指定 template_name/template_id 后重试；"
+                    "会议类活动（首次/末次会议、内部沟通）无需模板。"
+                )
+            }
 
         proposal = {
             "type": "action_proposal",

@@ -76,6 +76,15 @@ const activityTypeMap: Record<string, string> = {
   internal_meeting: '内部沟通',
 }
 
+/**
+ * 会议类活动不开展现场检查，天然不需要检查模板，豁免「必须选模板」约束。
+ * 与后端 app/utils/activity.py 的判定保持一致。
+ */
+const MEETING_ACTIVITY_TYPES = ['opening_meeting', 'closing_meeting', 'internal_meeting']
+
+const isMeetingActivity = (activityType?: string) =>
+  MEETING_ACTIVITY_TYPES.includes(activityType || 'normal')
+
 const statusColorMap: Record<string, string> = {
   pending: 'default',
   in_progress: 'processing',
@@ -274,6 +283,10 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
         if (templateId && name && name !== templateId) {
           return <span title={name}>{name}</span>
         }
+        // 会议类活动不开展现场检查，不需要检查模板，不提示「未选模板」。
+        if (isMeetingActivity(record.activity_type)) {
+          return <span style={{ color: '#94a3b8' }}>—</span>
+        }
         return (
           <Space size={2}>
             <Tag color="warning">未选模板</Tag>
@@ -333,7 +346,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
               size="small"
               icon={<EyeOutlined />}
               onClick={() => {
-                if (!record.template_id) {
+                if (!record.template_id && !isMeetingActivity(record.activity_type)) {
                   Modal.confirm({
                     title: '未选择检查模板',
                     icon: <ExclamationCircleOutlined />,
@@ -554,7 +567,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                         itemsForDate.map((item) => {
                           const isCompleted = item.status === 'completed'
                           const isProgress = item.status === 'in_progress'
-                          const isOpeningOrClosing = item.activity_type === 'opening_meeting' || item.activity_type === 'closing_meeting'
+                          const isOpeningOrClosing = isMeetingActivity(item.activity_type)
 
                           return (
                             <Card
@@ -677,7 +690,7 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
                                         icon={<EyeOutlined />}
                                         onClick={(e) => {
                                           e.stopPropagation()
-                                          if (!item.template_id) {
+                                          if (!item.template_id && !isMeetingActivity(item.activity_type)) {
                                             Modal.confirm({
                                               title: '未选择检查模板',
                                               icon: <ExclamationCircleOutlined />,
@@ -830,24 +843,41 @@ export default function PlanEditor({ projectId, onGoToTeam }: Props) {
             </Select>
           </Form.Item>
 
+          {/* 检查模板：检查类活动必填（前端先卡一道，后端 schema 同样强校验）；
+              会议类活动不开展现场检查，无需模板，因此这里动态取消必填。 */}
           <Form.Item
-            label="检查模板"
-            name="template_id"
-            rules={[{ required: true, message: '请选择检查模板' }]}
-            extra="选择检查模板后，模板中的检查项将作为本次审核的检查条款"
+            noStyle
+            shouldUpdate={(prev, cur) => prev.activity_type !== cur.activity_type}
           >
-            <Select 
-              placeholder="请选择检查模板" 
-              showSearch
-              optionFilterProp="children"
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={templates.map((t) => ({
-                label: t.name,
-                value: t.id,
-              }))}
-            />
+            {({ getFieldValue }) => {
+              const required = !isMeetingActivity(getFieldValue('activity_type'))
+              return (
+                <Form.Item
+                  label="检查模板"
+                  name="template_id"
+                  rules={required ? [{ required: true, message: '请选择检查模板' }] : []}
+                  extra={
+                    required
+                      ? '选择检查模板后，模板中的检查项将作为本次审核的检查条款'
+                      : '会议类活动不开展现场检查，无需选择检查模板'
+                  }
+                >
+                  <Select
+                    placeholder={required ? '请选择检查模板' : '会议类活动可不选'}
+                    showSearch
+                    allowClear={!required}
+                    optionFilterProp="children"
+                    filterOption={(input, option) =>
+                      (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                    options={templates.map((t) => ({
+                      label: t.name,
+                      value: t.id,
+                    }))}
+                  />
+                </Form.Item>
+              )
+            }}
           </Form.Item>
 
           <Form.Item

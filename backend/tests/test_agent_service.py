@@ -509,7 +509,12 @@ def test_propose_create_audit_plan():
 
     team_res = Mock()
     team_res.all.return_value = [(team_member, user)]
-    db.execute.return_value = team_res
+    # 模板查询（第二条 db.execute）返回带检查项数量的模板行；
+    # 无模板时 _tool_propose_create_audit_plan 会整批拒绝，因此这里必须给出可用模板。
+    tpl_id = uuid4()
+    tpl_res = Mock()
+    tpl_res.all.return_value = [(tpl_id, "ISO9001 质量管理体系检查模板", "Q", "质量", 12)]
+    db.execute.side_effect = [team_res, tpl_res]
 
     plan_items = [
         {
@@ -545,6 +550,8 @@ def test_propose_create_audit_plan():
     assert proposal["data"]["total_items"] == 2
     assert len(proposal["data"]["plan_items"]) == 2
     assert proposal["data"]["plan_items"][0]["area_name"] == "首次会议及高层访谈"
+    # 检查类计划项必须锁定模板，避免确认后落库为空白检查任务
+    assert proposal["data"]["plan_items"][1]["template_id"] == str(tpl_id)
 
 
 def test_execute_action_create_audit_plan():
@@ -571,7 +578,20 @@ def test_execute_action_create_audit_plan():
 
     team_res = Mock()
     team_res.all.return_value = []
-    db.execute.return_value = team_res
+
+    # 检查类计划项必须绑定模板，否则 _action_create_audit_plan 会整批拒绝。
+    tpl_id = uuid4()
+    tpl_obj = SimpleNamespace(id=tpl_id, name="ISO9001 质量管理体系检查模板", is_deleted=False)
+    tpl_res = Mock()
+    tpl_res.scalars.return_value.all.return_value = [tpl_obj]
+
+    parent_res = Mock()
+    parent_res.all.return_value = []
+
+    items_res = Mock()
+    items_res.scalars.return_value.all.return_value = []
+
+    db.execute.side_effect = [team_res, tpl_res, parent_res, items_res]
 
     plan_items = [
         {
@@ -582,6 +602,7 @@ def test_execute_action_create_audit_plan():
             "assigned_member_names": ["张建国"],
             "certification_systems": ["Q"],
             "clauses": ["4.1", "5.1"],
+            "activity_type": "night_inspection",
         }
     ]
 
@@ -600,6 +621,7 @@ def test_execute_action_create_audit_plan():
     assert result["applied"] == "create_audit_plan"
     assert result["created_count"] == 1
     assert result["plan_items"][0]["area_name"] == "首次会议及管理层"
+    assert result["plan_items"][0]["template_id"] == str(tpl_id)
     assert db.add.called
     assert db.commit.called
 

@@ -44,6 +44,7 @@ from app.models.enterprise import Enterprise
 from app.models.audit_project import AuditProject, AuditTeamMember, AuditPlanItem, CommunicationMeeting
 from app.models.user import User
 from app.utils.roles import ADMIN_ROLES
+from app.utils.activity import is_meeting_activity, requires_template
 from app.utils.business_time import meeting_time_for_schedule
 from app.utils.meeting_guard import (
     duplicate_meeting_message,
@@ -487,7 +488,7 @@ async def _action_create_audit_plan(
                     target_template_id = tpl.id
                     break
 
-        is_pure_meeting = activity_type in ["opening_meeting", "closing_meeting", "internal_meeting"]
+        is_pure_meeting = is_meeting_activity(activity_type)
         if not target_template_id and not is_pure_meeting:
             all_sys = set([s.upper() for s in (systems or project.certification_systems or [])])
             has_q = "Q" in all_sys or any("9001" in s or "质量" in s for s in all_sys)
@@ -512,6 +513,17 @@ async def _action_create_audit_plan(
                         break
             if not target_template_id and all_tpls:
                 target_template_id = all_tpls[0].id
+
+        # 检查类活动必须落到一个真实存在的模板上。提案确认卡片是「所见即所执行」的，
+        # 若这里仍然为 None，落库后就是无模板的空白检查任务——宁可整批失败，也不写入脏数据。
+        if requires_template(activity_type) and not target_template_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"计划项「{area_name}」未能匹配到检查模板。"
+                    "请先在系统内创建可用的检查模板，或在该计划项上显式指定 template_name/template_id 后重试。"
+                ),
+            )
 
         random_suffix = "".join([str(random.randint(0, 9)) for _ in range(6)])
         task_no = f"TASK-{datetime.now().strftime('%Y%m%d')}-{random_suffix}"

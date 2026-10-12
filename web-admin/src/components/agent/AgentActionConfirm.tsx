@@ -14,6 +14,14 @@ import {
 
 const { Paragraph, Text } = Typography
 
+/**
+ * 会议类活动不开展现场检查，天然不需要检查模板。
+ * 与后端 app/utils/activity.py 的判定保持一致。
+ */
+const MEETING_ACTIVITY_TYPES = ['opening_meeting', 'closing_meeting', 'internal_meeting']
+const isMeetingActivity = (activityType?: string) =>
+  MEETING_ACTIVITY_TYPES.includes(activityType || 'normal')
+
 export interface AgentAction {
   type: 'create_task' | 'judgment' | 'final_verdict' | 'operation'
   serverAction?: string
@@ -150,6 +158,9 @@ export default function AgentActionConfirm({ action, applying = false, onConfirm
                       >
                         {r.template_name}
                       </Tag>
+                    ) : isMeetingActivity(r.activity_type) ? (
+                      // 会议类活动不开展现场检查，无需模板
+                      <Text type="secondary" style={{ fontSize: 11 }}>—</Text>
                     ) : (
                       <Tag color="warning" style={{ margin: 0, fontSize: 11, padding: '0 4px' }}>
                         未锁定模板

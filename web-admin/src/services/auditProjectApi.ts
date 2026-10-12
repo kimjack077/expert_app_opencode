@@ -106,12 +106,8 @@ export const auditPlanApi = {
     api.put(`/api/audit-projects/plan/${planItemId}`, data),
   
   // 删除审核计划项
-  delete: (planItemId: string) => 
+  delete: (planItemId: string) =>
     api.delete(`/api/audit-projects/plan/${planItemId}`),
-
-  // 绑定检查模板
-  bindTemplate: (planItemId: string, templateId: string) =>
-    api.post(`/api/audit-projects/plan/${planItemId}/bind-template`, { template_id: templateId }),
 }
 
 // ==================== 审核记录 API ====================

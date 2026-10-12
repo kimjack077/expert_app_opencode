@@ -154,7 +154,10 @@ class AuditPlanItemBase(BaseModel):
     assigned_member_ids: List[UUID] = Field(default=[], description="分配的审核员 ID 列表")
     certification_systems: List[str] = Field(default=[], description="本次任务审核的体系")
     clauses: List[str] = Field(default=[], description="具体条款列表")
-    template_id: Optional[UUID] = Field(None, description="关联的检查模板 ID")
+    template_id: Optional[UUID] = Field(
+        None,
+        description="关联的检查模板 ID（检查类活动必填；首次/末次会议、内部沟通等会议类活动豁免）",
+    )
     is_joint: bool = Field(default=False, description="是否为联合审核")
     joint_group_ids: List[str] = Field(default=[], description="联合的其他组标识列表")
     activity_type: str = Field(default="normal", description="活动类型")
@@ -169,6 +172,19 @@ class AuditPlanItemCreate(AuditPlanItemBase):
     project_id: Optional[UUID] = Field(
         None, description="所属审核项目 ID（可选，优先使用路径参数）"
     )
+
+    @model_validator(mode="after")
+    def _require_template_for_inspection(self):
+        """检查类活动必须选择检查模板。
+
+        没有模板的现场检查在执行时会加载出空白检查项，属于不可恢复的脏数据，
+        因此在入口处直接拒绝（会议类活动不开展现场检查，豁免）。
+        """
+        from app.utils.activity import requires_template
+
+        if requires_template(self.activity_type) and not self.template_id:
+            raise ValueError("请选择检查模板（检查类审核活动必须绑定检查模板）")
+        return self
 
 
 class AuditPlanItemUpdate(BaseModel):
@@ -188,6 +204,21 @@ class AuditPlanItemUpdate(BaseModel):
     activity_type: Optional[str] = None
     status: Optional[str] = None
     remarks: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _require_template_for_inspection(self):
+        """显式清空模板、且活动类型一并给出时，检查类活动一律拒绝。
+
+        这里只看请求体**同时**给出的这两个字段；单独修改活动类型（未动模板）的
+        部分更新由路由层拿数据库现有模板兜底判断，避免误伤只改时间/备注的请求。
+        """
+        from app.utils.activity import requires_template
+
+        fields = self.model_fields_set
+        if "template_id" in fields and "activity_type" in fields:
+            if self.template_id is None and requires_template(self.activity_type):
+                raise ValueError("请选择检查模板（检查类审核活动必须绑定检查模板）")
+        return self
 
 
 class AuditPlanItemResponse(AuditPlanItemBase):
