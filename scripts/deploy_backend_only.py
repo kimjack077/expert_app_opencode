@@ -71,6 +71,7 @@ EXPECTED_NEW_FILES: tuple[str, ...] = (
 EXPECTED_MARKERS: tuple[tuple[str, str], ...] = (
     ("app/utils/soft_delete.py", "INDIRECT_CASCADE_POLICY"),
     ("app/utils/item_stats.py", "classify_item"),
+    ("app/utils/llm_fallback.py", "FallbackTarget"),
 )
 
 HEALTH_URL = "http://localhost:8000/api/health"
