@@ -104,15 +104,39 @@ class Settings(BaseSettings):
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
 
-    # 备用 LLM（主模型 429/超时/异常自动降级用，edgefn 网关 + DeepSeek-V4-Flash 关闭思考模式快速响应）
+    # 第一备用 LLM（同供应商 SenseNova + sensenova-6.8-flash-lite，独立配额抗 429，思考模式 medium）
+    LLM_FALLBACK1_BASE_URL: str = "https://token.sensenova.cn/v1"
+    LLM_FALLBACK1_MODEL: str = "sensenova-6.8-flash-lite"
+    LLM_FALLBACK1_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
+
+    # 第二备用 LLM（跨供应商 EdgeFN + DeepSeek-V4-Flash，关闭思考秒级响应）
+    LLM_FALLBACK2_BASE_URL: str = "https://api.edgefn.net/v1"
+    LLM_FALLBACK2_MODEL: str = "DeepSeek-V4-Flash"
+    LLM_FALLBACK2_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+    LLM_FALLBACK2_REASONING_EFFORT: str = "none"
+
+    # 兼容旧配置项（指向第二备用模型）
     LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
     LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
+    def has_llm_fallback1(self) -> bool:
+        """是否配置了第一备用 LLM（SenseNova sensenova-6.8-flash-lite）。"""
+        return bool(self.LLM_FALLBACK1_BASE_URL and self.LLM_FALLBACK1_MODEL and self.LLM_FALLBACK1_API_KEY)
+
+    @property
+    def has_llm_fallback2(self) -> bool:
+        """是否配置了第二备用 LLM（EdgeFN DeepSeek-V4-Flash）。"""
+        return bool(self.LLM_FALLBACK2_BASE_URL and self.LLM_FALLBACK2_MODEL and self.LLM_FALLBACK2_API_KEY)
+
+    @property
     def has_llm_backup(self) -> bool:
-        """是否配置了备用 LLM。"""
-        return bool(self.LLM_BACKUP_BASE_URL and self.LLM_BACKUP_MODEL and self.LLM_BACKUP_API_KEY)
+        """是否配置了备用 LLM（第一备用或第二备用）。"""
+        return self.has_llm_fallback1 or self.has_llm_fallback2 or bool(
+            self.LLM_BACKUP_BASE_URL and self.LLM_BACKUP_MODEL and self.LLM_BACKUP_API_KEY
+        )
 
     # 模型分层（共享 Agent 运行时使用）。
     # cheap：简单意图（列任务、意图分类、规划步骤）——可指向更小/更快的模型；
@@ -163,18 +187,50 @@ class Settings(BaseSettings):
     # - deepseek-flash / DeepSeek-V4-Flash：设 low/medium/high 控制思考深度
     AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
 
-    # AI 文档解析备用 LLM（主模型 429/超时/断连自动降级，edgefn 网关 + DeepSeek-V4-Flash 关闭思考模式快速响应）
+    # AI 文档解析第一备用 LLM（SenseNova sensenova-6.8-flash-lite，思考模式 medium）
+    AI_EXTRACT_LLM_FALLBACK1_BASE_URL: str = "https://token.sensenova.cn/v1"
+    AI_EXTRACT_LLM_FALLBACK1_MODEL: str = "sensenova-6.8-flash-lite"
+    AI_EXTRACT_LLM_FALLBACK1_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    AI_EXTRACT_LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
+
+    # AI 文档解析第二备用 LLM（EdgeFN DeepSeek-V4-Flash，关闭思考模式快速响应）
+    AI_EXTRACT_LLM_FALLBACK2_BASE_URL: str = "https://api.edgefn.net/v1"
+    AI_EXTRACT_LLM_FALLBACK2_MODEL: str = "DeepSeek-V4-Flash"
+    AI_EXTRACT_LLM_FALLBACK2_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+    AI_EXTRACT_LLM_FALLBACK2_REASONING_EFFORT: str = "none"
+
+    # 兼容旧配置项
     AI_EXTRACT_LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
     AI_EXTRACT_LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     AI_EXTRACT_LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
 
     @property
+    def has_ai_extract_llm_fallback1(self) -> bool:
+        return bool(
+            self.AI_EXTRACT_LLM_FALLBACK1_BASE_URL
+            and self.AI_EXTRACT_LLM_FALLBACK1_MODEL
+            and self.AI_EXTRACT_LLM_FALLBACK1_API_KEY
+        )
+
+    @property
+    def has_ai_extract_llm_fallback2(self) -> bool:
+        return bool(
+            self.AI_EXTRACT_LLM_FALLBACK2_BASE_URL
+            and self.AI_EXTRACT_LLM_FALLBACK2_MODEL
+            and self.AI_EXTRACT_LLM_FALLBACK2_API_KEY
+        )
+
+    @property
     def has_ai_extract_llm_backup(self) -> bool:
         """是否配置了 AI 解析备用 LLM。"""
-        return bool(
-            self.AI_EXTRACT_LLM_BACKUP_BASE_URL
-            and self.AI_EXTRACT_LLM_BACKUP_MODEL
-            and self.AI_EXTRACT_LLM_BACKUP_API_KEY
+        return (
+            self.has_ai_extract_llm_fallback1
+            or self.has_ai_extract_llm_fallback2
+            or bool(
+                self.AI_EXTRACT_LLM_BACKUP_BASE_URL
+                and self.AI_EXTRACT_LLM_BACKUP_MODEL
+                and self.AI_EXTRACT_LLM_BACKUP_API_KEY
+            )
         )
 
     @property

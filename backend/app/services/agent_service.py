@@ -706,17 +706,23 @@ class AgentService:
                 "id": self.model,
                 "name": "DeepSeek Flash",
                 "capabilities": ["text", "vision"],
-                "recommended_for": "文字问答、检查准备简报与多模态分析",
+                "recommended_for": "主力多模态模型：文字问答、检查准备简报与现场分析",
             },
             {
-                "id": self.vision_model,
-                "name": "SenseNova Vision",
+                "id": settings.LLM_FALLBACK1_MODEL,
+                "name": "SenseNova 6.8 Flash Lite",
                 "capabilities": ["text", "vision"],
-                "recommended_for": "图片识别和多模态分析",
+                "recommended_for": "第一备用模型：商汤轻量推理（思考medium）",
+            },
+            {
+                "id": settings.LLM_FALLBACK2_MODEL,
+                "name": "DeepSeek V4 Flash",
+                "capabilities": ["text"],
+                "recommended_for": "第二备用模型：EdgeFN跨供应商容灾（关闭思考秒级响应）",
             },
         ]
 
-        return list({model["id"]: model for model in models}.values())
+        return list({model["id"]: model for model in models if model.get("id")}.values())
 
     def _resolve_model(self, model_id: Optional[str]) -> tuple[AsyncOpenAI, str] | None:
         selected_model = model_id or self.model
