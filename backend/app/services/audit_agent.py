@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.utils.llm_fallback import create_main_llm_client
+from app.utils.llm_json import extract_json
 from app.models.audit_project import (
     AuditProject,
     AuditAreaRecord,
@@ -402,8 +403,7 @@ class AuditAgent:
                 temperature=0.7,
             )
 
-            import json
-            result = json.loads(content)
+            result = extract_json(content)
             return result
 
         except Exception as e:
@@ -457,8 +457,7 @@ class AuditAgent:
                 temperature=0.3,
             )
 
-            import json
-            result = json.loads(content)
+            result = extract_json(content)
             return result
 
         except Exception as e:
@@ -555,8 +554,7 @@ class AuditAgent:
                 temperature=0.7,
             )
 
-            import json
-            result = json.loads(content)
+            result = extract_json(content)
             return result
 
         except Exception as e:
@@ -614,8 +612,7 @@ class AuditAgent:
                 temperature=0.5,
             )
 
-            import json
-            result = json.loads(content)
+            result = extract_json(content)
             return result
 
         except Exception as e:

@@ -181,19 +181,20 @@ export default function AuditRecordEdit() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      // 1. 获取项目信息
-      const projectRes = await auditProjectApi.get(projectId!)
+      // 1~3. 项目信息 / 模板列表 / 计划项互不依赖，并发取回。
+      // 原实现串行 await，页面打开耗时 = 三次请求之和（远程库时明显）。
+      const [projectRes, templatesRes, planRes] = await Promise.all([
+        auditProjectApi.get(projectId!),
+        templateApi.getTemplates({ limit: 100 }) as Promise<any>,
+        planItemId ? auditPlanApi.get(planItemId) : Promise.resolve(null),
+      ])
       setProject(projectRes.data)
 
-      // 2. 获取模板列表
-      const templatesRes: any = await templateApi.getTemplates({ limit: 100 })
       const availableTemplates = templatesRes.data?.items || templatesRes.data || []
       setTemplates(availableTemplates)
 
-      // 3. 如果有计划项ID，获取计划项详情
       let loadedPlanItem: any = null
-      if (planItemId) {
-        const planRes = await auditPlanApi.get(planItemId)
+      if (planRes) {
         loadedPlanItem = planRes.data
         setPlanItem(loadedPlanItem)
       }

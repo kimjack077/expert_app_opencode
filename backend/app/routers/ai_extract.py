@@ -105,6 +105,7 @@ async def extract_items_stream(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 
@@ -326,5 +327,6 @@ async def refine_extracted_items_stream(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )

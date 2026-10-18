@@ -22,7 +22,7 @@ const Users: React.FC = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res: any = await userApi.getUsers();
+            const res: any = await userApi.getUsers({ limit: 100 });
             setData(res.data || []);
         } catch (error) {
             message.error('获取用户列表失败');

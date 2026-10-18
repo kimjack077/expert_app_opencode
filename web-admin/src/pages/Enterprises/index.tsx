@@ -47,7 +47,9 @@ export default function Enterprises() {
   const fetchEnterprises = async () => {
     setLoading(true)
     try {
-      const params: any = {}
+      // 与分页器 pageSize 对齐：后端默认只回 20 条，而表格分页器按 10 条/页
+      // 显示 total=14x 时会翻出空白页。这里显式取上限，继续走前端分页。
+      const params: any = { limit: 100 }
       if (searchParams.name) params.name = searchParams.name
       if (searchParams.district) params.district = searchParams.district
       if (searchParams.risk_level) params.risk_level = searchParams.risk_level

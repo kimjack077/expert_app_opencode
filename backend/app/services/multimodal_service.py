@@ -347,16 +347,16 @@ class MultimodalService:
             "recommendations": [],
         }
 
-        # Try to extract JSON from response
-        import re
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
+        # Try to extract JSON from response（含代码围栏 / 前置说明文案）
+        from app.utils.llm_json import extract_json
+
+        try:
+            parsed = extract_json(response)
+            if isinstance(parsed, dict):
                 result.update(parsed)
                 return result
-            except json.JSONDecodeError:
-                pass
+        except ValueError:
+            pass
 
         # Fallback: use response as description
         result["description"] = response

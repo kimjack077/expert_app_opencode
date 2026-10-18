@@ -30,6 +30,29 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
+# ---------------------------------------------------------------------------
+# bcrypt 的异步包装（PERF）
+#
+# bcrypt 是纯 CPU 密集操作，单次 checkpw 在线上 4 核小机上约 250~300ms。
+# 直接在 async 路由里调用会**阻塞整个事件循环**：10 个并发登录实测被串成
+# 2.9 秒（p50 2925ms），期间所有其他请求（包括检查项保存）一起卡住。
+# 登录/改密属于低频操作，但恰恰容易在演示现场多人同时登录时集中触发。
+#
+# 因此异步路由一律使用下面两个包装：把 bcrypt 丢到线程池，事件循环继续服务
+# 其他请求。同步版本保留给脚本/测试与线程内调用。
+# ---------------------------------------------------------------------------
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(verify_password, plain_password, hashed_password)
+
+
+async def get_password_hash_async(password: str) -> str:
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(get_password_hash, password)
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     if expires_delta:

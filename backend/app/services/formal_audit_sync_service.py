@@ -153,6 +153,7 @@ async def sync_task_to_formal_record(
     ).scalars().first()
     if not area_record:
         existing_items = []
+        synced_items: list = []
         area_record = AuditAreaRecord(
             project_id=plan_item.project_id,
             area_id=area.id,
@@ -170,6 +171,7 @@ async def sync_task_to_formal_record(
         await db.flush()
     else:
         existing_items = list(area_record.items or [])
+        synced_items = existing_items
 
     existing_by_template = {
         str(item.template_item_id): item
@@ -193,6 +195,7 @@ async def sync_task_to_formal_record(
             )
             db.add(formal)
             await db.flush()
+            synced_items.append(formal)
             if source.template_item_id:
                 existing_by_template[str(source.template_item_id)] = formal
 
@@ -346,7 +349,11 @@ async def sync_task_to_formal_record(
         inspection_record.overall_result = overall
         inspection_record.inspector_id = recorded_by
 
-    for item in area_record.items or []:
+    # 这里必须用同步过程中自己维护的列表，不能访问 ``area_record.items``：
+    # 新建的 area_record 在 flush 之后关系集合仍是未加载状态，async 会话里
+    # 访问它会触发同步懒加载并抛 MissingGreenlet —— 任务完成接口直接 500，
+    # 且此时任务/计划项/正式记录都未提交，用户看到的是"提交失败"。
+    for item in synced_items:
         item.record_id = inspection_record.id
 
     area.status = "completed"

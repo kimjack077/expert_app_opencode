@@ -739,7 +739,9 @@ async def update_item(
 
     # 获取所属模板进行权限检查
     template = await db.get(InspectionTemplate, item.template_id)
-    if not template or template.is_deleted:
+    # 用 getattr 取值：单测里模板是 SimpleNamespace（无 is_deleted 列），
+    # 直接属性访问会抛 AttributeError 而不是返回 404。
+    if not template or getattr(template, "is_deleted", False):
         raise HTTPException(status_code=404, detail="Template not found")
     if not can_modify_template(current_user, template):
         raise HTTPException(status_code=403, detail="您没有权限修改此模板的项目")

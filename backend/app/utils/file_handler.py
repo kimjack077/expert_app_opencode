@@ -120,8 +120,11 @@ async def save_upload_file(
     enforce_max_size(file_size)
     enforce_magic_bytes(content, ext)
 
-    with open(file_path, "wb") as f:
-        f.write(content)
+    # 写盘是同步阻塞 IO；上传发生在移动端弱网、照片较大的场景，
+    # 直接写在事件循环里会卡住其他请求。卸载到线程池。
+    from starlette.concurrency import run_in_threadpool
+
+    await run_in_threadpool(file_path.write_bytes, content)
 
     relative_path = file_path.relative_to(Path(settings.UPLOAD_DIR).parent).as_posix()
     # Ensure the path starts with / so it works as an absolute URL

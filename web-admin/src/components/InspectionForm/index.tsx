@@ -71,7 +71,14 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   const [selectedTemplateIdForBind, setSelectedTemplateIdForBind] = useState<string | undefined>()
   const [bindingTemplate, setBindingTemplate] = useState(false)
 
+  // 模板下拉只在「任务未关联模板」的空态卡片里用到。
+  // 原实现在组件挂载时就无条件拉一次模板列表：检查表单每次打开都要多付
+  // 一次串行请求（远程库时代约 100~300ms），而 99% 的任务并不需要它。
+  // 改为空态出现后再懒加载，正常检查流程少一次请求。
+  const [templatesLoaded, setTemplatesLoaded] = useState(false)
   useEffect(() => {
+    if (flatItems.length > 0 || templatesLoaded) return
+    setTemplatesLoaded(true)
     templateApi.getTemplates({ limit: 100 }).then((res: any) => {
       const list = res.data?.items || res.data || []
       setAvailableTemplates(list)
@@ -79,7 +86,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         setSelectedTemplateIdForBind(list[0].id)
       }
     }).catch((err: any) => console.error('加载模板列表失败:', err))
-  }, [])
+  }, [flatItems.length, templatesLoaded])
 
   const handleBindTemplateAndGenerate = async () => {
     if (!selectedTemplateIdForBind) {
@@ -286,10 +293,19 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
     // 否则用户会误以为数据被删了（原实现一律显示"检查记录不存在"）。
     let notFound = false
     try {
+      // 0) 同一路径既可能是独立检查记录 ID，也可能是任务 ID。
+      // 原实现先试 /records，404 后再试 /tasks —— 任务场景下每次打开表单都
+      // 固定多一次往返（远程库约 100~300ms）。两个 GET 互不影响，并发发出、
+      // 按"记录优先"的顺序取用，失败分支的语义保持不变。
+      const [recordResult, taskResult] = await Promise.allSettled([
+        recordApi.getRecord(id),
+        taskApi.getTask(id),
+      ])
+
       // 1) 优先按独立检查记录加载
-      try {
-        const res: any = await recordApi.getRecord(id)
-        if (res.code === 200 && res.data) {
+      if (recordResult.status === 'fulfilled') {
+        const res: any = recordResult.value
+        if (res?.code === 200 && res.data) {
           setExecutionMode('record')
           setTaskId(null)
           setActualRecordId(id)
@@ -307,20 +323,18 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
           }
           return
         }
-      } catch {
-        // 不是检查记录，继续按任务处理
       }
 
       // 2) 按任务加载：直接读写 task_item_records，禁止另建独立检查记录
-      try {
-        const taskRes: any = await taskApi.getTask(id)
-        if (taskRes.code === 200 && taskRes.data) {
+      if (taskResult.status === 'fulfilled') {
+        const taskRes: any = taskResult.value
+        if (taskRes?.code === 200 && taskRes.data) {
           await loadTaskMode(taskRes.data)
           return
         }
-      } catch (e: any) {
-        console.error('Failed to load task inspection:', e)
-        if (e?.response?.status === 404) notFound = true
+      } else {
+        console.error('Failed to load task inspection:', taskResult.reason)
+        if ((taskResult.reason as any)?.response?.status === 404) notFound = true
       }
 
       setLoadError(notFound ? 'not_found' : 'failed')

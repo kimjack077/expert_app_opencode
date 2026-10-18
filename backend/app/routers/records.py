@@ -1891,7 +1891,11 @@ async def download_report_pdf(
     # 原实现硬编码 ("admin", "super_admin")，导致 auditor 能看见列表、点进去却 403。
     _ensure_record_access(record, current_user)
 
-    pdf_bytes = report_service.generate_pdf(record)
+    # reportlab 是纯 CPU 密集同步调用（大记录可达数百毫秒），在 async 路由里
+    # 直接执行会阻塞事件循环，期间所有其他请求一起排队。卸载到线程池。
+    from starlette.concurrency import run_in_threadpool
+
+    pdf_bytes = await run_in_threadpool(report_service.generate_pdf, record)
 
     from urllib.parse import quote
     enterprise_name = record.enterprise_name or (

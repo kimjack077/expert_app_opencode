@@ -60,6 +60,9 @@ CHECK_TYPE_RESULT_FIELD: dict[str, str] = {
 CHECK_TYPE_ALIASES: dict[str, str] = {
     "pass_fail": "radio",
     "pass-fail": "radio",
+    # 历史模板里数值型写过 ``number``（见 template_items.result_type 实测值），
+    # 前端也仍在使用该字面量，必须映射到 numeric 才不会被判成未知类型而拒绝。
+    "number": "numeric",
 }
 
 # 全部结果承载字段（用于检测"写错了字段"）

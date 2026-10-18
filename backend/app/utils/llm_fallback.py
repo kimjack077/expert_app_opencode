@@ -9,6 +9,8 @@
     response = await self.client.chat.completions.create(model=..., messages=...)
 """
 import logging
+import time
+from dataclasses import dataclass
 from typing import Any, Optional, AsyncGenerator
 
 import httpx
@@ -80,15 +82,22 @@ def fallback_reason(response: Any) -> str:
     return str(getattr(response, FALLBACK_REASON_ATTR, "") or "")
 
 
-from dataclasses import dataclass
-
-
 @dataclass
 class FallbackTarget:
     client: AsyncOpenAI
     model: str
     reasoning_effort: Optional[str] = None
     name: str = "fallback"
+    # 该备用目标是否优先于主模型使用（主模型长期限流时的"事实主力"）。
+    preferred_first: bool = False
+
+
+# 主模型熔断状态（进程内，按 tag 隔离）。
+# 主模型配额耗尽（429）时每个请求都先打一次主模型、失败后再走备用链路，
+# 实测每次白付 1.7~2.3 秒。这里记录"冷却截止时刻"：冷却期内直接走备用，
+# 冷却结束后再放一个请求去试探主模型（半开），成功即恢复主链路。
+_PRIMARY_COOLDOWN_UNTIL: dict[str, float] = {}
+_PRIMARY_COOLDOWN_SECONDS = 60.0
 
 
 class _CompletionsProxy:
@@ -99,10 +108,92 @@ class _CompletionsProxy:
         primary: AsyncOpenAI,
         backups: list[FallbackTarget],
         tag: str = "LLM-Fallback",
+        primary_reasoning_effort: Optional[str] = None,
     ):
         self._primary = primary
         self._backups = backups
         self._tag = tag
+        self._primary_reasoning_effort = primary_reasoning_effort
+
+    def _primary_available(self) -> bool:
+        until = _PRIMARY_COOLDOWN_UNTIL.get(self._tag, 0.0)
+        return time.monotonic() >= until
+
+    def _trip_primary_breaker(self) -> None:
+        _PRIMARY_COOLDOWN_UNTIL[self._tag] = time.monotonic() + _PRIMARY_COOLDOWN_SECONDS
+
+    def _reset_primary_breaker(self) -> None:
+        _PRIMARY_COOLDOWN_UNTIL.pop(self._tag, None)
+
+    @property
+    def _preferred_backups(self) -> list[FallbackTarget]:
+        return [t for t in self._backups if t.preferred_first]
+
+    def _cooldown_chain(self) -> list[FallbackTarget]:
+        """冷却期的尝试顺序：首选备用优先，其余备用随后（去重）。"""
+        ordered = self._preferred_backups + [
+            t for t in self._backups if not t.preferred_first
+        ]
+        return ordered
+
+    async def _call_preferred(self, args: tuple, kwargs: dict):
+        last_exc: Exception | None = None
+        for target in self._cooldown_chain():
+            try:
+                target_kwargs = self._prepare_target_kwargs(target, kwargs)
+                print(
+                    f"[{self._tag}] 主模型冷却中，直接使用备用 {target.name} "
+                    f"({target.model}, reasoning_effort={target.reasoning_effort})"
+                )
+                response = await target.client.chat.completions.create(
+                    *args, **target_kwargs
+                )
+                return mark_fallback_response(
+                    response, target.model, "primary cooldown"
+                )
+            except Exception as exc:
+                last_exc = exc
+                print(f"[{self._tag}] 备用 {target.name} 失败: {exc}")
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("no backup configured")
+
+    async def _stream_preferred(self, args: tuple, kwargs: dict):
+        last_exc: Exception | None = None
+        for target in self._cooldown_chain():
+            try:
+                target_kwargs = self._prepare_target_kwargs(target, kwargs)
+                print(
+                    f"[{self._tag}] 主模型冷却中，流式直接使用备用 {target.name} "
+                    f"({target.model}, reasoning_effort={target.reasoning_effort})"
+                )
+                stream = await target.client.chat.completions.create(
+                    *args, **target_kwargs
+                )
+                async for chunk in stream:
+                    yield chunk
+                return
+            except Exception as exc:
+                last_exc = exc
+                print(f"[{self._tag}] 备用流 {target.name} 失败: {exc}")
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("no backup configured")
+
+    def _primary_kwargs(self, kwargs: dict) -> dict:
+        """主模型调用参数：按配置关闭思考模式。
+
+        DeepSeek 兼容网关在未显式传 ``reasoning_effort`` 时默认开启思考，
+        流式响应会先吐大段 ``reasoning_content``、``delta.content`` 长时间为空。
+        实测同一提示词：默认 ttfb 无正文、总耗时 2.06s；显式 ``none`` 后
+        ttfb 0.84s、总耗时 0.91s 且有正文。对"现场录入即时建议"这种短输出，
+        思考模式既慢又会让前端看起来一直没响应，因此默认关闭。
+        """
+        if not self._primary_reasoning_effort:
+            return kwargs
+        primary_kwargs = dict(kwargs)
+        primary_kwargs.setdefault("reasoning_effort", self._primary_reasoning_effort)
+        return primary_kwargs
 
     @property
     def _backup(self) -> Optional[AsyncOpenAI]:
@@ -126,89 +217,125 @@ class _CompletionsProxy:
 
     async def create(self, *args: Any, **kwargs: Any):
         if not self._backups:
-            return await self._primary.chat.completions.create(*args, **kwargs)
+            return await self._primary.chat.completions.create(
+                *args, **self._primary_kwargs(kwargs)
+            )
 
         is_stream = bool(kwargs.get("stream"))
         if is_stream:
             return self._stream_with_fallback(*args, **kwargs)
 
-        try:
-            return await self._primary.chat.completions.create(*args, **kwargs)
-        except Exception as e:
-            primary_reason = f"{type(e).__name__}: {e}"
-            logger.warning(
-                f"[{self._tag}] 主模型调用失败 ({primary_reason})，开始尝试备用链路..."
-            )
-            print(f"[{self._tag}] primary failed ({primary_reason}); initiating fallback chain...")
-
-            last_exc = e
-            for idx, target in enumerate(self._backups, start=1):
-                try:
-                    target_kwargs = self._prepare_target_kwargs(target, kwargs)
-                    logger.warning(
-                        f"[{self._tag}] 正在自动切换至第 {idx} 备用模型: {target.name} ({target.model}), "
-                        f"reasoning_effort={target.reasoning_effort}"
-                    )
+        primary_reason = "primary cooldown (recent rate limit)"
+        if not self._primary_available() and self._preferred_backups:
+            # 主模型处于限流冷却期：直接把"首选备用"当作主模型调用，
+            # 跳过必然会失败的备用链头部（实测备用 #1 首包 2.8~26s）。
+            return await self._call_preferred(args, kwargs)
+        if self._primary_available():
+            try:
+                response = await self._primary.chat.completions.create(
+                    *args, **self._primary_kwargs(kwargs)
+                )
+                self._reset_primary_breaker()
+                return response
+            except Exception as e:
+                primary_reason = f"{type(e).__name__}: {e}"
+                if isinstance(e, RateLimitError):
+                    self._trip_primary_breaker()
                     print(
-                        f"[{self._tag}] switching to fallback #{idx} ({target.name}): "
-                        f"model={target.model}, reasoning_effort={target.reasoning_effort}"
+                        f"[{self._tag}] 主模型触发限流，{_PRIMARY_COOLDOWN_SECONDS:.0f}s 内直接走备用链路"
                     )
-                    response = await target.client.chat.completions.create(*args, **target_kwargs)
-                    return mark_fallback_response(response, target.model, primary_reason)
-                except Exception as fb_exc:
-                    last_exc = fb_exc
-                    fb_reason = f"{type(fb_exc).__name__}: {fb_exc}"
-                    logger.warning(
-                        f"[{self._tag}] 第 {idx} 备用模型 ({target.model}) 调用失败: {fb_reason}"
-                    )
-                    print(f"[{self._tag}] fallback #{idx} ({target.model}) failed: {fb_reason}")
 
-            raise last_exc
+        logger.warning(
+            f"[{self._tag}] 主模型调用失败 ({primary_reason})，开始尝试备用链路..."
+        )
+        print(f"[{self._tag}] primary failed ({primary_reason}); initiating fallback chain...")
+
+        last_exc: Exception = RuntimeError(primary_reason)
+        for idx, target in enumerate(self._backups, start=1):
+            try:
+                target_kwargs = self._prepare_target_kwargs(target, kwargs)
+                logger.warning(
+                    f"[{self._tag}] 正在自动切换至第 {idx} 备用模型: {target.name} ({target.model}), "
+                    f"reasoning_effort={target.reasoning_effort}"
+                )
+                print(
+                    f"[{self._tag}] switching to fallback #{idx} ({target.name}): "
+                    f"model={target.model}, reasoning_effort={target.reasoning_effort}"
+                )
+                response = await target.client.chat.completions.create(*args, **target_kwargs)
+                return mark_fallback_response(response, target.model, primary_reason)
+            except Exception as fb_exc:
+                last_exc = fb_exc
+                fb_reason = f"{type(fb_exc).__name__}: {fb_exc}"
+                logger.warning(
+                    f"[{self._tag}] 第 {idx} 备用模型 ({target.model}) 调用失败: {fb_reason}"
+                )
+                print(f"[{self._tag}] fallback #{idx} ({target.model}) failed: {fb_reason}")
+
+        raise last_exc
 
     async def _stream_with_fallback(self, *args: Any, **kwargs: Any) -> AsyncGenerator:
         """流式 fallback 生成器：在建连或首包阶段失败时自动无缝降级到备用模型链。"""
         streamed_any = False
-        try:
-            primary_stream = await self._primary.chat.completions.create(*args, **kwargs)
-            async for chunk in primary_stream:
+        primary_error: Optional[Exception] = None
+        if not self._primary_available() and self._preferred_backups:
+            async for chunk in self._stream_preferred(args, kwargs):
                 streamed_any = True
                 yield chunk
-        except Exception as e:
-            if streamed_any:
-                logger.error(f"[{self._tag}] 主模型流式传输中途中断 ({type(e).__name__}: {e})")
-                raise
-
-            primary_reason = f"{type(e).__name__}: {e}"
-            logger.warning(
-                f"[{self._tag}] 主模型流式连接失败 ({primary_reason})，开始尝试备用链路..."
-            )
-            print(f"[{self._tag}] primary stream failed ({primary_reason}); initiating fallback chain...")
-
-            last_exc = e
-            for idx, target in enumerate(self._backups, start=1):
-                try:
-                    target_kwargs = self._prepare_target_kwargs(target, kwargs)
-                    logger.warning(
-                        f"[{self._tag}] 正在自动降级切换至第 {idx} 备用流: {target.name} ({target.model}), "
-                        f"reasoning_effort={target.reasoning_effort}"
-                    )
+            return
+        if self._primary_available():
+            try:
+                primary_stream = await self._primary.chat.completions.create(
+                    *args, **self._primary_kwargs(kwargs)
+                )
+                async for chunk in primary_stream:
+                    streamed_any = True
+                    yield chunk
+                self._reset_primary_breaker()
+                return
+            except Exception as e:
+                primary_error = e
+                if isinstance(e, RateLimitError):
+                    self._trip_primary_breaker()
                     print(
-                        f"[{self._tag}] switching to fallback stream #{idx} ({target.name}): "
-                        f"model={target.model}, reasoning_effort={target.reasoning_effort}"
+                        f"[{self._tag}] 主模型触发限流，{_PRIMARY_COOLDOWN_SECONDS:.0f}s 内直接走备用链路"
                     )
-                    backup_stream = await target.client.chat.completions.create(*args, **target_kwargs)
-                    async for chunk in backup_stream:
-                        streamed_any = True
-                        yield chunk
-                    return
-                except Exception as fb_exc:
-                    if streamed_any:
-                        logger.error(f"[{self._tag}] 备用模型 #{idx} 流式传输中途中断: {fb_exc}")
-                        raise
-                    last_exc = fb_exc
-                    print(f"[{self._tag}] fallback stream #{idx} ({target.model}) failed: {fb_exc}")
+        e = primary_error or RuntimeError("primary cooldown (recent rate limit)")
+        if streamed_any:
+            logger.error(f"[{self._tag}] 主模型流式传输中途中断 ({type(e).__name__}: {e})")
+            raise e
 
-            raise last_exc
+        primary_reason = f"{type(e).__name__}: {e}"
+        logger.warning(
+            f"[{self._tag}] 主模型流式连接失败 ({primary_reason})，开始尝试备用链路..."
+        )
+        print(f"[{self._tag}] primary stream failed ({primary_reason}); initiating fallback chain...")
+
+        last_exc: Exception = e
+        for idx, target in enumerate(self._backups, start=1):
+            try:
+                target_kwargs = self._prepare_target_kwargs(target, kwargs)
+                logger.warning(
+                    f"[{self._tag}] 正在自动降级切换至第 {idx} 备用流: {target.name} ({target.model}), "
+                    f"reasoning_effort={target.reasoning_effort}"
+                )
+                print(
+                    f"[{self._tag}] switching to fallback stream #{idx} ({target.name}): "
+                    f"model={target.model}, reasoning_effort={target.reasoning_effort}"
+                )
+                backup_stream = await target.client.chat.completions.create(*args, **target_kwargs)
+                async for chunk in backup_stream:
+                    streamed_any = True
+                    yield chunk
+                return
+            except Exception as fb_exc:
+                if streamed_any:
+                    logger.error(f"[{self._tag}] 备用模型 #{idx} 流式传输中途中断: {fb_exc}")
+                    raise
+                last_exc = fb_exc
+                print(f"[{self._tag}] fallback stream #{idx} ({target.model}) failed: {fb_exc}")
+
+        raise last_exc
 
 
 class _ChatProxy:
@@ -217,8 +344,11 @@ class _ChatProxy:
         primary: AsyncOpenAI,
         backups: list[FallbackTarget],
         tag: str = "LLM-Fallback",
+        primary_reasoning_effort: Optional[str] = None,
     ):
-        self.completions = _CompletionsProxy(primary, backups, tag)
+        self.completions = _CompletionsProxy(
+            primary, backups, tag, primary_reasoning_effort
+        )
 
 
 class LLMClientWithFallback:
@@ -234,6 +364,7 @@ class LLMClientWithFallback:
         tag: str = "LLM-Fallback",
         backup: Optional[AsyncOpenAI] = None,
         backup_model: Optional[str] = None,
+        primary_reasoning_effort: Optional[str] = None,
     ):
         self._primary = primary
         target_list: list[FallbackTarget] = list(backups or [])
@@ -247,7 +378,9 @@ class LLMClientWithFallback:
                 )
             )
         self._backups = target_list
-        self.chat = _ChatProxy(primary, self._backups, tag)
+        self.chat = _ChatProxy(
+            primary, self._backups, tag, primary_reasoning_effort
+        )
 
     @property
     def _backup(self) -> Optional[AsyncOpenAI]:
@@ -262,7 +395,16 @@ class LLMClientWithFallback:
 
 
 def create_main_llm_client() -> LLMClientWithFallback:
-    """创建主 LLM 客户端，配置了多级备用模型时自动启用按序降级。"""
+    """创建主 LLM 客户端，配置了多级备用模型时自动启用按序降级。
+
+    备用顺序按**实测首包延迟**排列（2026-10-18 生产机实测，同一提示词）：
+
+    * EdgeFN / DeepSeek-V4-Flash —— 1.0~1.8s，正文稳定，支持 function calling 与 JSON 模式；
+    * SenseNova / sensenova-6.8-flash-lite —— 2.8~26s，且思考模式未关闭时可能整段
+      只有 reasoning_content、没有正文。
+
+    降级链按顺序尝试，先快后慢；慢模型留在末尾做最后的可用性兜底。
+    """
     primary = AsyncOpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
@@ -270,28 +412,7 @@ def create_main_llm_client() -> LLMClientWithFallback:
     )
     backups: list[FallbackTarget] = []
 
-    # 第 1 备用：商汤 sensenova-6.8-flash-lite，独立配额抗 429，思考模式 medium
-    if settings.has_llm_fallback1:
-        client1 = AsyncOpenAI(
-            base_url=settings.LLM_FALLBACK1_BASE_URL,
-            api_key=settings.LLM_FALLBACK1_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client1,
-                model=settings.LLM_FALLBACK1_MODEL,
-                reasoning_effort=settings.LLM_FALLBACK1_REASONING_EFFORT,
-                name="SenseNova-Fallback1",
-            )
-        )
-        print(
-            f"[LLM-Fallback] #1 backup configured: "
-            f"{settings.LLM_FALLBACK1_BASE_URL} / {settings.LLM_FALLBACK1_MODEL} "
-            f"(reasoning_effort={settings.LLM_FALLBACK1_REASONING_EFFORT})"
-        )
-
-    # 第 2 备用：EdgeFN DeepSeek-V4-Flash，跨供应商容灾，关闭思考模式快速响应
+    # 第 1 备用：EdgeFN DeepSeek-V4-Flash，跨供应商容灾，关闭思考秒级响应
     if settings.has_llm_fallback2:
         client2 = AsyncOpenAI(
             base_url=settings.LLM_FALLBACK2_BASE_URL,
@@ -303,15 +424,38 @@ def create_main_llm_client() -> LLMClientWithFallback:
                 client=client2,
                 model=settings.LLM_FALLBACK2_MODEL,
                 reasoning_effort=settings.LLM_FALLBACK2_REASONING_EFFORT,
-                name="EdgeFN-Fallback2",
+                name="EdgeFN-Fallback",
+                preferred_first=True,
+            )
+        )
+        print(
+            f"[LLM-Fallback] #1 backup configured: "
+            f"{settings.LLM_FALLBACK2_BASE_URL} / {settings.LLM_FALLBACK2_MODEL} "
+            f"(reasoning_effort={settings.LLM_FALLBACK2_REASONING_EFFORT})"
+        )
+
+    # 第 2 备用：同供应商 SenseNova flash-lite，独立配额抗 429
+    if settings.has_llm_fallback1:
+        client1 = AsyncOpenAI(
+            base_url=settings.LLM_FALLBACK1_BASE_URL,
+            api_key=settings.LLM_FALLBACK1_API_KEY,
+            timeout=settings.LLM_TIMEOUT,
+        )
+        backups.append(
+            FallbackTarget(
+                client=client1,
+                model=settings.LLM_FALLBACK1_MODEL,
+                reasoning_effort=settings.LLM_FALLBACK1_REASONING_EFFORT,
+                name="SenseNova-Fallback",
             )
         )
         print(
             f"[LLM-Fallback] #2 backup configured: "
-            f"{settings.LLM_FALLBACK2_BASE_URL} / {settings.LLM_FALLBACK2_MODEL} "
-            f"(reasoning_effort={settings.LLM_FALLBACK2_REASONING_EFFORT})"
+            f"{settings.LLM_FALLBACK1_BASE_URL} / {settings.LLM_FALLBACK1_MODEL} "
+            f"(reasoning_effort={settings.LLM_FALLBACK1_REASONING_EFFORT})"
         )
-    elif settings.has_llm_backup and not backups:
+
+    if not backups and settings.has_llm_backup:
         client_legacy = AsyncOpenAI(
             base_url=settings.LLM_BACKUP_BASE_URL,
             api_key=settings.LLM_BACKUP_API_KEY,
@@ -330,6 +474,7 @@ def create_main_llm_client() -> LLMClientWithFallback:
         primary=primary,
         backups=backups,
         tag="LLM-Fallback",
+        primary_reasoning_effort=settings.effective_llm_reasoning_effort,
     )
 
 
@@ -401,8 +546,11 @@ def create_ai_extract_llm_client() -> LLMClientWithFallback:
             )
         )
 
+    # AI 文档抽取对结构还原质量敏感，默认保留其思考配置
+    # （AI_EXTRACT_LLM_REASONING_EFFORT），不套用主对话模型的 none。
     return LLMClientWithFallback(
         primary=primary,
         backups=backups,
         tag="AIExtract-Fallback",
+        primary_reasoning_effort=settings.AI_EXTRACT_LLM_REASONING_EFFORT or None,
     )

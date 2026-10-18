@@ -141,10 +141,12 @@ class LLMService:
         full_content = ""
         try:
             print(f"[LLM] Streaming API with model={self.model}")
+            # 短结论/依据类输出用独立上限：LLM_MAX_TOKENS 默认 65536，
+            # 对按 TPM 计费的网关等于把配额一次性占满，主模型频繁 429。
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=settings.LLM_MAX_TOKENS,
+                max_tokens=settings.LLM_SHORT_OUTPUT_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
                 stream_options={"include_usage": True},
@@ -210,10 +212,12 @@ class LLMService:
         full_content = ""
         try:
             print(f"[LLM] Streaming basis API with model={self.model}")
+            # 短结论/依据类输出用独立上限：LLM_MAX_TOKENS 默认 65536，
+            # 对按 TPM 计费的网关等于把配额一次性占满，主模型频繁 429。
             stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=settings.LLM_MAX_TOKENS,
+                max_tokens=settings.LLM_SHORT_OUTPUT_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
                 stream_options={"include_usage": True},
@@ -301,7 +305,7 @@ class LLMService:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=settings.LLM_MAX_TOKENS,
+                max_tokens=settings.LLM_SHORT_OUTPUT_MAX_TOKENS,
                 temperature=settings.LLM_TEMPERATURE,
                 top_p=settings.LLM_TOP_P,
             )

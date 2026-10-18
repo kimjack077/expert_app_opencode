@@ -65,10 +65,11 @@ async def _recalculate_task_statistics(
     if not records:
         return
 
-    # 统计各类结果
-    pass_count = sum(1 for r in records if r.result == "pass")
-    fail_count = sum(1 for r in records if r.result == "fail")
-    na_count = sum(1 for r in records if r.result == "na")
+    # 统计各类结果：统一走 classify_result，兼容历史/外部写入的
+    # ``not_applicable`` / ``compliant`` 等同义值（只认 "na" 会漏计）。
+    pass_count = sum(1 for r in records if classify_result(r.result) == "pass")
+    fail_count = sum(1 for r in records if classify_result(r.result) == "fail")
+    na_count = sum(1 for r in records if classify_result(r.result) == "na")
     total = len(records)
 
     # 如果remarks存在且包含统计信息，则更新统计部分

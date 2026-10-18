@@ -94,7 +94,13 @@ class AuditReportGenerator:
         """生成 Word 格式审核报告"""
         # 获取项目数据
         project_data = await self._fetch_project_data(project_id)
-        
+
+        # python-docx 的排版/序列化是同步 CPU 操作，放线程池避免阻塞事件循环。
+        from starlette.concurrency import run_in_threadpool
+
+        return await run_in_threadpool(self._build_word_report, project_data)
+
+    def _build_word_report(self, project_data: dict) -> BytesIO:
         # 创建 Word 文档
         doc = Document()
         
@@ -125,6 +131,12 @@ class AuditReportGenerator:
         # 获取项目数据
         project_data = await self._fetch_project_data(project_id)
 
+        # reportlab 的排版是同步 CPU 操作，放线程池避免阻塞事件循环。
+        from starlette.concurrency import run_in_threadpool
+
+        return await run_in_threadpool(self._build_pdf_report, project_data)
+
+    def _build_pdf_report(self, project_data: dict) -> BytesIO:
         font_name = _ensure_cjk_font()
 
         # 创建 PDF 文档

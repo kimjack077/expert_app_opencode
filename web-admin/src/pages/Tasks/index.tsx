@@ -34,10 +34,10 @@ export default function Tasks() {
     setSearchParams(params, { replace: true })
   }
 
+  // 三个请求互不依赖，并发发出：原实现是串行 await（tasks→templates→users），
+  // 在远程库环境下总耗时等于三次往返之和。
   useEffect(() => {
-    fetchTasks()
-    fetchTemplates()
-    fetchUsers()
+    void Promise.all([fetchTasks(), fetchTemplates(), fetchUsers()])
   }, [statusFilter])
 
   const filteredTasks = useMemo(() => {
@@ -68,7 +68,8 @@ export default function Tasks() {
   const fetchTasks = async () => {
     setLoading(true)
     try {
-      const params: any = {}
+      // 表格无后端分页，依赖一次性取回（后端默认 limit=20 会截断）
+      const params: any = { limit: 100 }
       if (statusFilter) params.status = statusFilter
       const res: any = await taskApi.getTasks(params)
       setTasks(res.data?.items || res.data || [])

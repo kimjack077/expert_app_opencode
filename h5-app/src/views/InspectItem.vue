@@ -1063,7 +1063,10 @@ const generateAI = async () => {
     const itemId = route.params.itemId
     const token = localStorage.getItem('token')
     
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const API_BASE_URL =
+      import.meta.env.VITE_API_URL !== undefined
+        ? import.meta.env.VITE_API_URL
+        : 'http://localhost:8000'
     const url = isTaskMode.value
       ? `${API_BASE_URL}/api/tasks/${recordId}/records/${itemId}/ai-stream`
       : `${API_BASE_URL}/api/records/${recordId}/items/${itemId}/ai-stream`

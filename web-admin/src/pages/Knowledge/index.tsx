@@ -93,7 +93,8 @@ export default function Knowledge() {
   const fetchDocuments = async () => {
     setLoading(true)
     try {
-      const params: any = {}
+      // 表格为前端分页，需一次取回全部（后端默认 limit=20 会截断）
+      const params: any = { limit: 100 }
       if (selectedDocType) params.doc_type = selectedDocType
       if (searchKeyword) params.keyword = searchKeyword
       const res: any = await knowledgeApi.getDocuments(params)

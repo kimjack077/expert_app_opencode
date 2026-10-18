@@ -18,8 +18,8 @@ from app.schemas import (
     ApiResponse,
 )
 from app.utils.security import (
-    verify_password,
-    get_password_hash,
+    verify_password_async,
+    get_password_hash_async,
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -46,7 +46,12 @@ async def login(
     result = await db.execute(select(User).where(User.username == login_data.username))
     user = result.scalar_one_or_none()
 
-    if not user or user.is_deleted or not verify_password(login_data.password, user.hashed_password):
+    # bcrypt 走线程池：直接调用会阻塞事件循环，并发登录时把整站串行化。
+    if (
+        not user
+        or user.is_deleted
+        or not await verify_password_async(login_data.password, user.hashed_password)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -184,10 +189,10 @@ async def change_password(
     managed = await db.get(User, current_user.id)
     if managed is None or managed.is_deleted:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if not verify_password(password_data.old_password, managed.hashed_password):
+    if not await verify_password_async(password_data.old_password, managed.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect old password")
 
-    managed.hashed_password = get_password_hash(password_data.new_password)
+    managed.hashed_password = await get_password_hash_async(password_data.new_password)
     await db.commit()
     invalidate_user_cache(current_user.username)
 
@@ -225,7 +230,7 @@ async def register(
         email=user_data.email,
         phone=user_data.phone,
         full_name=user_data.full_name,
-        hashed_password=get_password_hash(user_data.password),
+        hashed_password=await get_password_hash_async(user_data.password),
         role=SELF_REGISTRATION_ROLE,
         org_id=None,
     )

@@ -301,6 +301,13 @@ async def analyze_photo_stream(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
+        # nginx 默认会缓冲上游响应，SSE 会被攒成整包再下发，
+        # 前端表现为"AI 一直转圈，最后一次性出现"。必须逐条透传。
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

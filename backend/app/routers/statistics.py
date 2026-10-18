@@ -433,55 +433,73 @@ async def get_nc_trend(
     now = datetime.now(timezone.utc)
     data = []
 
+    # PERF：原实现按月循环发 SQL（默认 6 个月 = 6 次往返，24 个月 = 24 次）。
+    # 改为一条 GROUP BY 查询取回整段区间的月度分布，再在 Python 侧补零。
+    # 远程库场景下这直接省掉 months-1 次网络往返。
+    month_starts: list[datetime] = []
     for i in range(months - 1, -1, -1):
-        # 计算月份
         month_date = datetime(now.year, now.month, 1) - timedelta(days=i * 30)
         if month_date.month == 12 and i > 0:
             month_start = datetime(month_date.year + 1, 1, 1) - timedelta(days=i * 30)
             month_start = datetime(month_start.year, month_start.month, 1)
         else:
             month_start = datetime(month_date.year, month_date.month, 1)
+        month_starts.append(month_start)
 
-        # 计算月末
-        if month_start.month == 12:
-            month_end = datetime(month_start.year + 1, 1, 1)
-        else:
-            month_end = datetime(month_start.year, month_start.month + 1, 1)
+    if not month_starts:
+        return make_response(data=[])
 
-        # 查询该月各类不符合项数量（join 项目表排除软删除项目下的不符合项）
-        stmt = select(
+    range_start = month_starts[0]
+    last_start = month_starts[-1]
+    range_end = (
+        datetime(last_start.year + 1, 1, 1)
+        if last_start.month == 12
+        else datetime(last_start.year, last_start.month + 1, 1)
+    )
+
+    month_expr = func.date_trunc("month", Nonconformity.created_at)
+    stmt = (
+        select(
+            month_expr.label("month"),
             func.count(Nonconformity.id).label("total"),
-            func.count(Nonconformity.id).filter(
-                Nonconformity.severity == "major"
-            ).label("major"),
-            func.count(Nonconformity.id).filter(
-                Nonconformity.severity == "minor"
-            ).label("minor"),
-            func.count(Nonconformity.id).filter(
-                Nonconformity.severity == "observation"
-            ).label("observation"),
-        ).outerjoin(
-            AuditProject, Nonconformity.project_id == AuditProject.id
-        ).where(
+            func.count(Nonconformity.id)
+            .filter(Nonconformity.severity == "major")
+            .label("major"),
+            func.count(Nonconformity.id)
+            .filter(Nonconformity.severity == "minor")
+            .label("minor"),
+            func.count(Nonconformity.id)
+            .filter(Nonconformity.severity == "observation")
+            .label("observation"),
+        )
+        .outerjoin(AuditProject, Nonconformity.project_id == AuditProject.id)
+        .where(
             and_(
-                Nonconformity.created_at >= month_start,
-                Nonconformity.created_at < month_end,
+                Nonconformity.created_at >= range_start,
+                Nonconformity.created_at < range_end,
                 or_(
                     Nonconformity.project_id.is_(None),
                     AuditProject.is_deleted == False,  # noqa: E712
                 ),
             )
         )
+        .group_by(month_expr)
+    )
 
-        result = await db.execute(stmt)
-        row = result.first()
+    rows = (await db.execute(stmt)).all()
+    by_month = {
+        row.month.strftime("%Y-%m"): row for row in rows if row.month is not None
+    }
 
+    for month_start in month_starts:
+        key = month_start.strftime("%Y-%m")
+        row = by_month.get(key)
         data.append({
-            "month": month_start.strftime("%Y-%m"),
-            "total": row.total or 0,
-            "major": row.major or 0,
-            "minor": row.minor or 0,
-            "observation": row.observation or 0,
+            "month": key,
+            "total": (row.total or 0) if row else 0,
+            "major": (row.major or 0) if row else 0,
+            "minor": (row.minor or 0) if row else 0,
+            "observation": (row.observation or 0) if row else 0,
         })
 
     return make_response(data=data)

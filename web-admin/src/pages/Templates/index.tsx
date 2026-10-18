@@ -115,7 +115,9 @@ export default function Templates() {
   const fetchTemplates = async () => {
     setLoading(true)
     try {
-      const res: any = await templateApi.getTemplates()
+      // 后端默认 limit=20 且不返回 total；本页是前端分页，必须一次取够，
+      // 否则第 21 个模板之后永远翻不到。
+      const res: any = await templateApi.getTemplates({ limit: 100 })
       setTemplates(res.data || [])
     } catch (error) {
       console.error('Failed to fetch templates:', error)

@@ -97,18 +97,30 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "deepseek-flash"
     LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
     LLM_MAX_TOKENS: int = 65536
+    # 「检查结论 / 法规依据」这类 50~80 字的短输出专用上限。
+    # 沿用 LLM_MAX_TOKENS(65536) 会让按 TPM 计费的网关把配额一次性占满，
+    # 实测主模型频繁返回 429 rate_limit_error。
+    LLM_SHORT_OUTPUT_MAX_TOKENS: int = 1024
     LLM_TEMPERATURE: float = 0.3
     LLM_TOP_P: float = 0.95
     LLM_TIMEOUT: int = 180
     # When True, DeepSeek-compatible calls may use thinking mode (slower, reasoning_content).
     # Evidence multi-clause agent always forces thinking off regardless of this flag.
     LLM_ENABLE_THINKING: bool = False
+    # 主模型的 reasoning_effort。
+    # DeepSeek 兼容网关**不传该参数时默认开启思考**：流式响应先吐一大段
+    # reasoning_content，delta.content 长时间为空，前端看起来"AI 卡住不动"。
+    # 实测同一提示词：默认 ttfb 无正文、总耗时 2.06s；显式 none 后 ttfb 0.84s、
+    # 总耗时 0.91s。LLM_ENABLE_THINKING=False（默认）时固定为 none；
+    # 需要思考能力时置 True 并把本项设为 low/medium/high。
+    LLM_REASONING_EFFORT: str = "none"
 
-    # 第一备用 LLM（同供应商 SenseNova + sensenova-6.8-flash-lite，独立配额抗 429，思考模式 medium）
+    # 第一备用 LLM（同供应商 SenseNova + sensenova-6.8-flash-lite，独立配额抗 429；
+# 关闭思考：medium 时首包实测 2.8~17.6s 且可能整段只有 reasoning 没有正文）
     LLM_FALLBACK1_BASE_URL: str = "https://token.sensenova.cn/v1"
     LLM_FALLBACK1_MODEL: str = "sensenova-6.8-flash-lite"
     LLM_FALLBACK1_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
-    LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
+    LLM_FALLBACK1_REASONING_EFFORT: str = "none"
 
     # 第二备用 LLM（跨供应商 EdgeFN + DeepSeek-V4-Flash，关闭思考秒级响应）
     LLM_FALLBACK2_BASE_URL: str = "https://api.edgefn.net/v1"
@@ -120,6 +132,14 @@ class Settings(BaseSettings):
     LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
     LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
     LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+
+    @property
+    def effective_llm_reasoning_effort(self) -> str | None:
+        """主模型实际使用的 reasoning_effort；关闭思考时返回 "none"。"""
+        if not self.LLM_ENABLE_THINKING:
+            return "none"
+        effort = (self.LLM_REASONING_EFFORT or "").strip().lower()
+        return effort or None
 
     @property
     def has_llm_fallback1(self) -> bool:

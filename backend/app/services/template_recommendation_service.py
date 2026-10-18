@@ -247,18 +247,17 @@ class TemplateRecommendationService:
 
     def _parse_ai_response(self, response: str) -> List[Dict[str, Any]]:
         """Parse AI response into recommendations."""
-        import re
+        from app.utils.llm_json import extract_json
+
         recommendations = []
-
-        # Try to extract JSON
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                recommendations = parsed.get("recommendations", [])
-            except json.JSONDecodeError:
-                pass
-
+        try:
+            parsed = extract_json(response)
+        except ValueError:
+            return recommendations
+        if isinstance(parsed, dict):
+            recommendations = parsed.get("recommendations", []) or []
+        elif isinstance(parsed, list):
+            recommendations = parsed
         return recommendations
 
     async def record_recommendation_feedback(

@@ -1791,7 +1791,10 @@ const generateFinalJudgment = async () => {
     }
 
     const token = localStorage.getItem('token')
-    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const API_BASE_URL =
+      import.meta.env.VITE_API_URL !== undefined
+        ? import.meta.env.VITE_API_URL
+        : 'http://localhost:8000'
 
     // 任务模式走任务数据链；记录模式走 InspectionRecord
     const streamUrl =

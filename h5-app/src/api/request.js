@@ -1,7 +1,13 @@
 import axios from 'axios'
 import { showToast } from 'vant'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// 生产构建留空 = 同源（nginx 反代 /api）；开发环境 .env.development 指向 8000。
+// 注意不能用 `|| 'http://localhost:8000'`：空串会被兜底成本机地址，
+// 手机端访问时就发到手机自己身上了。
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL !== undefined
+    ? import.meta.env.VITE_API_URL
+    : 'http://localhost:8000'
 
 const request = axios.create({
   baseURL: `${API_BASE_URL}/api`,

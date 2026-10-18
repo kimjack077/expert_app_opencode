@@ -77,7 +77,10 @@ def _normalize(kind: str) -> str:
         return "radio"
     if kind == "score":
         return "score"
-    if kind == "numeric":
+    # 历史数据里数值型还出现过 ``number`` 写法（template_items.result_type），
+    # 若不认它，这类项会被当成 radio 判定型 —— 前端按数值框录入、后端按
+    # 单选判定校验，永远判为"未完成"。
+    if kind in ("numeric", "number"):
         return "numeric"
     if kind in ("text", "textarea"):
         return "text"

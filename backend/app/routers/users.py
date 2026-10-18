@@ -10,7 +10,7 @@ from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.common import ApiResponse
 from app.utils.security import (
     get_current_user,
-    get_password_hash,
+    get_password_hash_async,
     get_current_admin_user,
     invalidate_user_cache,
 )
@@ -64,7 +64,7 @@ async def create_user(
         
     user_data = data.model_dump()
     password = user_data.pop("password")
-    user_data["hashed_password"] = get_password_hash(password)
+    user_data["hashed_password"] = await get_password_hash_async(password)
     
     user = User(**user_data)
     db.add(user)
@@ -93,7 +93,7 @@ async def update_user(
 
     if "password" in update_data:
         password = update_data.pop("password")
-        user.hashed_password = get_password_hash(password)
+        user.hashed_password = await get_password_hash_async(password)
 
     for key, value in update_data.items():
         setattr(user, key, value)
