@@ -181,18 +181,17 @@ class _CompletionsProxy:
         raise RuntimeError("no backup configured")
 
     def _primary_kwargs(self, kwargs: dict) -> dict:
-        """主模型调用参数：按配置关闭思考模式。
+        """主模型调用参数：按配置注入思考强度。
 
-        DeepSeek 兼容网关在未显式传 ``reasoning_effort`` 时默认开启思考，
-        流式响应会先吐大段 ``reasoning_content``、``delta.content`` 长时间为空。
-        实测同一提示词：默认 ttfb 无正文、总耗时 2.06s；显式 ``none`` 后
-        ttfb 0.84s、总耗时 0.91s 且有正文。对"现场录入即时建议"这种短输出，
-        思考模式既慢又会让前端看起来一直没响应，因此默认关闭。
+        由 ``LLM_ENABLE_THINKING`` / ``LLM_REASONING_EFFORT`` 控制，默认开启且为
+        medium。注意：**不要**为了缩短首包而默认关闭思考——DeepSeek 系列的
+        判定/建议质量依赖思考，关闭会明显影响效果。
+        只有显式把开关设为 False 时才传 ``none``（不传的话网关会回落到默认思考，
+        "关闭"会变成空操作）。
         """
-        if not self._primary_reasoning_effort:
-            return kwargs
         primary_kwargs = dict(kwargs)
-        primary_kwargs.setdefault("reasoning_effort", self._primary_reasoning_effort)
+        if self._primary_reasoning_effort:
+            primary_kwargs.setdefault("reasoning_effort", self._primary_reasoning_effort)
         return primary_kwargs
 
     @property
@@ -397,13 +396,8 @@ class LLMClientWithFallback:
 def create_main_llm_client() -> LLMClientWithFallback:
     """创建主 LLM 客户端，配置了多级备用模型时自动启用按序降级。
 
-    备用顺序按**实测首包延迟**排列（2026-10-18 生产机实测，同一提示词）：
-
-    * EdgeFN / DeepSeek-V4-Flash —— 1.0~1.8s，正文稳定，支持 function calling 与 JSON 模式；
-    * SenseNova / sensenova-6.8-flash-lite —— 2.8~26s，且思考模式未关闭时可能整段
-      只有 reasoning_content、没有正文。
-
-    降级链按顺序尝试，先快后慢；慢模型留在末尾做最后的可用性兜底。
+    备用顺序沿用项目既定配置：先同供应商的 SenseNova flash-lite（独立配额抗 429），
+    再跨供应商的 EdgeFN DeepSeek-V4-Flash（容灾兜底）。
     """
     primary = AsyncOpenAI(
         base_url=settings.LLM_BASE_URL,
@@ -412,29 +406,7 @@ def create_main_llm_client() -> LLMClientWithFallback:
     )
     backups: list[FallbackTarget] = []
 
-    # 第 1 备用：EdgeFN DeepSeek-V4-Flash，跨供应商容灾，关闭思考秒级响应
-    if settings.has_llm_fallback2:
-        client2 = AsyncOpenAI(
-            base_url=settings.LLM_FALLBACK2_BASE_URL,
-            api_key=settings.LLM_FALLBACK2_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client2,
-                model=settings.LLM_FALLBACK2_MODEL,
-                reasoning_effort=settings.LLM_FALLBACK2_REASONING_EFFORT,
-                name="EdgeFN-Fallback",
-                preferred_first=True,
-            )
-        )
-        print(
-            f"[LLM-Fallback] #1 backup configured: "
-            f"{settings.LLM_FALLBACK2_BASE_URL} / {settings.LLM_FALLBACK2_MODEL} "
-            f"(reasoning_effort={settings.LLM_FALLBACK2_REASONING_EFFORT})"
-        )
-
-    # 第 2 备用：同供应商 SenseNova flash-lite，独立配额抗 429
+    # 第 1 备用：商汤 sensenova-6.8-flash-lite，独立配额抗 429，思考模式 medium
     if settings.has_llm_fallback1:
         client1 = AsyncOpenAI(
             base_url=settings.LLM_FALLBACK1_BASE_URL,
@@ -446,16 +418,36 @@ def create_main_llm_client() -> LLMClientWithFallback:
                 client=client1,
                 model=settings.LLM_FALLBACK1_MODEL,
                 reasoning_effort=settings.LLM_FALLBACK1_REASONING_EFFORT,
-                name="SenseNova-Fallback",
+                name="SenseNova-Fallback1",
             )
         )
         print(
-            f"[LLM-Fallback] #2 backup configured: "
+            f"[LLM-Fallback] #1 backup configured: "
             f"{settings.LLM_FALLBACK1_BASE_URL} / {settings.LLM_FALLBACK1_MODEL} "
             f"(reasoning_effort={settings.LLM_FALLBACK1_REASONING_EFFORT})"
         )
 
-    if not backups and settings.has_llm_backup:
+    # 第 2 备用：EdgeFN DeepSeek-V4-Flash，跨供应商容灾
+    if settings.has_llm_fallback2:
+        client2 = AsyncOpenAI(
+            base_url=settings.LLM_FALLBACK2_BASE_URL,
+            api_key=settings.LLM_FALLBACK2_API_KEY,
+            timeout=settings.LLM_TIMEOUT,
+        )
+        backups.append(
+            FallbackTarget(
+                client=client2,
+                model=settings.LLM_FALLBACK2_MODEL,
+                reasoning_effort=settings.LLM_FALLBACK2_REASONING_EFFORT,
+                name="EdgeFN-Fallback2",
+            )
+        )
+        print(
+            f"[LLM-Fallback] #2 backup configured: "
+            f"{settings.LLM_FALLBACK2_BASE_URL} / {settings.LLM_FALLBACK2_MODEL} "
+            f"(reasoning_effort={settings.LLM_FALLBACK2_REASONING_EFFORT})"
+        )
+    elif settings.has_llm_backup and not backups:
         client_legacy = AsyncOpenAI(
             base_url=settings.LLM_BACKUP_BASE_URL,
             api_key=settings.LLM_BACKUP_API_KEY,

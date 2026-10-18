@@ -836,8 +836,7 @@ class AgentService:
                     messages=request_messages,
                     tools=None if force_final else TOOLS,
                     tool_choice="auto" if not force_final else None,
-                    # Agent 单轮输出不需要 65536：对按 TPM 计费的网关会把配额一次占满。
-                    max_tokens=min(8192, settings.LLM_MAX_TOKENS),
+                    max_tokens=settings.LLM_MAX_TOKENS,
                     temperature=settings.LLM_TEMPERATURE,
                     stream_options={"include_usage": True},
                     stream=True,
