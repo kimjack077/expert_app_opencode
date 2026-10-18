@@ -74,10 +74,11 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
   // 模板下拉只在「任务未关联模板」的空态卡片里用到。
   // 原实现在组件挂载时就无条件拉一次模板列表：检查表单每次打开都要多付
   // 一次串行请求（远程库时代约 100~300ms），而 99% 的任务并不需要它。
-  // 改为空态出现后再懒加载，正常检查流程少一次请求。
+  // 注意必须等 loading 结束再判断：挂载瞬间 flatItems 还是空数组，
+  // 过早判断会让这个「懒加载」在每次打开时照旧触发，等于没改。
   const [templatesLoaded, setTemplatesLoaded] = useState(false)
   useEffect(() => {
-    if (flatItems.length > 0 || templatesLoaded) return
+    if (loading || flatItems.length > 0 || templatesLoaded) return
     setTemplatesLoaded(true)
     templateApi.getTemplates({ limit: 100 }).then((res: any) => {
       const list = res.data?.items || res.data || []
@@ -86,7 +87,7 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
         setSelectedTemplateIdForBind(list[0].id)
       }
     }).catch((err: any) => console.error('加载模板列表失败:', err))
-  }, [flatItems.length, templatesLoaded])
+  }, [loading, flatItems.length, templatesLoaded])
 
   const handleBindTemplateAndGenerate = async () => {
     if (!selectedTemplateIdForBind) {
