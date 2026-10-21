@@ -11,13 +11,13 @@ import base64
 import json
 import time
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from openai import AsyncOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import settings
 from app.models.media import MediaFile
 from app.models.rag import PhotoAnalysis
+from app.utils.llm_fallback import create_vision_llm_client
 
 
 PHOTO_ANALYSIS_PROMPT = """你是一位专业的现场检查员助手。请分析这张检查照片，识别可能存在的问题或不合规情况。
@@ -55,12 +55,8 @@ class MultimodalService:
     """Service for photo analysis using vision-capable LLM"""
 
     def __init__(self):
-        # Use dedicated vision LLM client (Qwen3.5 Plus supports multimodal)
-        self.client = AsyncOpenAI(
-            base_url=settings.VISION_LLM_BASE_URL,
-            api_key=settings.VISION_LLM_API_KEY,
-            timeout=180,
-        )
+        # 视觉主模型 + AMD 多模态备用链
+        self.client = create_vision_llm_client()
         self.vision_model = settings.VISION_LLM_MODEL
 
     async def analyze_photo(

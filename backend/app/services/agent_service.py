@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.utils.llm_fallback import (
     create_main_llm_client,
+    create_vision_llm_client,
     served_model as fb_served_model,
     was_fallback as fb_was_fallback,
 )
@@ -703,43 +704,47 @@ class AgentService:
     def __init__(self):
         self.client = create_main_llm_client()
         self.model = settings.LLM_MODEL
-        self.vision_client = AsyncOpenAI(
-            base_url=settings.VISION_LLM_BASE_URL,
-            api_key=settings.VISION_LLM_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        self.vision_client = create_vision_llm_client()
         self.vision_model = settings.VISION_LLM_MODEL
 
     def get_available_models(self) -> list[dict]:
+        extra_meta = {
+            "Qwen3.8-Flash-Next": (
+                "Qwen3.8 Flash Next",
+                "AMD 多模态：简报生成、图片理解与快速推理",
+            ),
+            "MiMo-V2.6-Flash": (
+                "MiMo V2.6 Flash",
+                "AMD 多模态：超长上下文简报与图片理解",
+            ),
+        }
         models = [
             {
                 "id": self.model,
-                "name": "DeepSeek Flash",
-                "capabilities": ["text", "vision"],
-                "recommended_for": "主力多模态模型：文字问答、检查准备简报与现场分析",
-            },
-            {
-                "id": settings.LLM_FALLBACK1_MODEL,
-                "name": "SenseNova 6.8 Flash Lite",
-                "capabilities": ["text", "vision"],
-                "recommended_for": "第一备用模型：商汤轻量推理（思考medium）",
-            },
-            {
-                "id": settings.LLM_FALLBACK2_MODEL,
                 "name": "DeepSeek V4 Flash",
                 "capabilities": ["text"],
-                "recommended_for": "第二备用模型：EdgeFN跨供应商容灾（关闭思考秒级响应）",
+                "recommended_for": "主模型：文字问答、检查准备简报与审核推理",
             },
         ]
+        for model_id in settings.extra_models:
+            name, recommended = extra_meta.get(
+                model_id, (model_id, "AMD 端点可选模型（多模态）")
+            )
+            models.append(
+                {
+                    "id": model_id,
+                    "name": name,
+                    "capabilities": ["text", "vision"],
+                    "recommended_for": recommended,
+                }
+            )
 
         return list({model["id"]: model for model in models if model.get("id")}.values())
 
     def _resolve_model(self, model_id: Optional[str]) -> tuple[AsyncOpenAI, str] | None:
         selected_model = model_id or self.model
-        if selected_model == self.model:
-            return self.client, self.model
-        if selected_model == self.vision_model:
-            return self.vision_client, self.vision_model
+        if selected_model == self.model or selected_model in settings.extra_models:
+            return self.client, selected_model
         return None
 
     async def chat_stream(

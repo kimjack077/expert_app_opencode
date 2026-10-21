@@ -126,8 +126,8 @@ class AIExtractService:
         self._init_clients()
 
     def _init_clients(self):
-        # AI 文档解析专用模型：SenseNova deepseek-flash（原生支持多模态，流式稳定）
-        # 配置了备用模型时自动启用降级（主 429/超时/断连 → edgefn DeepSeek-V4-Flash + reasoning_effort=none）
+        # AI 文档解析专用模型：AMD DeepSeek-V4-Flash（思考模式 medium）
+        # 主模型 429/超时/断连时按统一备用链降级，备用同样保持思考模式。
         self.client = create_ai_extract_llm_client()
         self.model = settings.AI_EXTRACT_LLM_MODEL
 
@@ -300,8 +300,8 @@ class AIExtractService:
                 content_sent = 0
 
                 # 建连/响应头等待阶段同样发送心跳（模型首字延迟可能较长）
-                # 推理模型（deepseek-flash / DeepSeek-V4-Flash）传 reasoning_effort 会先输出 reasoning_content；
-                # 备用降级时由 llm_fallback 强制传入 reasoning_effort=none 快速响应。
+                # 推理模型（DeepSeek-V4-Flash）传 reasoning_effort 会先输出 reasoning_content；
+                # 备用降级时由 llm_fallback 按备用目标配置注入同级思考强度。
                 # stream_options.include_usage 让最后一个 chunk 带 token 统计。
                 reasoning_kwargs = settings.ai_extract_reasoning_kwargs
                 print(f"[AIExtract] Calling {self.model} with reasoning_kwargs={reasoning_kwargs}")

@@ -90,6 +90,49 @@ class FallbackTarget:
     name: str = "fallback"
     # 该备用目标是否优先于主模型使用（主模型长期限流时的"事实主力"）。
     preferred_first: bool = False
+    # 备用目标的输出预算上限。部分网关在声明 64k max_tokens 时直接 429，
+    # 这里取调用方请求值与上限的较小值。
+    max_tokens: Optional[int] = None
+
+
+def build_fallback_targets(
+    targets: list[dict],
+    *,
+    timeout: float,
+    max_tokens: Optional[int] = None,
+    name_prefix: str = "",
+) -> list[FallbackTarget]:
+    """把 settings 的备用目标描述转成 FallbackTarget 列表。
+
+    ``max_tokens`` 显式传入时覆盖每个目标自带的预算（例如 AI 文档解析需要
+    比对话更高的输出上限）。
+    """
+    built: list[FallbackTarget] = []
+    for index, item in enumerate(targets, start=1):
+        name = item.get("name") or f"Fallback{index}"
+        if name_prefix:
+            name = f"{name_prefix}-{name}"
+        target_max_tokens = max_tokens if max_tokens is not None else item.get("max_tokens")
+        built.append(
+            FallbackTarget(
+                client=AsyncOpenAI(
+                    base_url=item["base_url"],
+                    api_key=item["api_key"],
+                    timeout=timeout,
+                ),
+                model=item["model"],
+                reasoning_effort=item.get("reasoning_effort"),
+                name=name,
+                max_tokens=target_max_tokens,
+            )
+        )
+        print(
+            f"[{name_prefix or 'LLM'}-Fallback] #{index} configured: "
+            f"{item['base_url']} / {item['model']} "
+            f"(reasoning_effort={item.get('reasoning_effort')}, "
+            f"max_tokens={target_max_tokens})"
+        )
+    return built
 
 
 # 主模型熔断状态（进程内，按 tag 隔离）。
@@ -210,6 +253,12 @@ class _CompletionsProxy:
             target_kwargs["reasoning_effort"] = target.reasoning_effort
         else:
             target_kwargs.pop("reasoning_effort", None)
+        if target.max_tokens:
+            requested = target_kwargs.get("max_tokens")
+            if isinstance(requested, int) and requested > 0:
+                target_kwargs["max_tokens"] = min(requested, target.max_tokens)
+            else:
+                target_kwargs["max_tokens"] = target.max_tokens
         # 移除 stream_options 避免对端网关兼容性问题
         target_kwargs.pop("stream_options", None)
         return target_kwargs
@@ -394,73 +443,17 @@ class LLMClientWithFallback:
 
 
 def create_main_llm_client() -> LLMClientWithFallback:
-    """创建主 LLM 客户端，配置了多级备用模型时自动启用按序降级。
-
-    备用顺序沿用项目既定配置：先同供应商的 SenseNova flash-lite（独立配额抗 429），
-    再跨供应商的 EdgeFN DeepSeek-V4-Flash（容灾兜底）。
-    """
+    """创建主 LLM 客户端：AMD 主模型 + 按序降级的多供应商备用链。"""
     primary = AsyncOpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
         timeout=settings.LLM_TIMEOUT,
     )
-    backups: list[FallbackTarget] = []
-
-    # 第 1 备用：商汤 sensenova-6.8-flash-lite，独立配额抗 429，思考模式 medium
-    if settings.has_llm_fallback1:
-        client1 = AsyncOpenAI(
-            base_url=settings.LLM_FALLBACK1_BASE_URL,
-            api_key=settings.LLM_FALLBACK1_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client1,
-                model=settings.LLM_FALLBACK1_MODEL,
-                reasoning_effort=settings.LLM_FALLBACK1_REASONING_EFFORT,
-                name="SenseNova-Fallback1",
-            )
-        )
-        print(
-            f"[LLM-Fallback] #1 backup configured: "
-            f"{settings.LLM_FALLBACK1_BASE_URL} / {settings.LLM_FALLBACK1_MODEL} "
-            f"(reasoning_effort={settings.LLM_FALLBACK1_REASONING_EFFORT})"
-        )
-
-    # 第 2 备用：EdgeFN DeepSeek-V4-Flash，跨供应商容灾
-    if settings.has_llm_fallback2:
-        client2 = AsyncOpenAI(
-            base_url=settings.LLM_FALLBACK2_BASE_URL,
-            api_key=settings.LLM_FALLBACK2_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client2,
-                model=settings.LLM_FALLBACK2_MODEL,
-                reasoning_effort=settings.LLM_FALLBACK2_REASONING_EFFORT,
-                name="EdgeFN-Fallback2",
-            )
-        )
-        print(
-            f"[LLM-Fallback] #2 backup configured: "
-            f"{settings.LLM_FALLBACK2_BASE_URL} / {settings.LLM_FALLBACK2_MODEL} "
-            f"(reasoning_effort={settings.LLM_FALLBACK2_REASONING_EFFORT})"
-        )
-    elif settings.has_llm_backup and not backups:
-        client_legacy = AsyncOpenAI(
-            base_url=settings.LLM_BACKUP_BASE_URL,
-            api_key=settings.LLM_BACKUP_API_KEY,
-            timeout=settings.LLM_TIMEOUT,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client_legacy,
-                model=settings.LLM_BACKUP_MODEL,
-                reasoning_effort="none",
-                name="Legacy-Backup",
-            )
-        )
+    backups = build_fallback_targets(
+        settings.llm_fallback_targets,
+        timeout=settings.LLM_TIMEOUT,
+        name_prefix="LLM",
+    )
 
     return LLMClientWithFallback(
         primary=primary,
@@ -471,78 +464,45 @@ def create_main_llm_client() -> LLMClientWithFallback:
 
 
 def create_ai_extract_llm_client() -> LLMClientWithFallback:
-    """创建 AI 文档解析 LLM 客户端，配置了多级备用模型时自动启用按序降级。"""
+    """创建 AI 文档解析 LLM 客户端，沿用主对话的供应商备用链。"""
     primary_timeout = httpx.Timeout(connect=15.0, read=600.0, write=60.0, pool=15.0)
     primary = AsyncOpenAI(
         base_url=settings.AI_EXTRACT_LLM_BASE_URL,
         api_key=settings.AI_EXTRACT_LLM_API_KEY,
         timeout=primary_timeout,
     )
-    backups: list[FallbackTarget] = []
+    backups = build_fallback_targets(
+        settings.llm_fallback_targets,
+        timeout=primary_timeout,
+        max_tokens=settings.AI_EXTRACT_LLM_FALLBACK_MAX_TOKENS,
+        name_prefix="AIExtract",
+    )
 
-    # 第 1 备用：商汤 sensenova-6.8-flash-lite，思考模式 medium
-    if settings.has_ai_extract_llm_fallback1:
-        client1 = AsyncOpenAI(
-            base_url=settings.AI_EXTRACT_LLM_FALLBACK1_BASE_URL,
-            api_key=settings.AI_EXTRACT_LLM_FALLBACK1_API_KEY,
-            timeout=primary_timeout,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client1,
-                model=settings.AI_EXTRACT_LLM_FALLBACK1_MODEL,
-                reasoning_effort=settings.AI_EXTRACT_LLM_FALLBACK1_REASONING_EFFORT,
-                name="SenseNova-AIExtract-Fallback1",
-            )
-        )
-        print(
-            f"[AIExtract-Fallback] #1 backup configured: "
-            f"{settings.AI_EXTRACT_LLM_FALLBACK1_BASE_URL} / "
-            f"{settings.AI_EXTRACT_LLM_FALLBACK1_MODEL} "
-            f"(reasoning_effort={settings.AI_EXTRACT_LLM_FALLBACK1_REASONING_EFFORT})"
-        )
-
-    # 第 2 备用：EdgeFN DeepSeek-V4-Flash，关闭思考模式快速响应
-    if settings.has_ai_extract_llm_fallback2:
-        client2 = AsyncOpenAI(
-            base_url=settings.AI_EXTRACT_LLM_FALLBACK2_BASE_URL,
-            api_key=settings.AI_EXTRACT_LLM_FALLBACK2_API_KEY,
-            timeout=primary_timeout,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client2,
-                model=settings.AI_EXTRACT_LLM_FALLBACK2_MODEL,
-                reasoning_effort=settings.AI_EXTRACT_LLM_FALLBACK2_REASONING_EFFORT,
-                name="EdgeFN-AIExtract-Fallback2",
-            )
-        )
-        print(
-            f"[AIExtract-Fallback] #2 backup configured: "
-            f"{settings.AI_EXTRACT_LLM_FALLBACK2_BASE_URL} / "
-            f"{settings.AI_EXTRACT_LLM_FALLBACK2_MODEL} "
-            f"(reasoning_effort={settings.AI_EXTRACT_LLM_FALLBACK2_REASONING_EFFORT})"
-        )
-    elif settings.has_ai_extract_llm_backup and not backups:
-        client_legacy = AsyncOpenAI(
-            base_url=settings.AI_EXTRACT_LLM_BACKUP_BASE_URL,
-            api_key=settings.AI_EXTRACT_LLM_BACKUP_API_KEY,
-            timeout=primary_timeout,
-        )
-        backups.append(
-            FallbackTarget(
-                client=client_legacy,
-                model=settings.AI_EXTRACT_LLM_BACKUP_MODEL,
-                reasoning_effort="none",
-                name="Legacy-AIExtract-Backup",
-            )
-        )
-
-    # AI 文档抽取对结构还原质量敏感，默认保留其思考配置
-    # （AI_EXTRACT_LLM_REASONING_EFFORT），不套用主对话模型的 none。
+    # AI 文档抽取对结构还原质量敏感，保留其独立思考配置。
     return LLMClientWithFallback(
         primary=primary,
         backups=backups,
         tag="AIExtract-Fallback",
         primary_reasoning_effort=settings.AI_EXTRACT_LLM_REASONING_EFFORT or None,
+    )
+
+
+def create_vision_llm_client() -> LLMClientWithFallback:
+    """创建视觉 LLM 客户端：SenseNova 多模态主模型 + AMD 多模态备用。"""
+    primary = AsyncOpenAI(
+        base_url=settings.VISION_LLM_BASE_URL,
+        api_key=settings.VISION_LLM_API_KEY,
+        timeout=settings.LLM_TIMEOUT,
+    )
+    backups = build_fallback_targets(
+        settings.vision_fallback_targets,
+        timeout=settings.LLM_TIMEOUT,
+        name_prefix="Vision",
+    )
+
+    return LLMClientWithFallback(
+        primary=primary,
+        backups=backups,
+        tag="Vision-Fallback",
+        primary_reasoning_effort=settings.effective_vision_reasoning_effort,
     )

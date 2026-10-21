@@ -91,11 +91,11 @@ class Settings(BaseSettings):
     def CORS_ORIGIN_LIST(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
-    # DeepSeek Flash (via SenseNova): 原生支持多模态（文本与图片）、长上下文、JSON 输出与工具调用。
-    LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
-    LLM_PROVIDER: str = "sensenova"
-    LLM_MODEL: str = "deepseek-flash"
-    LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    # 主模型：AMD Radeon 云（DeepSeek-V4-Flash）
+    LLM_BASE_URL: str = "https://developer.amd.com.cn/radeon/api/v1"
+    LLM_PROVIDER: str = "amd"
+    LLM_MODEL: str = "DeepSeek-V4-Flash"
+    LLM_API_KEY: str = "rc-7306d58389263eb712f29dc61c4e2fcf16eb31293f5e7089"
     LLM_MAX_TOKENS: int = 65536
     LLM_TEMPERATURE: float = 0.3
     LLM_TOP_P: float = 0.95
@@ -108,22 +108,54 @@ class Settings(BaseSettings):
     # 主模型的思考强度：low / medium / high。默认 medium。
     LLM_REASONING_EFFORT: str = "medium"
 
-    # 第一备用 LLM（同供应商 SenseNova + sensenova-6.8-flash-lite，独立配额抗 429）
-    LLM_FALLBACK1_BASE_URL: str = "https://token.sensenova.cn/v1"
-    LLM_FALLBACK1_MODEL: str = "sensenova-6.8-flash-lite"
-    LLM_FALLBACK1_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    # AMD 端点上的其它多模态模型（文本 + 图片），可被简报生成直接选用，并作为视觉备用。
+    LLM_EXTRA_MODELS: str = "MiMo-V2.6-Flash,Qwen3.8-Flash-Next"
+
+    # 备用链（顺序即优先级）。备用目标统一限制输出预算：
+    # 部分网关（实测 SenseNova）在声明 64k max_tokens 时直接返回 429。
+    LLM_FALLBACK_MAX_TOKENS: int = 8192
+
+    # 第 1 备用：EdgeFN DeepSeek-V4-Flash（跨供应商容灾）
+    LLM_FALLBACK1_NAME: str = "EdgeFN-DeepSeek-V4-Flash"
+    LLM_FALLBACK1_BASE_URL: str = "https://api.edgefn.net/v1"
+    LLM_FALLBACK1_MODEL: str = "DeepSeek-V4-Flash"
+    LLM_FALLBACK1_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
     LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
 
-    # 第二备用 LLM（跨供应商 EdgeFN + DeepSeek-V4-Flash，关闭思考秒级响应）
-    LLM_FALLBACK2_BASE_URL: str = "https://api.edgefn.net/v1"
-    LLM_FALLBACK2_MODEL: str = "DeepSeek-V4-Flash"
-    LLM_FALLBACK2_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
-    LLM_FALLBACK2_REASONING_EFFORT: str = "none"
+    # 第 2 备用：SenseNova deepseek-v4-flash
+    LLM_FALLBACK2_NAME: str = "SenseNova-DeepSeek-V4-Flash"
+    LLM_FALLBACK2_BASE_URL: str = "https://token.sensenova.cn/v1"
+    LLM_FALLBACK2_MODEL: str = "deepseek-v4-flash"
+    LLM_FALLBACK2_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    LLM_FALLBACK2_REASONING_EFFORT: str = "medium"
 
-    # 兼容旧配置项（指向第二备用模型）
-    LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
-    LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
-    LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
+    # 第 3 备用：SenseNova sensenova-6.8-flash-lite（独立配额抗 429）
+    LLM_FALLBACK3_NAME: str = "SenseNova-6.8-Flash-Lite"
+    LLM_FALLBACK3_BASE_URL: str = "https://token.sensenova.cn/v1"
+    LLM_FALLBACK3_MODEL: str = "sensenova-6.8-flash-lite"
+    LLM_FALLBACK3_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    LLM_FALLBACK3_REASONING_EFFORT: str = "medium"
+
+    # 第 4 备用：讯飞 MaaS xopqwen36v35b
+    LLM_FALLBACK4_NAME: str = "Xunfei-xopqwen36v35b"
+    LLM_FALLBACK4_BASE_URL: str = "https://maas-api.cn-huabei-1.xf-yun.com/v2"
+    LLM_FALLBACK4_MODEL: str = "xopqwen36v35b"
+    LLM_FALLBACK4_API_KEY: str = "76893fbd7cfbeffe6e201416647a83bd:MjUyMjY4YjY1NmVhODQxM2UwYjYyODMy"
+    LLM_FALLBACK4_REASONING_EFFORT: str = "medium"
+
+    # 第 5 备用：Agnes agnes-3.0-flash
+    LLM_FALLBACK5_NAME: str = "Agnes-3.0-Flash"
+    LLM_FALLBACK5_BASE_URL: str = "https://apihub.agnes-ai.com/v1"
+    LLM_FALLBACK5_MODEL: str = "agnes-3.0-flash"
+    LLM_FALLBACK5_API_KEY: str = "sk-PzYYnjm47YA4Wocto2DdQs87pkEvlQgaYIDhFAItikBFhdtR"
+    LLM_FALLBACK5_REASONING_EFFORT: str = "medium"
+
+    # 第 6 备用：AntLing Ling-3.1-flash
+    LLM_FALLBACK6_NAME: str = "AntLing-Ling-3.1-Flash"
+    LLM_FALLBACK6_BASE_URL: str = "https://api.ant-ling.com/v1"
+    LLM_FALLBACK6_MODEL: str = "Ling-3.1-flash"
+    LLM_FALLBACK6_API_KEY: str = "sk-studio-7b4c7dd4b4b545fc87ad8eea2171e4aa"
+    LLM_FALLBACK6_REASONING_EFFORT: str = "medium"
 
     @property
     def effective_llm_reasoning_effort(self) -> str | None:
@@ -138,21 +170,42 @@ class Settings(BaseSettings):
         return effort or "medium"
 
     @property
-    def has_llm_fallback1(self) -> bool:
-        """是否配置了第一备用 LLM（SenseNova sensenova-6.8-flash-lite）。"""
-        return bool(self.LLM_FALLBACK1_BASE_URL and self.LLM_FALLBACK1_MODEL and self.LLM_FALLBACK1_API_KEY)
+    def extra_models(self) -> list[str]:
+        return [m.strip() for m in self.LLM_EXTRA_MODELS.split(",") if m.strip()]
 
     @property
-    def has_llm_fallback2(self) -> bool:
-        """是否配置了第二备用 LLM（EdgeFN DeepSeek-V4-Flash）。"""
-        return bool(self.LLM_FALLBACK2_BASE_URL and self.LLM_FALLBACK2_MODEL and self.LLM_FALLBACK2_API_KEY)
+    def llm_fallback_targets(self) -> list[dict]:
+        """按 LLM_FALLBACK1..6 的顺序返回已配置的备用目标。"""
+        targets: list[dict] = []
+        for index in range(1, 7):
+            base_url = getattr(self, f"LLM_FALLBACK{index}_BASE_URL", "")
+            model = getattr(self, f"LLM_FALLBACK{index}_MODEL", "")
+            api_key = getattr(self, f"LLM_FALLBACK{index}_API_KEY", "")
+            if not (base_url and model and api_key):
+                continue
+            targets.append(
+                {
+                    "name": getattr(self, f"LLM_FALLBACK{index}_NAME", "")
+                    or f"Fallback{index}",
+                    "base_url": base_url,
+                    "model": model,
+                    "api_key": api_key,
+                    "reasoning_effort": getattr(
+                        self, f"LLM_FALLBACK{index}_REASONING_EFFORT", "medium"
+                    )
+                    or None,
+                    "max_tokens": int(
+                        getattr(self, f"LLM_FALLBACK{index}_MAX_TOKENS", 0)
+                        or self.LLM_FALLBACK_MAX_TOKENS
+                    ),
+                }
+            )
+        return targets
 
     @property
     def has_llm_backup(self) -> bool:
-        """是否配置了备用 LLM（第一备用或第二备用）。"""
-        return self.has_llm_fallback1 or self.has_llm_fallback2 or bool(
-            self.LLM_BACKUP_BASE_URL and self.LLM_BACKUP_MODEL and self.LLM_BACKUP_API_KEY
-        )
+        """是否配置了任意备用 LLM。"""
+        return bool(self.llm_fallback_targets)
 
     # 模型分层（共享 Agent 运行时使用）。
     # cheap：简单意图（列任务、意图分类、规划步骤）——可指向更小/更快的模型；
@@ -190,64 +243,79 @@ class Settings(BaseSettings):
     MINIMAX_MODEL: str = "DeepSeek-V3.2"
     MINIMAX_GROUP_ID: str = ""
 
-    # Vision/multimodal model (deepseek-flash 原生支持多模态)
+    # Vision/multimodal model（SenseNova deepseek-flash 已验证支持图片输入）
     VISION_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
     VISION_LLM_MODEL: str = "deepseek-flash"
-    VISION_LLM_API_KEY: str = ""
+    VISION_LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    VISION_LLM_ENABLE_THINKING: bool = True
+    VISION_LLM_REASONING_EFFORT: str = "medium"
+    VISION_LLM_FALLBACK_MAX_TOKENS: int = 4096
 
-    # AI 文档解析辅助录入专用模型（SenseNova 网关 deepseek-flash，流式稳定、速度快）
-    AI_EXTRACT_LLM_BASE_URL: str = "https://token.sensenova.cn/v1"
-    AI_EXTRACT_LLM_MODEL: str = "deepseek-flash"
-    AI_EXTRACT_LLM_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
+    # 视觉备用：AMD 端点上的多模态模型（按优先级排列）
+    VISION_LLM_FALLBACK1_NAME: str = "AMD-DeepSeek-V4-Flash-Vision-Exp"
+    VISION_LLM_FALLBACK1_BASE_URL: str = "https://developer.amd.com.cn/radeon/api/v1"
+    VISION_LLM_FALLBACK1_MODEL: str = "DeepSeek-V4-Flash-Vision-Exp"
+    VISION_LLM_FALLBACK1_API_KEY: str = "rc-7306d58389263eb712f29dc61c4e2fcf16eb31293f5e7089"
+    VISION_LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
+
+    VISION_LLM_FALLBACK2_NAME: str = "AMD-Qwen3.8-Flash-Next"
+    VISION_LLM_FALLBACK2_BASE_URL: str = "https://developer.amd.com.cn/radeon/api/v1"
+    VISION_LLM_FALLBACK2_MODEL: str = "Qwen3.8-Flash-Next"
+    VISION_LLM_FALLBACK2_API_KEY: str = "rc-7306d58389263eb712f29dc61c4e2fcf16eb31293f5e7089"
+    VISION_LLM_FALLBACK2_REASONING_EFFORT: str = "medium"
+
+    VISION_LLM_FALLBACK3_NAME: str = "AMD-MiMo-V2.6-Flash"
+    VISION_LLM_FALLBACK3_BASE_URL: str = "https://developer.amd.com.cn/radeon/api/v1"
+    VISION_LLM_FALLBACK3_MODEL: str = "MiMo-V2.6-Flash"
+    VISION_LLM_FALLBACK3_API_KEY: str = "rc-7306d58389263eb712f29dc61c4e2fcf16eb31293f5e7089"
+    VISION_LLM_FALLBACK3_REASONING_EFFORT: str = "medium"
+
+    @property
+    def effective_vision_reasoning_effort(self) -> str | None:
+        if not self.VISION_LLM_ENABLE_THINKING:
+            return "none"
+        effort = (self.VISION_LLM_REASONING_EFFORT or "").strip().lower()
+        return effort or "medium"
+
+    @property
+    def vision_fallback_targets(self) -> list[dict]:
+        targets: list[dict] = []
+        for index in range(1, 4):
+            base_url = getattr(self, f"VISION_LLM_FALLBACK{index}_BASE_URL", "")
+            model = getattr(self, f"VISION_LLM_FALLBACK{index}_MODEL", "")
+            api_key = getattr(self, f"VISION_LLM_FALLBACK{index}_API_KEY", "")
+            if not (base_url and model and api_key):
+                continue
+            targets.append(
+                {
+                    "name": getattr(self, f"VISION_LLM_FALLBACK{index}_NAME", "")
+                    or f"VisionFallback{index}",
+                    "base_url": base_url,
+                    "model": model,
+                    "api_key": api_key,
+                    "reasoning_effort": getattr(
+                        self, f"VISION_LLM_FALLBACK{index}_REASONING_EFFORT", "medium"
+                    )
+                    or None,
+                    "max_tokens": self.VISION_LLM_FALLBACK_MAX_TOKENS,
+                }
+            )
+        return targets
+
+    # AI 文档解析辅助录入专用模型（AMD DeepSeek-V4-Flash，流式稳定、速度快）
+    AI_EXTRACT_LLM_BASE_URL: str = "https://developer.amd.com.cn/radeon/api/v1"
+    AI_EXTRACT_LLM_MODEL: str = "DeepSeek-V4-Flash"
+    AI_EXTRACT_LLM_API_KEY: str = "rc-7306d58389263eb712f29dc61c4e2fcf16eb31293f5e7089"
     # 推理力度：low/medium/high/none/空（仅推理模型生效）
     # - deepseek-flash / DeepSeek-V4-Flash：设 low/medium/high 控制思考深度
     AI_EXTRACT_LLM_REASONING_EFFORT: str = "medium"
-
-    # AI 文档解析第一备用 LLM（SenseNova sensenova-6.8-flash-lite，思考模式 medium）
-    AI_EXTRACT_LLM_FALLBACK1_BASE_URL: str = "https://token.sensenova.cn/v1"
-    AI_EXTRACT_LLM_FALLBACK1_MODEL: str = "sensenova-6.8-flash-lite"
-    AI_EXTRACT_LLM_FALLBACK1_API_KEY: str = "sk-QGka5gp5QYBxJXL6UeJwPpwL7b7pZZPR"
-    AI_EXTRACT_LLM_FALLBACK1_REASONING_EFFORT: str = "medium"
-
-    # AI 文档解析第二备用 LLM（EdgeFN DeepSeek-V4-Flash，关闭思考模式快速响应）
-    AI_EXTRACT_LLM_FALLBACK2_BASE_URL: str = "https://api.edgefn.net/v1"
-    AI_EXTRACT_LLM_FALLBACK2_MODEL: str = "DeepSeek-V4-Flash"
-    AI_EXTRACT_LLM_FALLBACK2_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
-    AI_EXTRACT_LLM_FALLBACK2_REASONING_EFFORT: str = "none"
-
-    # 兼容旧配置项
-    AI_EXTRACT_LLM_BACKUP_BASE_URL: str = "https://api.edgefn.net/v1"
-    AI_EXTRACT_LLM_BACKUP_MODEL: str = "DeepSeek-V4-Flash"
-    AI_EXTRACT_LLM_BACKUP_API_KEY: str = "sk-PJHqVIOVEgya3CAu12682eFb2cBe4aBcB2396625E1Bc7cA3"
-
-    @property
-    def has_ai_extract_llm_fallback1(self) -> bool:
-        return bool(
-            self.AI_EXTRACT_LLM_FALLBACK1_BASE_URL
-            and self.AI_EXTRACT_LLM_FALLBACK1_MODEL
-            and self.AI_EXTRACT_LLM_FALLBACK1_API_KEY
-        )
-
-    @property
-    def has_ai_extract_llm_fallback2(self) -> bool:
-        return bool(
-            self.AI_EXTRACT_LLM_FALLBACK2_BASE_URL
-            and self.AI_EXTRACT_LLM_FALLBACK2_MODEL
-            and self.AI_EXTRACT_LLM_FALLBACK2_API_KEY
-        )
+    # 解析长文档需要更高输出预算，但仍低于部分网关的 429 阈值
+    AI_EXTRACT_LLM_FALLBACK_MAX_TOKENS: int = 16000
 
     @property
     def has_ai_extract_llm_backup(self) -> bool:
-        """是否配置了 AI 解析备用 LLM。"""
-        return (
-            self.has_ai_extract_llm_fallback1
-            or self.has_ai_extract_llm_fallback2
-            or bool(
-                self.AI_EXTRACT_LLM_BACKUP_BASE_URL
-                and self.AI_EXTRACT_LLM_BACKUP_MODEL
-                and self.AI_EXTRACT_LLM_BACKUP_API_KEY
-            )
-        )
+        """AI 解析与主对话共用同一条备用供应商链。"""
+        return bool(self.llm_fallback_targets)
 
     @property
     def ai_extract_is_thinking_model(self) -> bool:

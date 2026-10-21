@@ -91,29 +91,19 @@ class EvidenceAgentService:
         )
 
     @staticmethod
-    def _is_deepseek_model(model: str | None = None) -> bool:
-        name = (model or settings.LLM_MODEL or "").lower()
-        return "deepseek" in name
-
-    @classmethod
-    def _structured_call_kwargs(cls, *, max_tokens: int) -> dict[str, Any]:
+    def _structured_call_kwargs(*, max_tokens: int) -> dict[str, Any]:
         """OpenAI-compatible kwargs for strict JSON evidence analysis.
 
         DeepSeek V4 notes (via SenseNova gateway probe 2026-07-19):
         - Built-in JSON Output works with response_format=json_object.
         - Default may emit reasoning_content (thinking mode); content still holds JSON.
-        - For structured multi-clause tasks, disable thinking to cut latency/cost and
-          avoid token budget spent on chain-of-thought.
+        - 本项目统一保持思考模式（reasoning_effort=medium）以保证判定准确率。
         """
-        kwargs: dict[str, Any] = {
+        return {
             "temperature": 0.2,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
-        if cls._is_deepseek_model():
-            # Official-style toggle used by DeepSeek-compatible gateways
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
-        return kwargs
 
     @staticmethod
     def _message_text(message: Any) -> str:

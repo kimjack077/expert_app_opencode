@@ -19,10 +19,8 @@ import time
 from enum import Enum
 from typing import Any, AsyncGenerator, Optional
 
-from openai import AsyncOpenAI
-
 from app.config import settings
-from app.utils.llm_fallback import create_main_llm_client
+from app.utils.llm_fallback import create_main_llm_client, create_vision_llm_client
 
 
 class LLMTier(str, Enum):
@@ -34,12 +32,8 @@ class LLMTier(str, Enum):
 class LLMGateway:
     def __init__(self) -> None:
         self._text_client = create_main_llm_client()
-        # 视觉模型可能是独立 endpoint / key
-        self._vision_client = AsyncOpenAI(
-            api_key=settings.VISION_LLM_API_KEY or settings.LLM_API_KEY,
-            base_url=settings.VISION_LLM_BASE_URL or settings.LLM_BASE_URL,
-            timeout=settings.LLM_TIMEOUT,
-        )
+        # 视觉模型可能是独立 endpoint / key，主模型不可用时自动降级到 AMD 多模态模型
+        self._vision_client = create_vision_llm_client()
 
     def _resolve(self, tier: LLMTier) -> tuple[Any, str]:
         if tier == LLMTier.VISION:
