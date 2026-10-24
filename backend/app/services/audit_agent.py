@@ -29,6 +29,19 @@ from app.models.enterprise import Enterprise
 
 logger = logging.getLogger(__name__)
 
+# 主 LLM 客户端（1 主 + 多备）在进程内共享：便捷包装函数每次调用都新建
+# AuditAgent，若每次都重建整条 fallback 链（每个 OpenAI 客户端构造约
+# 数百毫秒），AI 端点会白付约 1~2s 的固定开销。LLMClientWithFallback
+# 只持有不可变配置，跨协程共享安全（其余服务均为模块级单例，同此口径）。
+_shared_llm_client: Optional["object"] = None
+
+
+def _get_shared_llm_client():
+    global _shared_llm_client
+    if _shared_llm_client is None:
+        _shared_llm_client = create_main_llm_client()
+    return _shared_llm_client
+
 
 class AuditAgent:
     """审核 AI Agent - 支持多模型"""
@@ -50,7 +63,7 @@ class AuditAgent:
         # drafting are text tasks.  Keep them on the configured primary text
         # model; the separate vision model is reserved for photo analysis.
         self.model_provider = settings.LLM_PROVIDER
-        self.client = create_main_llm_client()
+        self.client = _get_shared_llm_client()
         self.model = settings.LLM_MODEL
 
     async def _chat_json(
