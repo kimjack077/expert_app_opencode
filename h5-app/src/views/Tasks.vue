@@ -104,22 +104,22 @@
             </div>
             
             <h3 class="task-title">{{ formatTaskDisplay(task).primary }}</h3>
-            <p class="task-desc">{{ formatTaskDisplay(task).secondary || task.description || '暂无描述' }}</p>
-            
+            <p class="task-desc">{{ formatTaskDisplay(task).secondary || task.target_name || taskDescription(task) || '暂无描述' }}</p>
+
             <div class="task-meta">
-              <div class="meta-item" v-if="task.location">
+              <div class="meta-item" v-if="task.target_address">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
                   <circle cx="12" cy="10" r="3"/>
                 </svg>
-                <span>{{ task.location }}</span>
+                <span>{{ task.target_address }}</span>
               </div>
-              <div class="meta-item" v-if="task.assignee">
+              <div class="meta-item" v-if="task.assigned_to_name">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
-                <span>{{ task.assignee }}</span>
+                <span>{{ task.assigned_to_name }}</span>
               </div>
             </div>
             
@@ -161,7 +161,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getTasks, getTaskStatistics } from '../api/tasks.js'
-import { formatTaskDisplay } from '../utils/display.js'
+import { formatTaskDisplay, taskDescription } from '../utils/display.js'
 import { CACHE_EVENT, listCachedEntries } from '@/utils/offlineCache.js'
 import BottomNav from '../components/BottomNav.vue'
 
@@ -204,16 +204,11 @@ const statusCounts = computed(() => {
 })
 
 const filteredTasks = computed(() => {
+  // 搜索交给后端（按标题/任务编号/检查对象模糊匹配），此处只做状态筛选，
+  // 避免用不存在的字段在本地二次过滤把后端命中的结果又丢掉。
   let result = tasks.value
   if (activeFilter.value !== 'all') {
     result = result.filter(t => t.status === activeFilter.value)
-  }
-  if (searchText.value) {
-    const keyword = searchText.value.toLowerCase()
-    result = result.filter(t => 
-      t.title?.toLowerCase().includes(keyword) ||
-      t.location?.toLowerCase().includes(keyword)
-    )
   }
   return result
 })

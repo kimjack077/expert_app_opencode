@@ -451,6 +451,7 @@ const Industries: React.FC = () => {
             ) : (
               <Tree
                 treeData={treeData}
+                fieldNames={{ key: 'id', title: 'name', children: 'children' }}
                 expandedKeys={expandedKeys}
                 selectedKeys={selectedNode ? [selectedNode.id] : []}
                 onSelect={handleSelect}

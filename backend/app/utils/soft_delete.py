@@ -49,7 +49,7 @@ FK 图表达不了的归属关系，必须显式声明（「删除项目 → 处
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
@@ -128,7 +128,8 @@ FK_CASCADE_POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     ("inspection_record_items", "record_id", "inspection_records"): (
         CASCADE_HARD,
         "ORM 已声明 cascade='all, delete-orphan'，设计意图即随记录删除；"
-        "该表无 is_deleted 列，软删记录后明细会成为永久孤儿（实测 189 条）。",
+        "该表无 is_deleted 列，软删记录后明细会成为永久孤儿（实测 189 条）。"
+        "例外：同时挂靠正式区域记录的明细仅解除 record_id，保留正式证据及不符合项引用。",
     ),
     ("task_item_records", "task_id", "inspection_tasks"): (
         CASCADE_HARD,
@@ -592,6 +593,16 @@ async def _apply_cascade(
             .execution_options(synchronize_session=False)
         )
     else:  # CASCADE_HARD
+        if table.name == "inspection_record_items" and column_name == "record_id":
+            # formal_sync 会让同一明细同时属于简易记录和正式区域记录。
+            # 删除简易记录只解除这一侧归属，不能销毁正式证据及其不符合项引用。
+            await db.execute(
+                update(table)
+                .where(condition, table.c.audit_area_record_id.is_not(None))
+                .values(record_id=None)
+                .execution_options(synchronize_session=False)
+            )
+            condition = condition & table.c.audit_area_record_id.is_(None)
         stmt = (
             delete(table)
             .where(condition)
@@ -600,6 +611,29 @@ async def _apply_cascade(
         )
 
     result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def _detach_task_media(db: AsyncSession, task_ids: list, tables) -> list:
+    """硬删任务明细前，解除所有媒体引用（包括历史仅 record_id 关联及已软删行）。"""
+    media = tables.get("media_files")
+    records = tables.get("task_item_records")
+    if media is None or records is None or not task_ids:
+        return []
+
+    result = await db.execute(
+        update(media)
+        .where(
+            media.c.record_id == records.c.id,
+            records.c.task_id.in_(task_ids),
+        )
+        .values(
+            task_id=func.coalesce(media.c.task_id, records.c.task_id),
+            record_id=None,
+        )
+        .returning(media.c.id)
+        .execution_options(synchronize_session=False)
+    )
     return list(result.scalars().all())
 
 
@@ -669,6 +703,19 @@ async def soft_delete_cascade(
         for parent_table_name, parent_ids in frontier:
             if not parent_ids:
                 continue
+
+            if parent_table_name == "inspection_tasks":
+                # 必须先解除 FK，再硬删明细；不能只按媒体 task_id 找，否则漏掉历史上传。
+                # 已归档媒体也需解除 FK，但只对 live 行走正常软删及下一层照片分析清理。
+                media_ids = await _detach_task_media(db, parent_ids, Base.metadata.tables)
+                if media_ids:
+                    rows = await _apply_cascade(
+                        db, Base.metadata.tables["media_files"], "id", media_ids,
+                        CASCADE_SOFT, now,
+                    )
+                    if rows:
+                        affected["media_files"] = affected.get("media_files", 0) + len(rows)
+                        next_frontier.append(("media_files", rows))
 
             # ── 1. 直接级联（外键在子表上）────────────────────────────
             child_relations = _order_cascade_relations(

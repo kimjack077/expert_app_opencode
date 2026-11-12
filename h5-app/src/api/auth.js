@@ -10,3 +10,11 @@ export const login = (data) => {
 export const getCurrentUser = () => {
   return request.get('/auth/me')
 }
+
+export const logout = () => {
+  return request.post('/auth/logout')
+}
+
+export const changePassword = (data) => {
+  return request.put('/auth/me/password', data)
+}

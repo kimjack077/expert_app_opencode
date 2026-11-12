@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, Tree, message, Space, Tag, Radio, InputNumber, Switch, Empty, Row, Col, Tooltip, Divider, RadioChangeEvent, Alert } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, CheckCircleOutlined, FolderOutlined, FileTextOutlined, PlusCircleOutlined, SaveOutlined, CloseOutlined, ArrowLeftOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons'
-import { templateApi } from '@/services/api'
+import { templateApi, industryApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
-import { canManageTemplates } from '@/utils/roles'
+import { canManageTemplates, isAdminRole } from '@/utils/roles'
 import AiExtractModal from './AiExtractModal'
 import TemplateEditorV2 from './TemplateEditorV2'
 
@@ -99,6 +99,9 @@ export default function Templates() {
   // 复制模板相关状态
   const [copySourceId, setCopySourceId] = useState<string | null>(null)
 
+  // 行业列表（模板所属行业下拉）
+  const [industries, setIndustries] = useState<any[]>([])
+
   // AI辅助录入相关状态
   const [aiModalOpen, setAiModalOpen] = useState(false)
   // 编辑版本选择
@@ -110,7 +113,17 @@ export default function Templates() {
 
   useEffect(() => {
     fetchTemplates()
+    fetchIndustries()
   }, [])
+
+  const fetchIndustries = async () => {
+    try {
+      const res: any = await industryApi.getIndustries({ limit: 200 })
+      setIndustries(res.data?.items || res.data || [])
+    } catch (error) {
+      console.error('Failed to fetch industries:', error)
+    }
+  }
 
   const fetchTemplates = async () => {
     setLoading(true)
@@ -158,7 +171,7 @@ export default function Templates() {
   const handleCreateTemplate = async (values: any) => {
     try {
       if (editingTemplate) {
-        await templateApi.updateTemplate(editingTemplate.id, values)
+        await templateApi.updateTemplate(editingTemplate.id, { ...values, industry_id: values.industry_id ?? null })
         message.success('模板更新成功')
         setTemplateModal(false)
         templateForm.resetFields()
@@ -1365,9 +1378,33 @@ export default function Templates() {
           <Form.Item name="description" label="模板描述">
             <TextArea rows={3} />
           </Form.Item>
+          <Form.Item name="industry_id" label="所属行业">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="children"
+              placeholder="选择模板所属行业（可选）"
+            >
+              {industries.map((ind: any) => (
+                <Select.Option key={ind.id} value={ind.id}>
+                  {ind.name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
           <Form.Item name="is_quantified" label="启用计分" valuePropName="checked">
             <Switch checkedChildren="开启" unCheckedChildren="关闭" />
           </Form.Item>
+          {isAdminRole(role) && (
+            <Form.Item
+              name="is_public"
+              label="公共模板"
+              valuePropName="checked"
+              tooltip="公共模板对所有专家可见；个人模板仅创建者可见"
+            >
+              <Switch checkedChildren="公共" unCheckedChildren="个人" />
+            </Form.Item>
+          )}
           <Form.Item name="version" label="版本号" initialValue="1.0">
             <Input />
           </Form.Item>

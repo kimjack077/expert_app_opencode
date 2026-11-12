@@ -20,6 +20,7 @@ interface TeamMember {
 
 interface Props {
   projectId: string
+  canManage: boolean
 }
 
 const roleMap: Record<string, string> = {
@@ -30,7 +31,7 @@ const roleMap: Record<string, string> = {
   expert: '技术专家',
 }
 
-export default function TeamManagement({ projectId }: Props) {
+export default function TeamManagement({ projectId, canManage }: Props) {
   const [loading, setLoading] = useState(false)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [modalVisible, setModalVisible] = useState(false)
@@ -39,8 +40,8 @@ export default function TeamManagement({ projectId }: Props) {
 
   useEffect(() => {
     fetchMembers()
-    fetchUsers()
-  }, [projectId])
+    if (canManage) fetchUsers()
+  }, [projectId, canManage])
 
   const fetchMembers = async () => {
     setLoading(true)
@@ -56,7 +57,7 @@ export default function TeamManagement({ projectId }: Props) {
 
   const fetchUsers = async () => {
     try {
-      const response: any = await userApi.getUsers({ limit: 100 })
+      const response: any = await userApi.getUserOptions({ project_id: projectId })
       setUsers(response.data || [])
     } catch (error) {
       console.error('获取用户列表失败:', error)
@@ -156,7 +157,7 @@ export default function TeamManagement({ projectId }: Props) {
       key: 'action',
       width: 100,
       fixed: 'right',
-      render: (_, record) => (
+      render: (_, record) => canManage ? (
         <Button
           type="link"
           danger
@@ -166,17 +167,17 @@ export default function TeamManagement({ projectId }: Props) {
         >
           移除
         </Button>
-      ),
+      ) : null,
     },
   ]
 
   return (
     <>
-      <div style={{ marginBottom: 16 }}>
+      {canManage && <div style={{ marginBottom: 16 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
           添加成员
         </Button>
-      </div>
+      </div>}
 
       <Table
         columns={columns}
@@ -210,7 +211,7 @@ export default function TeamManagement({ projectId }: Props) {
                 (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
               options={users.map((u) => ({
-                label: `${u.full_name || u.username} (${u.email})`,
+                label: `${u.full_name || u.username} (${u.username})`,
                 value: u.id,
               }))}
             />

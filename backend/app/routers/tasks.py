@@ -1,13 +1,13 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
@@ -27,17 +27,19 @@ from app.schemas import (
 )
 from app.utils.security import get_current_user, get_current_admin_user
 from app.utils.roles import ADMIN_ROLES, RECORD_VIEW_ALL_ROLES, is_admin
-from app.utils.item_completion import is_item_assessed
+from app.utils.item_completion import is_item_assessed, resolve_check_type
 from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import classify_result
 from app.services import AuditService
 from app.services.formal_audit_sync_service import (
     can_access_linked_task,
     get_linked_plan_item,
+    overall_from_remarks,
     sync_task_to_formal_record,
 )
 from app.services.llm_service import llm_service
 from app.utils.response import make_response
+from app.utils.business_time import business_day_bounds
 
 # Alias for backward compatibility
 InspectionRecord = TaskItemRecord
@@ -139,7 +141,7 @@ async def _normalize_numeric_verdict(
         return result
     if item is None:
         return result
-    check_type = (item.check_type or item.result_type or "").lower()
+    check_type = resolve_check_type(item)
     if check_type not in {"numeric", "score"}:
         return result
     try:
@@ -216,6 +218,7 @@ async def _sync_reaudited_task_to_formal_record(
 @router.get("", response_model=ApiResponse)
 async def get_tasks(
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, description="按标题/任务编号/检查对象模糊搜索"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -226,6 +229,16 @@ async def get_tasks(
 
     if current_user.role not in RECORD_VIEW_ALL_ROLES:
         conditions.append(InspectionTask.assigned_to == current_user.id)
+
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        conditions.append(
+            or_(
+                InspectionTask.title.ilike(pattern),
+                InspectionTask.task_no.ilike(pattern),
+                InspectionTask.target_name.ilike(pattern),
+            )
+        )
 
     if status:
         if status == "todo":
@@ -307,6 +320,13 @@ async def get_task_statistics(
     )
     counts = {(status or "unknown"): count for status, count in rows.all()}
     total = sum(counts.values())
+    today, tomorrow = business_day_bounds()
+    completed_at = func.coalesce(InspectionTask.completed_at, InspectionTask.updated_at)
+    day = func.date(func.timezone("Asia/Shanghai", completed_at))
+    activity = (await db.execute(select(day, func.count(InspectionTask.id)).where(
+        *conditions, InspectionTask.status == "completed",
+        completed_at >= today - timedelta(days=6), completed_at < tomorrow,
+    ).group_by(day).order_by(day))).all()
 
     return make_response(
         data={
@@ -315,6 +335,7 @@ async def get_task_statistics(
             "in_progress": counts.get("in_progress", 0),
             "completed": counts.get("completed", 0),
             "cancelled": counts.get("cancelled", 0),
+            "recent_activity": [{"date": str(day), "completed": count} for day, count in activity],
         }
     )
 
@@ -441,6 +462,64 @@ async def get_task(
     return make_response(data=data)
 
 
+async def _validate_task_completion(
+    db: AsyncSession,
+    task: InspectionTask,
+    *,
+    remarks: Optional[str],
+    template_id: Optional[UUID],
+) -> None:
+    records = (await db.execute(
+        select(TaskItemRecord)
+        .options(selectinload(TaskItemRecord.template_item))
+        .where(TaskItemRecord.task_id == task.id)
+    )).scalars().all()
+    items = {
+        str(rec.template_item_id): rec.template_item
+        for rec in records if rec.template_item is not None
+    }
+    if template_id:
+        template_items = (await db.execute(
+            select(TemplateItem).where(
+                TemplateItem.template_id == template_id,
+                TemplateItem.is_deleted.is_(False),
+            )
+        )).scalars().all()
+        items.update({str(item.id): item for item in template_items})
+    template_ids = {
+        item.template_id for item in items.values()
+        if getattr(item, "template_id", None)
+    }
+    if template_id:
+        template_ids.add(template_id)
+    parent_ids = (
+        await load_parent_ids(db, template_ids=template_ids) if template_ids else set()
+    )
+    filled_ids = {
+        str(rec.template_item_id) for rec in records
+        if any(value is not None and str(value).strip() for value in (
+            rec.result, rec.result_value, rec.result_text,
+        ))
+    }
+    missing = [
+        item.title or item_id for item_id, item in items.items()
+        if item.is_required and not getattr(item, "is_deleted", False)
+        and not is_category_node(item, parent_ids) and item_id not in filled_ids
+    ]
+    if missing:
+        preview = "、".join(missing[:3])
+        suffix = f" 等 {len(missing)} 项" if len(missing) > 3 else ""
+        raise HTTPException(
+            status_code=409,
+            detail=f"存在未填报的必填检查项，无法完成任务：{preview}{suffix}",
+        )
+    if overall_from_remarks(remarks) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
+        )
+
+
 @router.put("/{task_id}", response_model=ApiResponse)
 async def update_task(
     task_id: str,
@@ -448,81 +527,55 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from app.models.audit_project import AuditPlanItem, AuditProject
+    from app.models.audit_project import AuditPlanItem
 
     task = await db.get(InspectionTask, task_id)
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # 专家用户只能更新分配给自己的任务状态与备注
+    # 状态机保护：cancelled 是终态，禁止任何修改；completed 禁止回退状态。
+    # 此前 PUT 可把已完成任务改回 pending、把已取消任务复活，
+    # 绕过 complete/cancel 端点的校验与计划项同步。
+    if task.status == "cancelled":
+        raise HTTPException(status_code=409, detail="任务已取消，不能修改")
+    if task_data.status is not None and task_data.status not in (
+        "pending",
+        "in_progress",
+        "completed",
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="无效的目标状态，取消任务请使用 POST /tasks/{id}/cancel",
+        )
+    if task.status == "completed":
+        if task_data.status is not None and task_data.status != "completed":
+            raise HTTPException(status_code=409, detail="任务已完成，不能回退状态")
+        # 与记录写入口同一口径：复审修正仅管理角色放行
+        if current_user.role not in ADMIN_ROLES:
+            raise HTTPException(status_code=409, detail="任务已完成，不可再修改")
+
+    update_data = task_data.model_dump(exclude_unset=True)
     if current_user.role == "expert":
         if not await can_access_linked_task(db, task, current_user):
             raise HTTPException(status_code=403, detail="Not authorized to update this task")
-        # BUG-31：remarks 此前被静默丢弃，导致 H5 提交流程
-        # （updateTask 写"最终判定: xx"备注 → POST /complete）必然 409。
-        # 专家仅允许更新 remarks，其余字段仍不可改。
-        if task_data.remarks is not None:
-            task.remarks = task_data.remarks
-        if task_data.template_id is not None:
-            task.template_id = task_data.template_id
-        if task_data.status:
-            # 与 POST /{task_id}/complete 同一口径：没有最终判定结论不允许置为已完成
-            if task_data.status == "completed" and not re.search(
-                r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
-                task.remarks or "",
-                re.IGNORECASE,
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
-                )
-            task.status = task_data.status
-            if task_data.status == "in_progress":
-                task.started_at = datetime.now(timezone.utc)
-            elif task_data.status == "completed":
-                task.completed_at = datetime.now(timezone.utc)
-                # 检查是否有关联的审核计划项
-                try:
-                    task_uuid = UUID(task_id)
-                    plan_item_result = await db.execute(
-                        select(AuditPlanItem).where(AuditPlanItem.inspection_task_id == task_uuid)
-                    )
-                    plan_item = plan_item_result.scalar_one_or_none()
-                except ValueError:
-                    plan_item = None
-                if plan_item:
-                    plan_item.status = "completed"
-                    await _sync_project_status_after_plan_item(db, plan_item.project_id)
-    else:
-        # 管理员可以更新所有字段
-        update_data = task_data.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(task, key, value)
-        # 与专家分支同一口径：没有最终判定结论不允许置为已完成
-        #（setattr 已应用，task.remarks 即为合并后的备注）
-        if task_data.status == "completed" and not re.search(
-            r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
-            task.remarks or "",
-            re.IGNORECASE,
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
-            )
-        # 如果管理员更新状态为 completed，也要同步审核计划项
-        if task_data.status == "completed":
-            task.completed_at = datetime.now(timezone.utc)
-            try:
-                task_uuid = UUID(task_id)
-                plan_item_result = await db.execute(
-                    select(AuditPlanItem).where(AuditPlanItem.inspection_task_id == task_uuid)
-                )
-                plan_item = plan_item_result.scalar_one_or_none()
-            except ValueError:
-                plan_item = None
-            if plan_item:
-                plan_item.status = "completed"
-                await _sync_project_status_after_plan_item(db, plan_item.project_id)
+        update_data = {
+            key: value for key, value in update_data.items()
+            if key in {"status", "remarks", "template_id"} and value is not None
+        }
+
+    if task_data.status == "completed" and task.status != "completed":
+        await _validate_task_completion(
+            db, task,
+            remarks=update_data.get("remarks", task.remarks),
+            template_id=update_data.get("template_id", task.template_id),
+        )
+
+    for key, value in update_data.items():
+        setattr(task, key, value)
+    if task_data.status == "in_progress" and current_user.role == "expert":
+        task.started_at = datetime.now(timezone.utc)
+    elif task_data.status == "completed":
+        task.completed_at = task.completed_at or datetime.now(timezone.utc)
 
     # 模板绑定与同步：若任务绑定了模板，自动同步至关联计划项，并在无检查项时自动补齐
     if task.template_id:
@@ -561,9 +614,11 @@ async def update_task(
             for it in leaf_items:
                 db.add(InspectionRecord(task_id=task.id, template_item_id=it.id))
 
-    # Older clients complete tasks through PUT instead of POST /complete.
-    # Route both paths through the formal-record bridge before committing.
-    if task_data.status == "completed":
+    # 完成任务和管理员修正已完成任务的备注，都同步正式记录。
+    if task_data.status == "completed" or (
+        task.status == "completed" and "remarks" in update_data
+    ):
+        await db.flush()
         try:
             linked_plan_item = await get_linked_plan_item(db, UUID(task_id))
         except ValueError:
@@ -578,6 +633,7 @@ async def update_task(
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            await _sync_project_status_after_plan_item(db, linked_plan_item.project_id)
 
     await db.commit()
     await db.refresh(task)
@@ -735,42 +791,15 @@ async def complete_task(
     ):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
+    if task.status == "cancelled":
+        raise HTTPException(status_code=409, detail="任务已取消，不能完成")
     if task.status == "completed":
         raise HTTPException(status_code=409, detail="任务已完成，不能重复提交")
 
-    # BUG-11：完成前校验必填检查项覆盖率必须 100%，杜绝"空任务直接完成"
-    records_res = await db.execute(
-        select(TaskItemRecord)
-        .options(selectinload(TaskItemRecord.template_item))
-        .where(TaskItemRecord.task_id == task.id)
+    await _validate_task_completion(
+        db, task, remarks=task.remarks, template_id=task.template_id,
     )
-    missing: list[str] = []
-    for rec in records_res.scalars().all():
-        tpl_item = getattr(rec, "template_item", None)
-        if not tpl_item or not bool(tpl_item.is_required):
-            continue
-        filled = bool(rec.result or rec.result_value or rec.result_text)
-        if not filled:
-            missing.append(getattr(tpl_item, "title", "") or str(rec.template_item_id))
-    if missing:
-        preview = "、".join(missing[:3])
-        suffix = f" 等 {len(missing)} 项" if len(missing) > 3 else ""
-        raise HTTPException(
-            status_code=409,
-            detail=f"存在未填报的必填检查项，无法完成任务：{preview}{suffix}",
-        )
-
-    # 最终判定结论必填：任务模式把结论写在 remarks 里（`最终判定:合格 | 判定说明:...`）。
-    # 原先不校验，未选判定结果也能完成任务，落库一批没有结论的「已完成」任务。
-    if not re.search(
-        r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
-        task.remarks or "",
-        re.IGNORECASE,
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="请先填写最终判定结论（合格/基本合格/不合格），再完成任务",
-        )
+    await db.flush()
 
     try:
         task_uuid = UUID(task_id)
@@ -822,9 +851,12 @@ async def delete_task(
     if not task or task.is_deleted:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    from app.utils.soft_delete import soft_delete
+    from app.utils.soft_delete import soft_delete_cascade
 
-    await soft_delete(db, task, unique_fields=["task_no"])
+    # 按级联策略表处理子行：task_item_records 硬删（无 is_deleted 列，
+    # 留着会被明细级统计重复计入）、media_files 软删归档；
+    # 计划项与整改记录按策略有意保留。
+    await soft_delete_cascade(db, task, unique_fields=["task_no"])
     await db.commit()
 
     await AuditService.log_action(
@@ -1058,6 +1090,10 @@ async def create_or_update_record(
     if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
         raise HTTPException(status_code=403, detail="Not assigned to you")
 
+    # 已取消的任务对所有人只读：取消即放弃执行，不存在复审修正场景。
+    if task.status == "cancelled":
+        raise HTTPException(status_code=409, detail="任务已取消，不能写入检查记录")
+
     # BUG-11：已完成的填报记录默认只读，防止事后篡改。
     # 复审/再认证场景由管理角色显式放行（修改会留审计痕并同步正式审核记录，
     # 见 _sync_reaudited_task_to_formal_record）；专家与普通用户一律拒绝。
@@ -1155,10 +1191,14 @@ async def update_record(
 
         # 默认拒绝：父任务缺失（孤儿记录）时不能放行，否则任何登录用户都能改
         task = await db.get(InspectionTask, record.task_id) if record.task_id else None
-        if not task:
+        if not task or task.is_deleted:
             raise HTTPException(status_code=404, detail="Parent task not found")
         if current_user.role == "expert" and not await can_access_linked_task(db, task, current_user):
             raise HTTPException(status_code=403, detail="Not authorized")
+
+        # 已取消的任务对所有人只读，同 create_or_update_record 的口径。
+        if task.status == "cancelled":
+            raise HTTPException(status_code=409, detail="任务已取消，不能写入检查记录")
 
         # BUG-11：已完成的填报记录默认只读，防止事后篡改。
         # 复审/再认证场景由管理角色显式放行，同 create_or_update_record 的口径。

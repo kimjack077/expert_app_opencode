@@ -107,7 +107,7 @@
             <h3 class="record-title">{{ record.template?.name || '未知模板' }}</h3>
             
             <div class="record-meta">
-              <div v-if="record.template?.is_quantified && hasQuantifiedItems(record.template)" class="meta-item" style="color: #F59E0B; font-weight: 500;">
+              <div v-if="record.template?.is_quantified && record.total_score != null" class="meta-item" style="color: #F59E0B; font-weight: 500;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                 </svg>
@@ -125,7 +125,7 @@
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                   <circle cx="12" cy="7" r="4"/>
                 </svg>
-                <span>{{ record.inspector?.real_name || record.inspector?.username }}</span>
+                <span>{{ record.inspector?.full_name || record.inspector?.username }}</span>
               </div>
             </div>
             
@@ -172,7 +172,6 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords } from '../api/records'
-import { hasQuantifiedItems } from '../utils/display.js'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()

@@ -116,6 +116,9 @@ export default function Records() {
       dateRange: null,
     })
     setPagination(prev => ({ ...prev, current: 1 }))
+    // 当前已在第 1 页时 pagination.current 不变，effect 不会触发，
+    // 必须显式 bump 触发器才能按清空后的条件重新拉取
+    setSearchTrigger(prev => prev + 1)
   }
 
   // 执行搜索
@@ -211,15 +214,7 @@ export default function Records() {
         // 检查必填项是否已填写
         // 注意：接口未填写时返回的是 null，只判 undefined 会让校验恒为通过
         if (item.is_required !== false) {
-          const hasResult =
-            item.radio_value ||
-            (item.numeric_value !== undefined &&
-              item.numeric_value !== null &&
-              item.numeric_value !== '') ||
-            item.text_value ||
-            (item.score_value !== undefined &&
-              item.score_value !== null &&
-              item.score_value !== '')
+          const hasResult = isItemAssessed(item)
           if (!hasResult) {
             incompleteItems.push(`第${index + 1}项: ${item.title || '未命名'}`)
           }
@@ -485,23 +480,25 @@ export default function Records() {
               提交
             </Button>
           )}
-          <Popconfirm
-            title="确定删除此记录？"
-            description="此操作不可恢复"
-            onConfirm={() => handleDelete(record.id)}
-            okText="确定"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-          >
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
+          {(isAdmin || String(record.inspector_id) === String(user?.id)) && (
+            <Popconfirm
+              title="确定删除此记录？"
+              description="此操作不可恢复"
+              onConfirm={() => handleDelete(record.id)}
+              okText="确定"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
             >
-              删除
-            </Button>
-          </Popconfirm>
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -848,6 +845,7 @@ export default function Records() {
                     isQuantified={selectedRecord.template?.is_quantified}
                     canCorrect={isAdmin && selectedRecord.status === 'submitted'}
                     onCorrect={openCorrection}
+                    onOpenDetail={(it) => navigate(`/audit-item/${selectedRecord.id}/${it.id}`)}
                   />
                 ))}
               </div>
@@ -917,6 +915,7 @@ function TreeItem({
   isQuantified,
   canCorrect = false,
   onCorrect,
+  onOpenDetail,
   parentIndex = '',
 }: {
   item: any
@@ -924,6 +923,7 @@ function TreeItem({
   isQuantified?: boolean
   canCorrect?: boolean
   onCorrect?: (item: any) => void
+  onOpenDetail?: (item: any) => void
   parentIndex?: string
 }) {
   const hasChildren = item.children && item.children.length > 0
@@ -1086,6 +1086,7 @@ function TreeItem({
                 isQuantified={isQuantified}
                 canCorrect={canCorrect}
                 onCorrect={onCorrect}
+                onOpenDetail={onOpenDetail}
                 parentIndex={currentIndex}
               />
             ))}
@@ -1233,14 +1234,24 @@ function TreeItem({
               </div>
             )}
 
-            {canCorrect && item.id && onCorrect && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                <Button size="small" type="primary" onClick={(event) => {
-                  event.stopPropagation()
-                  onCorrect(item)
-                }}>
-                  更正此项
-                </Button>
+            {(onOpenDetail || (canCorrect && onCorrect)) && item.id && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                {onOpenDetail && (
+                  <Button size="small" onClick={(event) => {
+                    event.stopPropagation()
+                    onOpenDetail(item)
+                  }}>
+                    详情 / AI 分析
+                  </Button>
+                )}
+                {canCorrect && onCorrect && (
+                  <Button size="small" type="primary" onClick={(event) => {
+                    event.stopPropagation()
+                    onCorrect(item)
+                  }}>
+                    更正此项
+                  </Button>
+                )}
               </div>
             )}
 

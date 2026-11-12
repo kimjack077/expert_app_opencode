@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.orm import selectinload, joinedload
 import json
+import re
 
 from app.database import get_db
 from app.models.user import User
@@ -25,12 +26,17 @@ from app.schemas import (
     InspectionRecordListQuery,
 )
 from app.utils.security import get_current_user, get_current_admin_user
-from app.utils.roles import RECORD_VIEW_ALL_ROLES, can_view_all_records, is_admin
+from app.utils.roles import RECORD_VIEW_ALL_ROLES, REVIEWER_ROLES, can_view_all_records, is_admin
 from app.utils.category import is_category_node, load_parent_ids
 from app.utils.item_stats import calculate_item_stats, classify_result, classify_item
 from app.utils.business_time import business_day_bounds
-from app.utils.item_write_guard import validate_item_payload
-from app.utils.item_completion import resolve_check_type
+from app.utils.item_write_guard import (
+    CHECK_TYPE_ALIASES,
+    CHECK_TYPE_RESULT_FIELD,
+    validate_item_payload,
+)
+from app.utils.item_completion import is_item_assessed, resolve_check_type
+from app.utils.scoring import calculate_total_score
 from app.utils.tree_builder import build_inspection_record_tree
 from app.services import AuditService
 from app.services.llm_service import llm_service
@@ -63,6 +69,8 @@ def _ensure_record_access(record: InspectionRecord, current_user: User, *, write
     """
     if is_admin(current_user.role):
         return
+    if write and current_user.role in REVIEWER_ROLES:
+        raise HTTPException(status_code=403, detail="只读审核员不能修改检查记录")
     if not write and can_view_all_records(current_user.role):
         return
     if str(record.inspector_id) == str(current_user.id):
@@ -174,6 +182,11 @@ async def get_records(
     ).all()
     records = [row[0] for row in rows]
     total = int(rows[0][1]) if rows else 0
+    if not rows and skip:
+        count_query = select(func.count(InspectionRecord.id))
+        if enterprise_name:
+            count_query = count_query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
+        total = (await db.execute(count_query.where(*conditions))).scalar() or 0
 
     record_list = []
     for r in records:
@@ -199,6 +212,7 @@ async def get_records(
                 "id": str(r.template.id),
                 "name": r.template.name,
                 "category": r.template.category,
+                "is_quantified": r.template.is_quantified,
             }
             if r.template
             else None,
@@ -219,6 +233,36 @@ async def get_records(
         record_list.append(data)
 
     return make_response(data={"items": record_list, "total": total})
+
+
+@router.get("/statistics", response_model=ApiResponse)
+async def get_record_statistics(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按列表可见范围聚合全部记录，趋势按北京时间自然日统计。"""
+    conditions = [InspectionRecord.is_deleted == False]  # noqa: E712
+    if not can_view_all_records(current_user.role):
+        conditions.append(InspectionRecord.inspector_id == current_user.id)
+    counts = dict((await db.execute(
+        select(InspectionRecord.overall_result, func.count(InspectionRecord.id))
+        .where(*conditions).group_by(InspectionRecord.overall_result)
+    )).all())
+    today, tomorrow = business_day_bounds()
+    day = func.date(func.timezone("Asia/Shanghai", InspectionRecord.inspection_date))
+    activity = (await db.execute(
+        select(day, func.count(InspectionRecord.id)).where(
+            *conditions, InspectionRecord.inspection_date >= today - timedelta(days=6),
+            InspectionRecord.inspection_date < tomorrow,
+        ).group_by(day).order_by(day)
+    )).all()
+    total = sum(counts.values())
+    results = {key: counts.get(key, 0) for key in ("pass", "partial_pass", "fail")}
+    results["pending"] = total - sum(results.values())
+    return make_response(data={
+        "total": total, "results": results,
+        "recent_activity": [{"date": str(day), "records": count} for day, count in activity],
+    })
 
 
 @router.post("", response_model=ApiResponse)
@@ -748,10 +792,12 @@ async def _collect_submit_blockers(
         .scalars()
         .all()
     )
+    templates_by_id = {str(ti.id): ti for ti in template_items}
     filled_template_ids = {
         str(ri.template_item_id)
         for ri in record_items
-        if ri.template_item_id and _record_item_filled(ri)
+        if str(ri.template_item_id) in templates_by_id
+        and is_item_assessed(templates_by_id[str(ri.template_item_id)], ri)
     }
 
     missing = [
@@ -798,7 +844,14 @@ async def submit_record(
         )
 
     record.status = "submitted"
-    record.inspection_date = datetime.now(timezone.utc)
+    # inspection_date 是「检查实施日期」，由用户填报；提交只在缺失时兜底，
+    # 不能用提交时刻覆盖（否则补录的历史检查日期全部变成提交当天）。
+    if record.inspection_date is None:
+        record.inspection_date = datetime.now(timezone.utc)
+    items = (await db.execute(select(InspectionRecordItem).where(
+        InspectionRecordItem.record_id == record.id,
+    ))).scalars().all()
+    await _recalculate_record_score(db, record, items)
     await db.commit()
 
     await AuditService.log_action(
@@ -847,6 +900,19 @@ async def delete_record(
 
 
 # 检查记录项管理
+async def _recalculate_record_score(db, record, items=None):
+    snapshot = getattr(record, "template_snapshot", None) or {}
+    quantified = snapshot.get("is_quantified")
+    if quantified is None:
+        template = await db.get(InspectionTemplate, record.template_id) if record.template_id else None
+        quantified = bool(template and template.is_quantified)
+    if items is None:
+        items = (await db.execute(select(InspectionRecordItem).where(
+            InspectionRecordItem.record_id == record.id,
+        ))).scalars().all()
+    record.total_score = calculate_total_score(items) if quantified else None
+
+
 @router.post("/{record_id}/items", response_model=ApiResponse)
 async def create_or_update_record_item(
     record_id: str,
@@ -878,6 +944,8 @@ async def create_or_update_record_item(
             )
         )
         record_item = result.scalar_one_or_none()
+        if record_item is None:
+            raise HTTPException(status_code=404, detail="Item not found")
     elif item_data.template_item_id:
         result = await db.execute(
             select(InspectionRecordItem).where(
@@ -904,6 +972,19 @@ async def create_or_update_record_item(
     )
     if template_item_id:
         template_item = await db.get(TemplateItem, template_item_id)
+    if record_item and item_data.template_item_id and str(item_data.template_item_id) != str(record_item.template_item_id):
+        raise HTTPException(status_code=422, detail="记录项与模板项不一致")
+    if not record_item:
+        if not template_item or template_item.is_deleted or str(template_item.template_id) != str(record.template_id):
+            raise HTTPException(status_code=422, detail="检查项不属于当前记录模板")
+        parent_ids = await load_parent_ids(db, template_id=record.template_id)
+        if is_category_node(template_item, parent_ids):
+            raise HTTPException(status_code=422, detail="分类目录不能填写检查结果")
+
+    has_snapshot = bool(record_item and record_item.item_check_type)
+    options = record_item.item_result_options if has_snapshot else (template_item.result_options if template_item else None)
+    minimum = record_item.item_min_value if has_snapshot else (template_item.min_value if template_item else None)
+    maximum = record_item.item_max_value if has_snapshot else (template_item.max_value if template_item else None)
 
     guard_errors = validate_item_payload(
         # ⚠️ 必须用 resolve_check_type，不能直接读 template_item.check_type。
@@ -917,18 +998,18 @@ async def create_or_update_record_item(
         #
         # 同一文件的快照写入（见 resolve_check_type 的调用）用的是正确口径，
         # 两处必须一致，否则同一份数据在快照与校验里是两个类型。
-        check_type=item_data.check_type
-        or (resolve_check_type(template_item) if template_item else None),
+        check_type=resolve_check_type(record_item if has_snapshot else template_item),
         payload={
             "score_value": item_data.score_value,
             "radio_value": item_data.radio_value,
             "multi_value": item_data.multi_value,
             "numeric_value": item_data.numeric_value,
             "text_value": item_data.text_value,
+            "photos": item_data.photos,
         },
-        result_options=template_item.result_options if template_item else None,
-        min_value=template_item.min_value if template_item else None,
-        max_value=template_item.max_value if template_item else None,
+        result_options=options,
+        min_value=minimum,
+        max_value=maximum,
     )
     if guard_errors:
         raise HTTPException(status_code=422, detail=guard_errors)
@@ -962,6 +1043,23 @@ async def create_or_update_record_item(
         record_item = InspectionRecordItem(
             record_id=record_id,
             template_item_id=item_data.template_item_id,
+            item_title=template_item.title,
+            item_description=template_item.description,
+            item_check_method=template_item.check_method,
+            item_legal_basis=template_item.legal_basis,
+            item_standard_ref=template_item.standard_ref,
+            item_risk_level=template_item.risk_level,
+            item_check_type=resolve_check_type(template_item),
+            item_result_options=template_item.result_options,
+            item_min_value=template_item.min_value,
+            item_max_value=template_item.max_value,
+            item_unit=template_item.unit,
+            item_score_weight=template_item.score_weight,
+            item_default_score=template_item.default_score,
+            item_allow_attachment=template_item.allow_attachment,
+            item_attachment_required=template_item.attachment_required,
+            item_ai_prompt_template=template_item.ai_prompt_template,
+            item_use_ai=template_item.use_ai,
             result=item_data.result,
             result_value=item_data.result_value,
             result_text=item_data.result_text,
@@ -1068,6 +1166,8 @@ async def correct_submitted_record_item(
         raise HTTPException(status_code=409, detail="更正内容与原记录一致")
 
     record_item.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await _recalculate_record_score(db, record)
     await AuditService.log_action(
         db,
         str(current_user.id),
@@ -1479,6 +1579,33 @@ async def generate_ai_suggestion(
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
 
 
+def _verdict_from_suggestion(text: str) -> Optional[str]:
+    """从 AI 建议文本里提取**显式**判定结论。
+
+    只认「判定/结论/结果：xx」这类明确表述，避免把
+    「未发现不合格项」这类叙述误判成不合格。
+    返回 pass / partial / fail / na；提取不到返回 None。
+    """
+    match = re.search(
+        r"(?:最终判定|判定结论|判定|结论|检查结果|结果)\s*[:：]?\s*"
+        r"(不合格|不符合|基本合格|合格|符合|不适用|pass|fail|na)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    keyword = match.group(1).lower()
+    if keyword in ("不合格", "不符合", "fail"):
+        return "fail"
+    if keyword == "基本合格":
+        return "partial"
+    if keyword in ("合格", "符合", "pass"):
+        return "pass"
+    if keyword in ("不适用", "na"):
+        return "na"
+    return None
+
+
 @router.post("/{record_id}/items/{item_id}/accept-ai", response_model=ApiResponse)
 async def accept_ai_suggestion(
     record_id: str,
@@ -1486,17 +1613,27 @@ async def accept_ai_suggestion(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """采纳AI建议"""
+    """采纳AI建议 —— 按检查项类型写入对应结果字段。
+
+    旧实现无条件把建议文本写进 text_value：单选/数值/打分项的界面与报告
+    读的是 radio_value / numeric_value / score_value，「采纳」实际毫无效果；
+    且不校验提交态，已提交记录可被绕过只读保护修改。
+    """
     record = await db.get(InspectionRecord, record_id)
     if not record or record.is_deleted:
         raise HTTPException(status_code=404, detail="Record not found")
 
-    # 权限检查
     # 权限检查：写操作仅限管理员或记录本人（只读复核角色不得写入）。
     _ensure_record_access(record, current_user, write=True)
 
+    # 与 create_or_update_record_item 同一口径：已提交记录只读，
+    # 管理员更正走专用 correction 入口。
+    if record.status == "submitted":
+        raise HTTPException(status_code=409, detail="该检查记录已提交，条目不可再修改")
+
     result = await db.execute(
         select(InspectionRecordItem)
+        .options(selectinload(InspectionRecordItem.template_item))
         .where(InspectionRecordItem.id == item_id)
         .where(InspectionRecordItem.record_id == record_id)
     )
@@ -1504,12 +1641,76 @@ async def accept_ai_suggestion(
     if not record_item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    if record_item.ai_suggestion:
-        record_item.text_value = record_item.ai_suggestion
-        record_item.ai_generated = True
-        await db.commit()
+    if not record_item.ai_suggestion:
+        raise HTTPException(status_code=409, detail="该检查项暂无 AI 建议，请先生成建议")
 
-    return make_response(message="AI suggestion accepted")
+    suggestion = str(record_item.ai_suggestion).strip()
+    template_item = record_item.template_item
+    check_type = resolve_check_type(template_item) if template_item else None
+    normalized = (check_type or "").strip().lower()
+    normalized = CHECK_TYPE_ALIASES.get(normalized, normalized) or None
+
+    payload: dict = {}
+    if normalized in (None, "text"):
+        payload["text_value"] = suggestion
+    elif normalized in ("radio", "audit_3level"):
+        verdict = _verdict_from_suggestion(suggestion)
+        if verdict is None:
+            raise HTTPException(
+                status_code=422,
+                detail="AI 建议中未包含明确的判定结论（如「判定：合格」），请手动选择结果",
+            )
+        if normalized == "audit_3level":
+            mapping = {"pass": "1", "partial": "2", "fail": "3"}
+            if verdict not in mapping:
+                raise HTTPException(
+                    status_code=422,
+                    detail="三级评估检查项仅支持符合/基本符合/不符合结论，请手动选择结果",
+                )
+            payload["radio_value"] = mapping[verdict]
+        else:
+            if verdict == "partial":
+                raise HTTPException(
+                    status_code=422,
+                    detail="AI 建议结论为「基本合格」，单选检查项请手动选择结果",
+                )
+            payload["radio_value"] = verdict
+    elif normalized in ("numeric", "score"):
+        number_pattern = r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+        if re.fullmatch(number_pattern, suggestion):
+            numbers = [suggestion]
+        else:
+            label = r"(?:得分|评分结果|分数)" if normalized == "score" else r"(?:实测值|测量值|测量结果|数值结果)"
+            numbers = re.findall(label + r"\s*[:：]\s*(" + number_pattern + r")(?![\d.])", suggestion)
+        if len(numbers) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="AI 建议中未包含唯一明确的数值结果（如「实测值：5」或「得分：5」），请手动填写数值",
+            )
+        payload[CHECK_TYPE_RESULT_FIELD[normalized]] = numbers[0]
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="多选检查项暂不支持一键采纳 AI 建议，请手动勾选选项",
+        )
+
+    guard_errors = validate_item_payload(
+        check_type=normalized,
+        payload=payload,
+        result_options=template_item.result_options if template_item else None,
+        min_value=template_item.min_value if template_item else None,
+        max_value=template_item.max_value if template_item else None,
+    )
+    if guard_errors:
+        raise HTTPException(status_code=422, detail=guard_errors)
+
+    for field, value in payload.items():
+        setattr(record_item, field, value)
+    record_item.ai_generated = True
+    record_item.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return make_response(message="AI suggestion accepted", data=payload)
 
 
 @router.get("/{record_id}/items/{item_id}/ai-stream")
@@ -1734,6 +1935,7 @@ async def get_item_history_stats(
         .join(InspectionRecord, InspectionRecordItem.record_id == InspectionRecord.id)
         .where(InspectionRecord.enterprise_id == enterprise_id)
         .where(InspectionRecord.status == "submitted")
+        .where(InspectionRecord.is_deleted == False)  # noqa: E712
         .where(InspectionRecordItem.template_item_id == template_item_id)
         .where(InspectionRecord.id != record_id)
         .options(

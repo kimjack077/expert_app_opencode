@@ -29,7 +29,7 @@
 
       <div class="content-card">
         <h1 class="task-title">{{ task.title }}</h1>
-        <p class="task-desc" :class="{ 'empty-desc': !task.description }">{{ task.description || '暂无详细描述' }}</p>
+        <p class="task-desc" :class="{ 'empty-desc': !taskDescription(task) }">{{ taskDescription(task) || '暂无详细描述' }}</p>
 
         <div class="info-section">
           <h3 class="section-title">基本信息</h3>
@@ -40,7 +40,7 @@
               </div>
               <div class="info-content">
                 <span class="info-label">检查地点</span>
-                <span class="info-value">{{ task.location || '未指定地点' }}</span>
+                <span class="info-value">{{ task.target_address || '未指定地点' }}</span>
               </div>
             </div>
             <div class="info-item">
@@ -227,6 +227,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { taskDescription } from '../utils/display.js'
 import { showToast, showConfirmDialog } from 'vant'
 import {
   cancelTask as cancelTaskApi,

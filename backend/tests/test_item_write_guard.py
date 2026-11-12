@@ -122,6 +122,7 @@ def test_matching_field_is_accepted(check_type, field):
         "multi_value": ["a"],
         "numeric_value": "12.5",
         "text_value": "正常",
+        "photos": ["/uploads/test.jpg"],
     }[field]
     assert validate_item_payload(check_type=check_type, payload={field: sample}) == []
 

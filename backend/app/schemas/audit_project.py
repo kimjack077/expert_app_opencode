@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 # 审核类型：初审 / 监督审核 / 再认证 / 扩大范围
 AuditType = Literal["initial", "surveillance", "recertification", "expansion"]
@@ -202,7 +202,7 @@ class AuditPlanItemUpdate(BaseModel):
     is_joint: Optional[bool] = None
     joint_group_ids: Optional[List[str]] = None
     activity_type: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal["pending", "in_progress", "completed", "cancelled"]] = None
     remarks: Optional[str] = None
 
     @model_validator(mode="after")
@@ -283,19 +283,105 @@ class AuditAreaRecordBase(BaseModel):
     conclusion: Optional[str] = Field(None, description="审核结论")
 
 
-class AuditAreaRecordRequest(AuditAreaRecordBase):
-    """创建审核区域记录请求（project_id 从路径获取，recorded_by 从当前用户获取）"""
-    pass
-
-
 class AuditAreaRecordCreate(AuditAreaRecordBase):
     """创建审核区域记录（完整字段，用于内部调用）"""
     project_id: UUID = Field(..., description="所属审核项目 ID")
     recorded_by: UUID = Field(..., description="主填写人 ID")
 
 
+class AuditAreaRecordItemPayload(BaseModel):
+    """区域记录检查项批量保存的单条载荷。
+
+    定位方式：优先 id（既有记录项），其次 template_item_id（按模板项匹配，
+    不存在则创建）。其余字段「给出即写入」，未给出的字段保持原值。
+    """
+    id: Optional[UUID] = None
+    template_item_id: Optional[UUID] = None
+    ensure_exists: bool = Field(False, description="上传附件前显式创建空明细")
+    result: Optional[str] = None
+    radio_value: Optional[str] = None
+    evaluation_3level: Optional[str] = None
+    score_value: Optional[str] = None
+    numeric_value: Optional[str] = None
+    text_value: Optional[str] = None
+    multi_value: Optional[List[str]] = None
+    audit_evidence: Optional[str] = None
+    audit_findings: Optional[str] = None
+    rectification_suggestion: Optional[str] = None
+    inspector_note: Optional[str] = None
+    photos: Optional[List[str]] = None
+
+    @field_validator("result", "radio_value", "evaluation_3level", mode="before")
+    @classmethod
+    def _normalize_verdict(cls, value):
+        if value is None:
+            return None
+        value = str(value).strip()
+        return None if not value or value.lower() == "null" else value
+
+    def normalized_updates(self) -> dict:
+        """非空结论按 radio → result → 三级评价取值；全部显式为空才清空。
+
+        客户端可能同时发送旧评价和新选择，优先级固定，不能让旧字段的 null
+        遮住新选择。三级评价 2 与 pass 一致时保留其「基本符合」含义。
+        """
+        from app.utils.item_stats import classify_result_ext
+
+        data = self.model_dump(exclude_unset=True)
+        verdict_fields = ("radio_value", "result", "evaluation_3level")
+        if not any(field in data for field in verdict_fields):
+            return data
+        selected = next((field for field in verdict_fields if data.get(field) is not None), None)
+        if selected is None:
+            data.update(dict.fromkeys(verdict_fields))
+            return data
+
+        value = data[selected]
+        if selected == "evaluation_3level":
+            evaluation = value
+            result = "fail" if value == "3" else "pass"
+        else:
+            bucket = classify_result_ext(value)
+            result = bucket or value
+            evaluation = {"pass": "1", "fail": "3"}.get(bucket)
+            if value == "pending_rectification":
+                evaluation = "3"
+            elif bucket == "observe":
+                evaluation = "2"
+            if bucket == "pass" and data.get("evaluation_3level") == "2":
+                evaluation = "2"
+        data.update(radio_value=result, result=result, evaluation_3level=evaluation)
+        return data
+
+    @field_validator("evaluation_3level")
+    @classmethod
+    def _validate_evaluation(cls, value):
+        if value is not None and value not in {"1", "2", "3"}:
+            raise ValueError("三级评价必须为 1、2 或 3")
+        return value
+
+    @field_validator("score_value", "numeric_value", mode="before")
+    @classmethod
+    def _stringify_number(cls, value):
+        # 列类型是 String；前端 stepper/输入框可能提交数字，统一转字符串落库
+        if value is None:
+            return None
+        return str(value)
+
+
+class AuditAreaRecordItemsUpdate(BaseModel):
+    """批量保存区域记录检查项"""
+    items: List[AuditAreaRecordItemPayload]
+
+
+class AuditAreaRecordRequest(AuditAreaRecordBase):
+    """表头、明细及提交状态在一个事务中创建。"""
+    items: List[AuditAreaRecordItemPayload] = Field(default_factory=list)
+    status: Literal["draft", "in_progress", "submitted"] = "draft"
+
+
 class AuditAreaRecordUpdate(BaseModel):
-    """更新审核区域记录"""
+    """更新审核区域记录，可携带明细原子提交。"""
     area_id: Optional[UUID] = None
     template_id: Optional[UUID] = None
     certification_systems: Optional[List[str]] = None
@@ -304,7 +390,8 @@ class AuditAreaRecordUpdate(BaseModel):
     audit_time_start: Optional[str] = None
     audit_time_end: Optional[str] = None
     conclusion: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[Literal["draft", "in_progress", "submitted"]] = None
+    items: Optional[List[AuditAreaRecordItemPayload]] = None
 
 
 class AuditAreaRecordResponse(AuditAreaRecordBase):

@@ -1,5 +1,7 @@
 import request from './request.js'
 
+export const getRecordStatistics = () => request.get('/records/statistics')
+
 /**
  * 检查记录 API
  */

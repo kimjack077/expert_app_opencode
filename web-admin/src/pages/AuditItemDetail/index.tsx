@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Card, Descriptions, Tag, Button, Space, message, Radio, InputNumber, Input,
-  Upload, Progress, Alert, Spin, Modal, Drawer, Badge, Tooltip, Divider, Image
+  Upload, Progress, Alert, Spin, Modal, Drawer, Badge, Tooltip, Divider, Image, Checkbox, ConfigProvider
 } from 'antd'
 import {
   ArrowLeftOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -11,6 +11,8 @@ import {
 } from '@ant-design/icons'
 import { recordApi, llmApi, mediaApi } from '@/services/api'
 import EnterpriseRiskProfile from '@/components/EnterpriseRiskProfile'
+import { normalizeVerdictFields, resolveCheckType } from '@/utils/completion'
+import { normalizeResultOptions } from '@/utils/resultOptions'
 import type { UploadProps } from 'antd'
 
 const { TextArea } = Input
@@ -23,7 +25,7 @@ interface ItemData {
   legal_basis?: string
   risk_level?: 'high' | 'medium' | 'low'
   result_type: 'pass_fail' | 'score' | 'numeric' | 'text' | 'multi_check'
-  result_options?: Array<{ value: string; label: string }>
+  result_options?: Array<{ value: string; label: string } | string> | { options: Array<{ value: string; label: string } | string> }
   min_value?: number
   max_value?: number
   unit?: string
@@ -75,6 +77,9 @@ export default function AuditItemDetail() {
   const [historyStats, setHistoryStats] = useState<HistoryStats | null>(null)
   const [result, setResult] = useState<ItemResult>({})
   const [recordItemId, setRecordItemId] = useState<string | null>(null)
+  const readOnly = record?.status === 'submitted' || searchParams.get('mode') === 'view'
+  const resultType = resolveCheckType(itemData)
+  const resultOptions = normalizeResultOptions(itemData?.result_options)
 
   useEffect(() => {
     if (recordId && itemId) {
@@ -89,34 +94,34 @@ export default function AuditItemDetail() {
       const recordRes: any = await recordApi.getRecord(recordId!)
       setRecord(recordRes.data)
 
-      // 查找对应的检查项
-      const items = recordRes.data?.template?.items || []
-      const flatItems = flattenItems(items)
-      const item = flatItems.find((i: any) => i.id === itemId || i.template_item_id === itemId)
-
-      if (item) {
-        setItemData(item)
-        // 获取历史统计（模拟数据，实际需要调用API）
-        fetchHistoryStats(item)
-      }
-
-      // 获取已有的检查结果
       const itemsRes: any = await recordApi.getRecordItems(recordId!)
-      const existingResult = itemsRes.data?.items?.find((i: any) =>
-        i.template_item_id === itemId || i.id === itemId
-      )
-      if (existingResult) {
-        setRecordItemId(existingResult.id)
-        setResult({
-          radio_value: existingResult.radio_value,
-          score_value: existingResult.score_value,
-          numeric_value: existingResult.numeric_value,
-          text_value: existingResult.text_value,
-          multi_value: existingResult.multi_value || [],
-          inspector_note: existingResult.inspector_note,
-          photos: existingResult.photos || [],
-        })
-      }
+      const recordItems = Array.isArray(itemsRes.data) ? itemsRes.data : []
+      const existingResult = recordItems.find((i: any) => i.id === itemId)
+        || recordItems.find((i: any) => i.template_item_id === itemId)
+      const templateItemId = existingResult?.template_item_id || itemId
+      const flatItems = flattenItems(recordRes.data?.template?.items || [])
+      const item = flatItems.find((i: any) => (i.template_item_id || i.id) === templateItemId)
+      // 模板节点被删除/调整时仍使用落库快照查看及填写历史明细。
+      const snapshot = existingResult ? {
+        ...existingResult,
+        id: templateItemId,
+        title: existingResult.item_title || existingResult.title || '历史检查项',
+        check_type: existingResult.check_type,
+        result_type: existingResult.result_type || 'pass_fail',
+      } : null
+      setItemData(item ? { ...item, id: templateItemId } : snapshot)
+      setRecordItemId(existingResult?.id || null)
+      setHistoryStats(null)
+      setResult(existingResult ? {
+        radio_value: normalizeVerdictFields(existingResult).radio_value,
+        score_value: existingResult.score_value,
+        numeric_value: existingResult.numeric_value,
+        text_value: existingResult.text_value,
+        multi_value: existingResult.multi_value || [],
+        inspector_note: existingResult.inspector_note,
+        photos: existingResult.photos || [],
+      } : {})
+      if (existingResult?.id) fetchHistoryStats(existingResult.id)
     } catch (error) {
       console.error('Failed to fetch data:', error)
       message.error('获取检查项数据失败')
@@ -137,22 +142,28 @@ export default function AuditItemDetail() {
     return result
   }
 
-  const fetchHistoryStats = async (item: any) => {
-    // 模拟历史统计数据
-    // 实际应该调用后端API获取该检查项的历史检查记录
-    const stats: HistoryStats = {
-      has_history: Math.random() > 0.5,
-      total_checks: Math.floor(Math.random() * 10) + 1,
-      pass_count: Math.floor(Math.random() * 8),
-      fail_count: Math.floor(Math.random() * 3),
-      na_count: Math.floor(Math.random() * 2),
-      fail_rate: Math.random() * 30,
+  const fetchHistoryStats = async (savedItemId: string) => {
+    try {
+      const res: any = await recordApi.getItemHistoryStats(recordId!, savedItemId)
+      const data = res.data || {}
+      setHistoryStats({
+        has_history: !!data.has_history,
+        total_checks: data.total_inspections || 0,
+        pass_count: data.pass_count || 0,
+        fail_count: data.fail_count || 0,
+        na_count: data.na_count || 0,
+        fail_rate: data.fail_rate || 0,
+        last_check_date: data.last_inspection_date || undefined,
+        last_result: data.last_result || undefined,
+      })
+    } catch {
+      // 检查项尚未落库（新记录）或记录未关联企业时没有历史可查
+      setHistoryStats(null)
     }
-    setHistoryStats(stats)
   }
 
   const handleSaveResult = async (field: string, value: any) => {
-    if (!recordId || !itemId) return
+    if (readOnly || !recordId || !itemData?.id) return
     setSaving(true)
     try {
       // Convert numeric values to string for backend compatibility
@@ -161,7 +172,7 @@ export default function AuditItemDetail() {
         : value
 
       const data = {
-        template_item_id: itemId,
+        template_item_id: itemData.id,
         [field]: valueToSave,
       }
 
@@ -173,6 +184,7 @@ export default function AuditItemDetail() {
         // 创建新记录
         res = await recordApi.createRecordItem(recordId!, data)
         setRecordItemId(res.data?.id)
+        if (res.data?.id) fetchHistoryStats(res.data.id)
       }
 
       setResult(prev => ({ ...prev, [field]: value }))
@@ -187,6 +199,7 @@ export default function AuditItemDetail() {
   }
 
   const handleLLMRequest = async (type: 'suggestion' | 'basis') => {
+    if (readOnly) return
     if (!recordItemId) {
       message.warning('请先填写检查结果后再获取AI建议')
       return
@@ -207,15 +220,32 @@ export default function AuditItemDetail() {
   }
 
   const handleUpload = async (uploadInfo: any) => {
+    if (readOnly) {
+      uploadInfo.onError?.(new Error('已提交记录不能上传照片'))
+      return
+    }
     const file = uploadInfo.file as File
     if (!recordId) return
     try {
       // 优先用检查记录项 ID，后端据此换算为任务检查项，保住照片与条目的关联
-      const res: any = await mediaApi.upload(file, { record_id: recordItemId || recordId })
+      let savedItemId = recordItemId
+      if (!savedItemId) {
+        const saved: any = await recordApi.createRecordItem(recordId, { template_item_id: itemData!.id })
+        savedItemId = saved.data?.id
+        if (!savedItemId) throw new Error('检查项尚未保存')
+        setRecordItemId(savedItemId)
+      }
+      const res: any = await mediaApi.upload(file, { record_id: savedItemId })
       const photoUrl = res.data?.file_path
       if (photoUrl) {
         const updatedPhotos = [...(result.photos || []), photoUrl]
-        await handleSaveResult('photos', updatedPhotos)
+        try {
+          await recordApi.updateRecordItem(recordId, savedItemId, { photos: updatedPhotos })
+        } catch (error) {
+          if (res.data?.id) await mediaApi.deleteMedia(res.data.id).catch(() => {})
+          throw error
+        }
+        setResult(prev => ({ ...prev, photos: updatedPhotos }))
       }
       if (uploadInfo.onSuccess) uploadInfo.onSuccess({}, uploadInfo.file)
     } catch (error) {
@@ -258,6 +288,7 @@ export default function AuditItemDetail() {
     if (result.text_value) {
       return <Tag color="default">已填写</Tag>
     }
+    if (result.multi_value?.length) return <Tag color="processing">已选 {result.multi_value.length} 项</Tag>
     return <Tag>未填写</Tag>
   }
 
@@ -299,6 +330,7 @@ export default function AuditItemDetail() {
           <Space>
             <Button
               icon={<BulbOutlined />}
+              disabled={readOnly}
               onClick={() => handleLLMRequest('suggestion')}
               style={{ background: '#faad14', borderColor: '#faad14', color: '#fff' }}
             >
@@ -306,6 +338,7 @@ export default function AuditItemDetail() {
             </Button>
             <Button
               icon={<InfoCircleOutlined />}
+              disabled={readOnly}
               onClick={() => handleLLMRequest('basis')}
               style={{ background: '#722ed1', borderColor: '#722ed1', color: '#fff' }}
             >
@@ -391,6 +424,7 @@ export default function AuditItemDetail() {
           </Card>
 
           {/* 检查结果填写 */}
+          <ConfigProvider componentDisabled={readOnly}>
           <Card
             title="检查结果"
             extra={saving ? <Spin size="small" /> : null}
@@ -408,7 +442,7 @@ export default function AuditItemDetail() {
             )}
 
             {/* 合格/不合格选择 */}
-            {(itemData.result_type === 'pass_fail' || !itemData.result_type) && (
+            {(resultType === 'radio' || resultType === 'audit_3level') && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ marginBottom: 8, fontWeight: 500 }}>
                   {itemData.is_required !== false && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
@@ -420,7 +454,7 @@ export default function AuditItemDetail() {
                   buttonStyle="solid"
                   size="large"
                 >
-                  {(itemData.result_options || [
+                  {(resultOptions.length ? resultOptions : [
                     { value: 'pass', label: '合格' },
                     { value: 'fail', label: '不合格' },
                     { value: 'na', label: '不适用' },
@@ -434,7 +468,19 @@ export default function AuditItemDetail() {
             )}
 
             {/* 得分输入 */}
-            {itemData.result_type === 'score' && (
+            {resultType === 'multi' && (
+              <div style={{ marginBottom: 24 }}>
+                <div id="multi-result-label" style={{ marginBottom: 8, fontWeight: 500 }}>多选结果</div>
+                <Checkbox.Group
+                  aria-labelledby="multi-result-label"
+                  disabled={readOnly || saving}
+                  options={resultOptions || []}
+                  value={result.multi_value || []}
+                  onChange={(values) => handleSaveResult('multi_value', values)}
+                />
+              </div>
+            )}
+            {resultType === 'score' && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ marginBottom: 8, fontWeight: 500 }}>
                   {itemData.is_required !== false && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
@@ -461,7 +507,7 @@ export default function AuditItemDetail() {
             )}
 
             {/* 数值输入 */}
-            {itemData.result_type === 'numeric' && (
+            {resultType === 'numeric' && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ marginBottom: 8, fontWeight: 500 }}>
                   {itemData.is_required !== false && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
@@ -485,7 +531,7 @@ export default function AuditItemDetail() {
             )}
 
             {/* 文本输入 */}
-            {itemData.result_type === 'text' && (
+            {resultType === 'text' && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ marginBottom: 8, fontWeight: 500 }}>
                   {itemData.is_required !== false && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
@@ -548,6 +594,7 @@ export default function AuditItemDetail() {
               </div>
             )}
           </Card>
+          </ConfigProvider>
         </div>
 
         {/* 右侧企业信息（如果需要） */}

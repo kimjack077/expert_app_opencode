@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Button, Form, Input, Select, Tree, message, Space, Tag, InputNumber, Switch, Empty, Tooltip, Row, Col, Dropdown, Divider, Alert } from 'antd'
 import { PlusOutlined, DeleteOutlined, ArrowLeftOutlined, FolderOutlined, FileTextOutlined, ExpandOutlined, CompressOutlined, RobotOutlined, HolderOutlined, SaveOutlined } from '@ant-design/icons'
 import { templateApi } from '@/services/api'
+import { normalizeResultOptions } from '@/utils/resultOptions'
 import AiExtractModal from './AiExtractModal'
 
 const { TextArea } = Input
@@ -10,18 +11,24 @@ const RESULT_TYPES = [
   { label: '合格/不合格', value: 'pass_fail' },
   { label: '数值判定', value: 'numeric' },
   { label: '文字描述', value: 'text' },
+  { label: '打分', value: 'score' },
+  { label: '多选', value: 'multi_check' },
 ]
 
 const RESULT_TYPE_COLORS: Record<string, string> = {
   pass_fail: 'success',
   numeric: 'warning',
   text: 'processing',
+  score: 'gold',
+  multi_check: 'cyan',
 }
 
 const RESULT_TYPE_LABELS: Record<string, string> = {
   pass_fail: '合格/不合格',
   numeric: '数值判定',
   text: '文字描述',
+  score: '打分',
+  multi_check: '多选',
 }
 
 const RISK_LEVELS = [
@@ -54,6 +61,9 @@ interface TreeNodeData {
   min_value?: number
   max_value?: number
   unit?: string
+  max_score?: number
+  pass_score?: number
+  score_step?: number
   use_ai?: boolean
   risk_level?: string
   is_category?: boolean
@@ -175,6 +185,11 @@ export default function TemplateEditorV2({
         min_value: node.min_value,
         max_value: node.max_value,
         unit: node.unit,
+        max_score: node.max_score,
+        pass_score: node.pass_score,
+        score_step: node.score_step,
+        is_required: isCategory ? true : (node.is_required ?? true),
+        result_options: normalizeResultOptions(node.result_options),
         use_ai: isCategory ? false : node.use_ai,
         score_weight: node.score_weight,
         default_score: node.default_score,
@@ -267,18 +282,31 @@ export default function TemplateEditorV2({
       setLoading(true)
       const hasChildren = !!(selectedNode.children && selectedNode.children.length > 0)
       const isCategory = hasChildren || !!values.is_category
+      const resultType = values.result_type
+      // 编码随表单行保存，编辑标题和调整行顺序均保留历史 value。
+      const multiOptions = !isCategory && resultType === 'multi_check'
+        ? normalizeResultOptions(values.result_options)
+        : undefined
       const payload = {
         title: values.title,
         is_category: isCategory,
-        result_type: isCategory ? undefined : values.result_type,
+        result_type: isCategory ? undefined : resultType,
+        // 列 check_type 默认 'radio'，后端类型判定优先取非默认值；
+        // 只改 result_type 会让旧值继续生效（如 numeric 改 score 仍按数值校验）。
+        check_type: isCategory ? undefined : (resultType === 'pass_fail' ? 'radio' : resultType),
         description: isCategory ? undefined : values.description,
         check_method: isCategory ? undefined : values.check_method,
         legal_basis: isCategory ? undefined : values.legal_basis,
         standard_ref: isCategory ? undefined : values.standard_ref,
         risk_level: isCategory ? undefined : values.risk_level,
-        min_value: !isCategory && values.result_type === 'numeric' ? values.min_value : undefined,
-        max_value: !isCategory && values.result_type === 'numeric' ? values.max_value : undefined,
-        unit: !isCategory && values.result_type === 'numeric' ? values.unit : undefined,
+        min_value: !isCategory && resultType === 'numeric' ? values.min_value : undefined,
+        max_value: !isCategory && resultType === 'numeric' ? values.max_value : undefined,
+        unit: !isCategory && resultType === 'numeric' ? values.unit : undefined,
+        max_score: !isCategory && resultType === 'score' ? values.max_score : undefined,
+        pass_score: !isCategory && resultType === 'score' ? values.pass_score : undefined,
+        score_step: !isCategory && resultType === 'score' ? values.score_step : undefined,
+        result_options: multiOptions,
+        is_required: isCategory ? undefined : (values.is_required ?? true),
         use_ai: isCategory ? false : values.use_ai,
         score_weight: !isCategory ? values.score_weight : undefined,
         default_score: !isCategory ? values.default_score : undefined,
@@ -337,7 +365,7 @@ export default function TemplateEditorV2({
         // Drop on the node content (become child)
         newParentId = dropNodeId
         const targetNode = findNodeById(treeData, dropNodeId)
-        const children = targetNode?.children || []
+        const children = (targetNode?.children || []).filter(node => node.id !== dragNodeId)
         newSortOrder = children.length
       } else if (
         (dropNode.children || []).length > 0 &&
@@ -358,6 +386,7 @@ export default function TemplateEditorV2({
           siblings = treeData
         }
 
+        siblings = siblings.filter(node => node.id !== dragNodeId)
         const dropIndex = siblings.findIndex(s => s.id === dropNodeId)
         if (dropPosition === -1) {
           newSortOrder = Math.max(0, dropIndex)
@@ -366,9 +395,10 @@ export default function TemplateEditorV2({
         }
       }
 
-      await templateApi.updateItem(dragNodeId, {
+      await templateApi.reorderItems(selectedTemplate.id, {
+        item_id: dragNodeId,
         parent_id: newParentId,
-        sort_order: newSortOrder,
+        position: newSortOrder,
       })
 
       if (newParentId && !expandedKeys.includes(newParentId)) {
@@ -821,7 +851,8 @@ export default function TemplateEditorV2({
 
                           <Form.Item noStyle shouldUpdate={(prev, current) => prev.result_type !== current.result_type}>
                             {({ getFieldValue }) => {
-                              if (getFieldValue('result_type') === 'numeric') {
+                              const rt = getFieldValue('result_type')
+                              if (rt === 'numeric') {
                                 return (
                                   <div style={{ background: '#fffbe6', padding: 16, borderRadius: 8, marginBottom: 24, border: '1px solid #ffe58f' }}>
                                     <Row gutter={24}>
@@ -844,8 +875,59 @@ export default function TemplateEditorV2({
                                   </div>
                                 )
                               }
+                              if (rt === 'score') {
+                                return (
+                                  <div style={{ background: '#fff7e6', padding: 16, borderRadius: 8, marginBottom: 24, border: '1px solid #ffd591' }}>
+                                    <Row gutter={24}>
+                                      <Col span={8}>
+                                        <Form.Item name="max_score" label={<span style={{ color: '#d46b08' }}>满分</span>} style={{ marginBottom: 0 }}>
+                                          <InputNumber placeholder="如：100" min={0} size="large" style={{ width: '100%' }} />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col span={8}>
+                                        <Form.Item name="pass_score" label={<span style={{ color: '#d46b08' }}>合格分数线</span>} style={{ marginBottom: 0 }}>
+                                          <InputNumber placeholder="如：60" min={0} size="large" style={{ width: '100%' }} />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col span={8}>
+                                        <Form.Item name="score_step" label={<span style={{ color: '#d46b08' }}>打分步长</span>} style={{ marginBottom: 0 }}>
+                                          <InputNumber placeholder="如：1 或 0.5" min={0} size="large" style={{ width: '100%' }} />
+                                        </Form.Item>
+                                      </Col>
+                                    </Row>
+                                  </div>
+                                )
+                              }
+                              if (rt === 'multi_check') {
+                                return (
+                                  <div style={{ background: '#e6fffb', padding: 16, borderRadius: 8, marginBottom: 24, border: '1px solid #87e8de' }}>
+                                    <div style={{ marginBottom: 8 }}>多选项</div>
+                                    <Form.List name="result_options">
+                                      {(fields, { add, remove }) => <>
+                                        {fields.map(({ key, name, ...rest }) => <Space key={key} align="baseline" style={{ display: 'flex' }}>
+                                          <Form.Item {...rest} name={[name, 'value']} hidden><Input /></Form.Item>
+                                          <Form.Item {...rest} name={[name, 'label']} rules={[{ required: true, whitespace: true, message: '请输入选项标题' }]}>
+                                            <Input aria-label={`选项 ${name + 1} 标题`} placeholder="选项标题" />
+                                          </Form.Item>
+                                          <Button onClick={() => remove(name)} danger>删除</Button>
+                                        </Space>)}
+                                        <Button onClick={() => add({ value: `option_${Date.now()}_${Math.random().toString(36).slice(2)}`, label: '' })}>添加选项</Button>
+                                      </>}
+                                    </Form.List>
+                                  </div>
+                                )
+                              }
                               return null
                             }}
+                          </Form.Item>
+
+                          <Form.Item
+                            name="is_required"
+                            label="该检查项是否必填"
+                            valuePropName="checked"
+                            tooltip="关闭后，现场审核时该项可留空不评定"
+                          >
+                            <Switch checkedChildren="必填" unCheckedChildren="选填" />
                           </Form.Item>
 
                           <Divider style={{ margin: '12px 0 24px 0' }} />

@@ -19,6 +19,7 @@
 """
 
 from typing import Any
+from app.utils.item_stats import classify_result
 
 #: 判定型结论字段的候选顺序（radio_value 优先，其次 result）
 _VERDICT_FIELDS = ("radio_value", "result", "evaluation_3level")
@@ -84,8 +85,10 @@ def _normalize(kind: str) -> str:
         return "numeric"
     if kind in ("text", "textarea"):
         return "text"
-    if kind in ("multi", "multiselect", "multi_check"):
+    if kind in ("multi", "multiselect", "multi_check", "checkbox"):
         return "multi_check"
+    if kind == "photo":
+        return "photo"
     if kind == "audit_3level":
         return "audit_3level"
     return "radio"
@@ -108,6 +111,9 @@ def is_item_assessed(item: Any, record: Any = None) -> bool:
     target = record if record is not None else item
     if target is None:
         return False
+    if any(classify_result(_get(target, field)) == "na"
+           for field in ("radio_value", "result")):
+        return True
 
     kind = resolve_check_type(item)
 
@@ -122,5 +128,7 @@ def is_item_assessed(item: Any, record: Any = None) -> bool:
         return _has(_get(target, "text_value")) or _has(_get(target, "result_text"))
     if kind == "multi_check":
         return _has(_get(target, "multi_value"))
+    if kind == "photo":
+        return _has(_get(target, "photos"))
     # audit_3level 等其余类型：有结论即算完成
-    return _has(_get(target, "result")) or _has(_get(target, "evaluation_3level"))
+    return any(_has(_get(target, field)) for field in _VERDICT_FIELDS)

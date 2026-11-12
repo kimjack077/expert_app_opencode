@@ -595,13 +595,13 @@ const getItemScore = (item) => {
   
   // 已经是独立打分项
   if (result.score_value !== null && result.score_value !== undefined && result.score_value !== '') {
-    return Number(result.score_value)
+    return Number(result.score_value) * Number(item.score_weight ?? 1)
   }
   
   // 依据是否合格打分
   const radio = result.radio_value
   if (radio === 'pass') {
-    return Number(item.score_weight || item.default_score || 0)
+    return Number(item.score_weight ?? item.default_score ?? 0)
   } else if (radio === 'fail') {
     return 0
   } else if (radio === 'na') {
@@ -739,20 +739,61 @@ const agentContext = computed(() => ({
   enterpriseId: record.value?.enterprise_id
 }))
 
+// 将模板历史别名归一为规范类型（与后端 resolve_check_type 同口径）。
+// 模板 check_type 列默认 'radio'，编辑器只写 result_type；若不归一，
+// 打分/数值/文本项会因 check_type==='radio' 命中单选分支，渲染成单选、
+// 完成判定与保存也都走错分支。
+const canonicalResultType = (resultType, checkType) => {
+  const alias = {
+    number: 'numeric',
+    textarea: 'text',
+    multi: 'multi_check',
+    multiselect: 'multi_check',
+    radio: 'pass_fail',
+  }
+  const t = resultType || checkType || 'pass_fail'
+  return alias[t] || t
+}
+
+// 任务模式的最终判定存在 inspection_tasks.remarks（updateTaskStatusAndRemarks
+// 写入「最终判定: 合格 | 说明」）。重新打开任务时按同一格式解析回填，
+// 否则已判定的任务再次进入会显示成「待判定」。
+const parseTaskRemark = (raw) => {
+  if (!raw) return null
+  const match = raw.match(/最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)/i)
+  if (!match) return null
+  const val = match[1].toLowerCase()
+  const result =
+    val === 'pass' || val === '合格' || val === '符合'
+      ? 'pass'
+      : val === 'fail' || val === '不合格' || val === '不符合'
+        ? 'fail'
+        : 'partial_pass'
+  const judgmentNote = raw
+    .replace(/^最终判定\s*[:：]\s*[^|｜]+[|｜]?\s*/i, '')
+    .trim()
+  return { result, judgmentNote }
+}
+
 const mergeTemplateResults = (items, resultByItemId) => {
   return (items || []).map((item) => {
     const id = String(item.id)
     const existing = resultByItemId[id] || {}
+    const normType = canonicalResultType(item.result_type, item.check_type)
     return {
       ...item,
       id,
       template_item_id: id,
+      result_type: normType,
+      check_type: normType === 'pass_fail' ? 'radio' : normType,
       radio_value: existing.radio_value || '',
       text_value: existing.text_value || '',
       numeric_value: existing.numeric_value ?? '',
       score_value: existing.score_value ?? '',
       problem_description: existing.problem_description || '',
-      multi_value: existing.multi_value || [],
+      multi_value: normType === 'multi_check'
+        ? (existing.text_value || '').split(',').map((s) => s.trim()).filter(Boolean)
+        : (existing.multi_value || []),
       // 附件必须一并合并：hasAttachment() 读的是 item.photos，
       // 漏掉这一项会让已上传的附件在任务模式下永远显示不出来。
       photos: existing.photos || [],
@@ -985,6 +1026,12 @@ const applyTaskExecutionData = async (task, rawTemplate, taskRecords = []) => {
       result_text: tr.result_text,
       inspector_note: tr.inspector_note,
     })),
+  }
+
+  const parsedJudgment = parseTaskRemark(task.remarks)
+  if (parsedJudgment) {
+    finalJudgment.result = parsedJudgment.result
+    finalJudgment.judgmentNote = parsedJudgment.judgmentNote
   }
 
   loadExistingResults()
@@ -1668,7 +1715,7 @@ const completeInspection = async () => {
 
       // 打分型
       else if (resultType === 'score') {
-        if (inputs.score_value !== '' && inputs.score_value != null && inputs.score_value !== 0) {
+        if (inputs.score_value !== '' && inputs.score_value != null) {
           data.score_value = String(inputs.score_value)
           hasValue = true
         }
@@ -1720,8 +1767,7 @@ const completeInspection = async () => {
     // 再保存最终判定
     await updateRecord(currentRecordId.value, {
       overall_result: finalJudgment.result,
-      judgment_note: finalJudgment.judgmentNote,
-      total_score: totalScore.value
+      judgment_note: finalJudgment.judgmentNote
     })
 
     // 再提交记录

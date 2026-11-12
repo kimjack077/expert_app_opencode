@@ -109,6 +109,15 @@
             </div>
             <div class="result-item">
               <div class="result-bar">
+                <div class="result-fill partial_pass" :style="{ width: partialPassRate + '%' }"></div>
+              </div>
+              <div class="result-info">
+                <span class="result-label">基本合格</span>
+                <span class="result-value">{{ resultStats.partial_pass }} ({{ partialPassRate }}%)</span>
+              </div>
+            </div>
+            <div class="result-item">
+              <div class="result-bar">
                 <div class="result-fill fail" :style="{ width: failRate + '%' }"></div>
               </div>
               <div class="result-info">
@@ -164,8 +173,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getTasks } from '../api/tasks'
-import { getRecords } from '../api/records'
+import { getTaskStatistics } from '../api/tasks'
+import { getRecordStatistics } from '../api/records'
 
 const router = useRouter()
 
@@ -179,9 +188,8 @@ const stats = ref({
 
 const resultStats = ref({
   pass: 0,
+  partial_pass: 0,
   fail: 0,
-  pending_rectification: 0,
-  not_applicable: 0,
   pending: 0
 })
 
@@ -192,67 +200,63 @@ const completionRate = computed(() => {
   return Math.round((stats.value.completed / stats.value.totalTasks) * 100)
 })
 
+// 记录总体结论只有 pass / partial_pass / fail / 待判定（null）四种，
+// 分母必须含 partial_pass，否则「基本合格」记录被漏算、百分比之和不足 100%。
+const resultTotal = computed(() => {
+  const r = resultStats.value
+  return r.pass + r.partial_pass + r.fail + r.pending
+})
+
 const passRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
-  if (total === 0) return 0
-  return Math.round((resultStats.value.pass / total) * 100)
+  if (resultTotal.value === 0) return 0
+  return Math.round((resultStats.value.pass / resultTotal.value) * 100)
+})
+
+const partialPassRate = computed(() => {
+  if (resultTotal.value === 0) return 0
+  return Math.round((resultStats.value.partial_pass / resultTotal.value) * 100)
 })
 
 const failRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
-  if (total === 0) return 0
-  return Math.round((resultStats.value.fail / total) * 100)
+  if (resultTotal.value === 0) return 0
+  return Math.round((resultStats.value.fail / resultTotal.value) * 100)
 })
 
 const pendingRate = computed(() => {
-  const total = resultStats.value.pass + resultStats.value.fail + resultStats.value.pending_rectification + resultStats.value.pending
-  if (total === 0) return 0
-  return Math.round((resultStats.value.pending / total) * 100)
+  if (resultTotal.value === 0) return 0
+  return Math.round((resultStats.value.pending / resultTotal.value) * 100)
 })
 
 const fetchData = async () => {
   try {
-    const [tasksRes, recordsRes] = await Promise.all([
-      getTasks({ page: 1, limit: 100 }),
-      getRecords({ page: 1, limit: 100 })
+    const [statsRes, recordsRes] = await Promise.all([
+      getTaskStatistics(),
+      getRecordStatistics()
     ])
-    
-    const tasks = tasksRes?.data?.items || tasksRes?.items || []
-    const records = recordsRes?.data?.items || recordsRes?.items || []
-    
+
+    const td = statsRes?.data || {}
+    const rd = recordsRes?.data || {}
+
+    // 任务汇总走后端全量口径；记录总数取后端 total，避免被分页截断
     stats.value = {
-      totalTasks: tasks.length,
-      pending: tasks.filter(t => t.status === 'pending').length,
-      inProgress: tasks.filter(t => t.status === 'in_progress').length,
-      completed: tasks.filter(t => t.status === 'completed').length,
-      totalRecords: records.length
+      totalTasks: td.total ?? 0,
+      pending: td.pending ?? 0,
+      inProgress: td.in_progress ?? 0,
+      completed: td.completed ?? 0,
+      totalRecords: rd.total ?? 0
     }
-    
-    resultStats.value = {
-      pass: records.filter(r => r.overall_result === 'pass').length,
-      fail: records.filter(r => r.overall_result === 'fail').length,
-      pending_rectification: records.filter(r => r.overall_result === 'pending_rectification').length,
-      not_applicable: records.filter(r => r.overall_result === 'not_applicable').length,
-      pending: records.filter(r => r.overall_result === 'pending' || !r.overall_result).length
+
+    resultStats.value = rd.results || { pass: 0, partial_pass: 0, fail: 0, pending: 0 }
+    const activity = new Map()
+    for (const entry of [...(rd.recent_activity || []), ...(td.recent_activity || [])]) {
+      activity.set(entry.date, { ...activity.get(entry.date), ...entry })
     }
-    
-    const last7Days = []
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date()
-      date.setDate(date.getDate() - i)
-      const dateStr = date.toISOString().split('T')[0]
-      const dayRecords = records.filter(r => r.inspection_date?.startsWith(dateStr))
-      const dayTasks = tasks.filter(t => t.completed_at?.startsWith(dateStr) || (t.status === 'completed' && t.updated_at?.startsWith(dateStr)))
-      
-      if (dayRecords.length > 0 || dayTasks.length > 0) {
-        last7Days.push({
-          date: `${date.getMonth() + 1}/${date.getDate()}`,
-          records: dayRecords.length,
-          completed: dayTasks.length
-        })
-      }
-    }
-    recentActivity.value = last7Days
+    recentActivity.value = [...activity.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, entry]) => ({
+        date: `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`,
+        records: entry.records || 0,
+        completed: entry.completed || 0
+      }))
   } catch (error) {
     console.error('获取统计数据失败:', error)
   }
@@ -445,6 +449,10 @@ onMounted(() => {
 
 .result-fill.pass {
   background: var(--success-color);
+}
+
+.result-fill.partial_pass {
+  background: var(--info-color);
 }
 
 .result-fill.fail {

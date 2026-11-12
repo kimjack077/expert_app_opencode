@@ -1,5 +1,6 @@
 """Bridge legacy inspection tasks into the formal audit project record."""
 
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -16,8 +17,36 @@ from app.models.audit_project import (
 from app.models.record import InspectionRecord, InspectionRecordItem
 from app.models.task import InspectionTask, TaskItemRecord
 from app.models.user import User
+from app.models.template import InspectionTemplate
 from app.utils.item_stats import FAIL_VALUES, NA_VALUES, PASS_VALUES
 from app.utils.item_completion import resolve_check_type
+from app.utils.scoring import calculate_total_score
+
+
+# 最终判定写在任务 remarks 里（`最终判定:合格 | 判定说明:...`）。
+# 必须提取判定值再映射，不能用子串匹配——"合格，无不合格项" 会被误判为 fail。
+_JUDGMENT_RE = re.compile(
+    r"最终判定\s*[:：]\s*(pass|fail|partial_pass|合格|不合格|基本合格|符合|不符合)",
+    re.IGNORECASE,
+)
+_JUDGMENT_MAP = {
+    "pass": "pass",
+    "合格": "pass",
+    "符合": "pass",
+    "partial_pass": "partial_pass",
+    "基本合格": "partial_pass",
+    "fail": "fail",
+    "不合格": "fail",
+    "不符合": "fail",
+}
+
+
+def overall_from_remarks(remarks: str | None) -> str | None:
+    """从任务备注提取最终判定，无法识别时不推断结论。"""
+    match = _JUDGMENT_RE.search(remarks or "")
+    if match:
+        return _JUDGMENT_MAP.get(match.group(1).lower())
+    return None
 
 
 def legacy_result_to_evaluation(result: str | None) -> str | None:
@@ -96,7 +125,7 @@ async def sync_task_to_formal_record(
         row
         for row in source_rows
         if str(row.result or "").strip()
-        or str(row.result_value or "").strip()
+        or (row.result_value is not None and str(row.result_value).strip())
         or str(row.result_text or "").strip()
         or str(row.inspector_note or "").strip()
     ]
@@ -318,12 +347,11 @@ async def sync_task_to_formal_record(
         from app.models.enterprise import Enterprise
 
         enterprise = await db.get(Enterprise, project.enterprise_id)
-    overall = "pass"
-    if task.remarks and "\u4e0d\u5408\u683c" in task.remarks:
-        overall = "fail"
-    elif task.remarks and "\u57fa\u672c\u5408\u683c" in task.remarks:
-        overall = "partial_pass"
+    overall = overall_from_remarks(task.remarks)
+    synced_remarks = f"{marker} 由日常检查任务 {task.task_no} 完成时同步 | {task.remarks or ''}".strip()
     if not inspection_record:
+        if overall is None:
+            raise ValueError("请先填写最终判定结论（合格/基本合格/不合格），再完成任务")
         inspection_record = InspectionRecord(
             template_id=plan_item.template_id,
             enterprise_id=getattr(enterprise, "id", None),
@@ -339,14 +367,17 @@ async def sync_task_to_formal_record(
             inspection_date=now,
             status="submitted",
             overall_result=overall,
-            remarks=f"{marker} 由日常检查任务 {task.task_no} 完成时同步 | {task.remarks or ''}".strip(),
+            remarks=synced_remarks,
             judgment_note=task.remarks,
         )
         db.add(inspection_record)
         await db.flush()
     else:
         inspection_record.status = "submitted"
-        inspection_record.overall_result = overall
+        if overall is not None:
+            inspection_record.overall_result = overall
+        inspection_record.remarks = synced_remarks
+        inspection_record.judgment_note = task.remarks
         inspection_record.inspector_id = recorded_by
 
     # 这里必须用同步过程中自己维护的列表，不能访问 ``area_record.items``：
@@ -355,6 +386,8 @@ async def sync_task_to_formal_record(
     # 且此时任务/计划项/正式记录都未提交，用户看到的是"提交失败"。
     for item in synced_items:
         item.record_id = inspection_record.id
+    template = await db.get(InspectionTemplate, plan_item.template_id) if plan_item.template_id else None
+    inspection_record.total_score = calculate_total_score(synced_items) if template and getattr(template, "is_quantified", False) else None
 
     area.status = "completed"
     plan_item.status = "completed"

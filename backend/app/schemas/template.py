@@ -14,6 +14,12 @@ class TemplateItemBase(BaseModel):
     legal_basis: Optional[str] = Field(None, description="法律依据")
     standard_ref: Optional[str] = Field(None, max_length=200, description="标准依据")
 
+    # 认证审核专用字段
+    clause_no: Optional[str] = Field(None, max_length=50, description="标准条款号")
+    applicable_systems: Optional[List[str]] = Field(None, description="适用体系列表，如 ['Q','E','S']")
+    evidence_hint: Optional[str] = Field(None, description="审核员填写提示")
+    tags: Optional[List[str]] = Field(None, description="标签")
+
     # 检查结论配置
     # check_type 支持: score(打分)/radio(单选)/numeric(数值)/text(文本)/multi_check(多选)
     check_type: Optional[str] = Field("radio", description="检查类型：score/radio/numeric/text/multi_check")
@@ -57,6 +63,10 @@ class TemplateItemUpdate(BaseModel):
     check_method: Optional[str] = None
     legal_basis: Optional[str] = None
     standard_ref: Optional[str] = None
+    clause_no: Optional[str] = Field(None, max_length=50)
+    applicable_systems: Optional[List[str]] = None
+    evidence_hint: Optional[str] = None
+    tags: Optional[List[str]] = None
     check_type: Optional[str] = None
     result_type: Optional[str] = None
     result_options: Optional[Any] = None
@@ -78,6 +88,12 @@ class TemplateItemUpdate(BaseModel):
     ai_prompt_template: Optional[str] = None
 
 
+class TemplateItemMove(BaseModel):
+    item_id: UUID
+    parent_id: Optional[UUID] = None
+    position: int = Field(0, ge=0)
+
+
 class TemplateItemResponse(TemplateItemBase):
     """检查项目响应"""
     id: UUID
@@ -97,6 +113,7 @@ class InspectionTemplateBase(BaseModel):
     version: Optional[str] = Field("1.0", description="版本号")
     is_quantified: Optional[bool] = Field(False, description="是否量化")
     is_public: Optional[bool] = Field(False, description="是否公共模板")
+    industry_id: Optional[UUID] = Field(None, description="所属行业 ID")
 
 
 class InspectionTemplateCreate(InspectionTemplateBase):
@@ -114,6 +131,7 @@ class InspectionTemplateUpdate(BaseModel):
     is_published: Optional[bool] = None
     is_public: Optional[bool] = None
     is_quantified: Optional[bool] = None
+    industry_id: Optional[UUID] = None
 
 
 class InspectionTemplateResponse(InspectionTemplateBase):

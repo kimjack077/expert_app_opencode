@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout, Menu, Dropdown, Avatar, Button, Tooltip } from 'antd'
+import { Layout, Menu, Dropdown, Avatar, Button, Tooltip, Modal, Descriptions, Form, Input, message } from 'antd'
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -23,6 +24,7 @@ import {
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
+import { authApi } from '@/services/api'
 import AgentSidebar from '@/components/agent/AgentSidebar'
 import { roleLabel } from '@/utils/display'
 import { isAdminRole } from '@/utils/roles'
@@ -87,9 +89,38 @@ export default function MainLayout() {
     },
   ]
 
-  const handleLogout = () => {
-    logout()
-    navigate('/login')
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [pwdSaving, setPwdSaving] = useState(false)
+  const [pwdForm] = Form.useForm()
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout()
+    } catch {
+      // 服务端不可用时仍允许本地退出
+    } finally {
+      logout()
+      navigate('/login')
+    }
+  }
+
+  const handleChangePassword = async () => {
+    try {
+      const values = await pwdForm.validateFields()
+      setPwdSaving(true)
+      await authApi.changePassword(values.old_password, values.new_password)
+      message.success('密码修改成功，请重新登录')
+      setProfileOpen(false)
+      pwdForm.resetFields()
+      logout()
+      navigate('/login')
+    } catch (error: any) {
+      if (!error?.errorFields) {
+        message.error(error?.response?.data?.message || error?.response?.data?.detail || '密码修改失败')
+      }
+    } finally {
+      setPwdSaving(false)
+    }
   }
 
   const userMenuItems = [
@@ -97,6 +128,7 @@ export default function MainLayout() {
       key: 'profile',
       icon: <UserOutlined />,
       label: '个人信息',
+      onClick: () => setProfileOpen(true),
     },
     {
       type: 'divider' as const,
@@ -307,6 +339,62 @@ export default function MainLayout() {
         </Content>
         <AgentSidebar context={agentContext} />
       </Layout>
+
+      <Modal
+        title="个人信息"
+        open={profileOpen}
+        onCancel={() => setProfileOpen(false)}
+        footer={null}
+        width={480}
+        destroyOnHidden
+      >
+        <Descriptions column={1} size="small" bordered style={{ marginBottom: 20 }}>
+          <Descriptions.Item label="用户名">{user?.username || '-'}</Descriptions.Item>
+          <Descriptions.Item label="姓名">{user?.full_name || '-'}</Descriptions.Item>
+          <Descriptions.Item label="邮箱">{user?.email || '-'}</Descriptions.Item>
+          <Descriptions.Item label="角色">{roleLabel(user?.role)}</Descriptions.Item>
+        </Descriptions>
+
+        <div style={{ fontWeight: 600, marginBottom: 12 }}>修改密码</div>
+        <Form form={pwdForm} layout="vertical">
+          <Form.Item
+            label="当前密码"
+            name="old_password"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password placeholder="请输入当前密码" autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item
+            label="新密码"
+            name="new_password"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 6, message: '密码至少 6 位' },
+            ]}
+          >
+            <Input.Password placeholder="至少 6 位" autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            label="确认新密码"
+            name="confirm_password"
+            dependencies={['new_password']}
+            rules={[
+              { required: true, message: '请再次输入新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('new_password') === value) return Promise.resolve()
+                  return Promise.reject(new Error('两次输入的新密码不一致'))
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="再次输入新密码" autoComplete="new-password" />
+          </Form.Item>
+          <Button type="primary" loading={pwdSaving} onClick={handleChangePassword} block>
+            确认修改
+          </Button>
+        </Form>
+      </Modal>
     </Layout>
   )
 }

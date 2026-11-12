@@ -192,16 +192,18 @@ async def apply_extracted_items(
             # 处理 result_options（保留合格/不合格判定标准）
             result_options = item_data.get("result_options")
             
-            # 根据 check_type 确定 result_type（兼容旧字段）
+            # 根据 check_type 确定 result_type（兼容旧字段）。
+            # H5 优先按 result_type 渲染，必须与 check_type 保持一致，
+            # 否则打分/多选项会被当成单选（pass_fail）无法填报。
             check_type = item_data.get("check_type", "radio")
-            if check_type == "radio":
-                result_type = "pass_fail"
-            elif check_type == "numeric":
-                result_type = "numeric"
-            elif check_type == "text":
-                result_type = "text"
-            else:
-                result_type = "pass_fail"
+            result_type = {
+                "radio": "pass_fail",
+                "numeric": "numeric",
+                "text": "text",
+                "score": "score",
+                "multi_check": "multi_check",
+                "audit_3level": "audit_3level",
+            }.get(check_type, "pass_fail")
 
             new_item = TemplateItem(
                 template_id=template_id,
@@ -218,6 +220,7 @@ async def apply_extracted_items(
                 max_value=item_data.get("max_value"),
                 unit=item_data.get("unit"),
                 max_score=item_data.get("max_score"),
+                score_step=item_data.get("score_step"),
                 pass_score=item_data.get("pass_score"),
                 risk_level=item_data.get("risk_level", "medium"),
                 is_category=item_data.get("is_category", False),

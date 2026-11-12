@@ -159,8 +159,8 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
-import { getCurrentUser } from '../api/auth.js'
-import { getTasks } from '../api/tasks.js'
+import { getCurrentUser, logout as logoutApi } from '../api/auth.js'
+import { getTaskStatistics } from '../api/tasks.js'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
@@ -182,13 +182,13 @@ const fetchUser = async () => {
 
 const fetchStats = async () => {
   try {
-    const res = await getTasks({ page: 1, page_size: 100 })
-    // 统一响应体为 { code, message, data: { items } }；此前少解一层 data 导致统计恒为 0（BUG-27）
-    const tasks = res.data?.items || []
+    // 走后端全量统计口径，避免基于分页数组累加导致数字对不上
+    const res = await getTaskStatistics()
+    const d = res.data || {}
     stats.value = {
-      pending: tasks.filter(t => t.status === 'pending').length,
-      inProgress: tasks.filter(t => t.status === 'in_progress').length,
-      completed: tasks.filter(t => t.status === 'completed').length
+      pending: d.pending ?? 0,
+      inProgress: d.in_progress ?? 0,
+      completed: d.completed ?? 0
     }
   } catch (error) {
     console.error('获取统计数据失败:', error)
@@ -223,7 +223,11 @@ const logout = async () => {
       confirmButtonText: '退出',
       cancelButtonText: '取消',
     })
+    // 先吊销后端会话（失败也不阻断本地退出），再清掉全部本地凭据
+    await logoutApi().catch(() => {})
     localStorage.removeItem('token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('userName')
     showToast({ type: 'success', message: '已退出登录' })
     router.push('/login')
   } catch (error) {

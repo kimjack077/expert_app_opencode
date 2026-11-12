@@ -8,6 +8,8 @@
 
 from typing import Any, Dict, List, Optional, Set, Callable
 
+from app.utils.item_completion import resolve_check_type
+
 
 def build_tree_fast(
     items: List[Any],
@@ -206,15 +208,31 @@ def build_inspection_record_tree(
             if record_item and record_item.item_title
             else getattr(template_item, "use_ai", False)
         )
+        # 类型口径与写入侧一致：快照 item_check_type 落库时已经过
+        # resolve_check_type 归一；无快照时实时解析，避免 check_type 恒为
+        # 列默认值 'radio' 把数值/文本/打分项误判成单选。
+        check_type = (
+            record_item.item_check_type
+            if record_item and record_item.item_title and record_item.item_check_type
+            else resolve_check_type(template_item)
+        )
+
+        def _num_attr(name: str) -> Optional[float]:
+            value = getattr(template_item, name, None)
+            return float(value) if value is not None else None
 
         return {
             "id": str(record_item.id) if record_item else str(template_item.id),
             "template_item_id": str(template_item.id),
+            "parent_id": str(template_item.parent_id)
+            if getattr(template_item, "parent_id", None)
+            else None,
             "title": title,
             "description": description,
             "check_method": check_method,
             "legal_basis": legal_basis,
             "standard_ref": standard_ref,
+            "check_type": check_type,
             "result_type": getattr(template_item, "result_type", "pass_fail"),
             "result_options": result_options,
             "min_value": min_value,
@@ -222,6 +240,13 @@ def build_inspection_record_tree(
             "unit": unit,
             "score_weight": score_weight,
             "default_score": default_score,
+            "max_score": _num_attr("max_score"),
+            "pass_score": _num_attr("pass_score"),
+            "score_step": _num_attr("score_step"),
+            # 与后端提交校验同一口径（is_required is not False），
+            # 前端 `is_required !== false` 依赖真实布尔值。
+            "is_required": getattr(template_item, "is_required", None) is not False,
+            "sort_order": getattr(template_item, "sort_order", 0) or 0,
             "allow_attachment": allow_attachment,
             "attachment_required": attachment_required,
             "ai_prompt_template": ai_prompt_template,

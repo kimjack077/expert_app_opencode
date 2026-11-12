@@ -18,15 +18,31 @@
 /** 非空判定：null / undefined / 空串 / 字面量 "null" 都视为空 */
 const has = (v: unknown): boolean => {
   if (v === null || v === undefined) return false
+  if (Array.isArray(v)) return v.length > 0
   const s = String(v).trim()
-  return s !== '' && s !== 'null'
+  return s !== '' && s.toLowerCase() !== 'null'
 }
 
-/** 判定值：兼容 radio_value（inspection_record_items）与 result（task_item_records） */
-const verdictOf = (r: any): string | null => {
-  const v = r?.radio_value ?? r?.result ?? r?.evaluation_3level ?? null
-  return has(v) ? String(v).trim() : null
+/** 以显式结论优先回填，避免旧三级评价覆盖 NA 或新的判定。 */
+export function normalizeVerdictFields(r: any) {
+  const explicit = [r?.radio_value, r?.result].find(has)
+  const evaluation = has(r?.evaluation_3level) ? String(r.evaluation_3level).trim() : undefined
+  let verdict = explicit === undefined ? undefined : String(explicit).trim()
+  if (verdict === 'not_applicable') verdict = 'na'
+  if (!verdict) {
+    if (evaluation === '1' || evaluation === '2') verdict = 'pass'
+    else if (evaluation === '3') verdict = 'fail'
+  }
+  return {
+    radio_value: verdict,
+    result: verdict,
+    evaluation_3level: verdict === 'pass' ? (evaluation === '2' ? '2' : '1')
+      : verdict === 'fail' ? '3' : undefined,
+  }
 }
+
+/** 判定值：兼容两套记录模型及三级评价。 */
+const verdictOf = (r: any): string | null => normalizeVerdictFields(r).radio_value ?? null
 
 /**
  * 取检查项的真实类型。
@@ -60,9 +76,10 @@ export function resolveCheckType(item: any): string {
 function normalizeCheckType(kind: string): string {
   if (!kind || kind === 'radio' || kind === 'pass_fail') return 'radio'
   if (kind === 'score') return 'score'
-  if (kind === 'numeric') return 'numeric'
+  if (kind === 'numeric' || kind === 'number') return 'numeric'
   if (kind === 'text' || kind === 'textarea') return 'text'
-  if (kind === 'multi' || kind === 'multiselect' || kind === 'multi_check') return 'multi'
+  if (['multi', 'multiselect', 'multi_check', 'checkbox'].includes(kind)) return 'multi'
+  if (kind === 'audit_3level' || kind === 'photo') return kind
   return 'radio'
 }
 
@@ -75,6 +92,7 @@ function normalizeCheckType(kind: string): string {
 export function isItemAssessed(item: any, record?: any): boolean {
   const r = record ?? item
   if (!r) return false
+  if (['na', 'not_applicable', '不适用'].includes(verdictOf(r) || '')) return true
 
   switch (resolveCheckType(item)) {
     case 'radio':
@@ -90,6 +108,8 @@ export function isItemAssessed(item: any, record?: any): boolean {
       return Array.isArray(r.multi_value)
         ? r.multi_value.length > 0
         : has(r.multi_value)
+    case 'photo':
+      return has(r.photos)
     default:
       return verdictOf(r) !== null
   }
@@ -128,7 +148,9 @@ export function classifyItem(item: any, record?: any): ItemBucket {
   if (!isItemAssessed(item, r)) return 'unfilled'
 
   // 非判定型（数值 / 描述 / 打分 / 多选）填了内容即「其他项」
-  if (resolveCheckType(item) !== 'radio') return 'other'
+  if (!['radio', 'audit_3level'].includes(resolveCheckType(item))) {
+    return NA_VALUES.has(verdictOf(r) || '') ? 'na' : 'other'
+  }
 
   const v = verdictOf(r)
   if (v === null) return 'other'

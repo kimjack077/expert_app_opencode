@@ -15,6 +15,8 @@ from app.utils.security import (
     invalidate_user_cache,
 )
 from app.utils.response import make_response
+from app.utils.roles import is_admin
+from app.services.project_access_service import ensure_project_access
 
 router = APIRouter()
 
@@ -36,6 +38,45 @@ async def get_users(
     users = result.scalars().all()
 
     return make_response(data=[UserResponse.model_validate(u).model_dump() for u in users])
+
+
+@router.get("/options", response_model=ApiResponse)
+async def get_user_options(
+    role: Optional[str] = None,
+    project_id: Optional[UUID] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """轻量成员列表 —— 供任务分配 / 审核组选员下拉使用。
+
+    GET /users 仅管理员可用，expert/组长打开分配下拉会静默 403、列表为空。
+    管理员可选员；项目负责人须提供其管理的项目，其他用户无权枚举通讯录。
+    """
+    if not is_admin(current_user.role):
+        if not project_id:
+            raise HTTPException(status_code=403, detail="仅管理员或项目负责人可选择成员")
+        await ensure_project_access(db, project_id, current_user, require_manage=True)
+    query = select(User).where(
+        User.is_deleted == False,  # noqa: E712
+        User.is_active == True,  # noqa: E712
+    )
+    if role:
+        query = query.where(User.role == role)
+    query = query.order_by(User.full_name, User.username).limit(500)
+    result = await db.execute(query)
+    users = result.scalars().all()
+    return make_response(
+        data=[
+            {
+                "id": str(u.id),
+                "username": u.username,
+                "full_name": u.full_name,
+                "role": u.role,
+            }
+            for u in users
+        ]
+    )
+
 
 @router.get("/{user_id}", response_model=ApiResponse)
 async def get_user(

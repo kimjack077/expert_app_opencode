@@ -378,7 +378,7 @@ class ReportService:
             ['企业名称', record.enterprise_name or (record.enterprise.name if record.enterprise else '-')],
             ['检查日期', record.inspection_date.strftime('%Y年%m月%d日') if record.inspection_date else '-'],
             ['检查员', record.inspector.full_name or record.inspector.username if record.inspector else '-'],
-            ['检查类型', '定期检查'],
+            ['检查模板', (record.template.name if record.template else None) or (record.template_snapshot or {}).get('name') or '-'],
             ['总体结论', self._get_result_text(record.overall_result)],
         ]
         cover_table = Table(cover_data, colWidths=[40*mm, 80*mm])
@@ -694,7 +694,7 @@ class ReportService:
                 'template_version': (record.template.version if record.template else None) or (record.template_snapshot or {}).get('version') or '-',
                 'overall_result': record.overall_result,
                 'overall_result_text': self._get_result_text(record.overall_result),
-                'total_score': float(record.total_score) if record.total_score else None,
+                'total_score': float(record.total_score) if record.total_score is not None else None,
                 'remarks': record.remarks,
                 'judgment_note': record.judgment_note,
             },

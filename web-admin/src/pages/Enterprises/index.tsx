@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, message, Space, Tag, Tabs, DatePicker, InputNumber, Descriptions, Row, Col } from 'antd'
 import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, SearchOutlined, BankOutlined, EnvironmentOutlined, PhoneOutlined, UserOutlined } from '@ant-design/icons'
 import { enterpriseApi } from '@/services/api'
@@ -27,6 +27,10 @@ interface Enterprise {
 export default function Enterprises() {
   const [enterprises, setEnterprises] = useState<Enterprise[]>([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const appliedFilters = useRef({ name: '', district: '', risk_level: '', status: '' })
+  const requestSequence = useRef(0)
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [detailVisible, setDetailVisible] = useState(false)
@@ -44,23 +48,29 @@ export default function Enterprises() {
     fetchEnterprises()
   }, [])
 
-  const fetchEnterprises = async () => {
+  const fetchEnterprises = async (filters = appliedFilters.current, current = page, size = pageSize) => {
+    const sequence = ++requestSequence.current
+    appliedFilters.current = filters
+    setPage(current)
+    setPageSize(size)
     setLoading(true)
     try {
-      // 与分页器 pageSize 对齐：后端默认只回 20 条，而表格分页器按 10 条/页
-      // 显示 total=14x 时会翻出空白页。这里显式取上限，继续走前端分页。
-      const params: any = { limit: 100 }
-      if (searchParams.name) params.name = searchParams.name
-      if (searchParams.district) params.district = searchParams.district
-      if (searchParams.risk_level) params.risk_level = searchParams.risk_level
-      if (searchParams.status) params.status = searchParams.status
+      const params: any = { skip: (current - 1) * size, limit: size }
+      if (filters.name) params.name = filters.name
+      if (filters.district) params.district = filters.district
+      if (filters.risk_level) params.risk_level = filters.risk_level
+      if (filters.status) params.status = filters.status
       const res: any = await enterpriseApi.getEnterprises(params)
+      if (sequence !== requestSequence.current) return
+      if (!res.data?.items?.length && current > 1 && res.data?.total > 0) {
+        return fetchEnterprises(filters, Math.ceil(res.data.total / size), size)
+      }
       setEnterprises(res.data?.items || [])
       setTotal(res.data?.total || 0)
     } catch (error) {
       console.error('Failed to fetch enterprises:', error)
     } finally {
-      setLoading(false)
+      if (sequence === requestSequence.current) setLoading(false)
     }
   }
 
@@ -264,7 +274,7 @@ export default function Enterprises() {
             value={searchParams.name}
             onChange={(e) => setSearchParams({ ...searchParams, name: e.target.value })}
             style={{ width: 240 }}
-            onPressEnter={fetchEnterprises}
+            onPressEnter={() => fetchEnterprises(searchParams, 1)}
             allowClear
           />
           <Select
@@ -290,12 +300,13 @@ export default function Enterprises() {
             <Select.Option value="suspended">停业</Select.Option>
             <Select.Option value="revoked">吊销</Select.Option>
           </Select>
-          <Button type="primary" onClick={fetchEnterprises}>
+          <Button type="primary" onClick={() => fetchEnterprises(searchParams, 1)}>
             查询
           </Button>
           <Button onClick={() => {
-            setSearchParams({ name: '', district: '', risk_level: '', status: '' })
-            fetchEnterprises()
+            const empty = { name: '', district: '', risk_level: '', status: '' }
+            setSearchParams(empty)
+            fetchEnterprises(empty, 1)
           }}>
             重置
           </Button>
@@ -307,7 +318,10 @@ export default function Enterprises() {
           rowKey="id"
           loading={loading}
           pagination={{ 
-            pageSize: 10,
+            current: page,
+            pageSize,
+            pageSizeOptions: [10, 20, 50, 100],
+            onChange: (current, size) => fetchEnterprises(appliedFilters.current, size === pageSize ? current : 1, size),
             total: total,
             showSizeChanger: true,
             showQuickJumper: true,

@@ -224,7 +224,6 @@ const Users: React.FC = () => {
                         >
                             <Option value="super_admin">超级管理员 (Super Admin)</Option>
                             <Option value="admin">管理员 (Admin)</Option>
-                            <Option value="manager">主管 (Manager)</Option>
                             <Option value="expert">专家 (Expert)</Option>
                             <Option value="auditor">审核员 (Auditor)</Option>
                         </Select>

@@ -28,6 +28,8 @@ from app.utils.category import (
 from app.services import AuditService
 from app.utils.response import make_response
 from app.utils.roles import FIELD_ROLES, is_admin as is_admin_role
+from app.schemas.template import TemplateItemMove
+from app.utils.template_order import move_template_item
 
 router = APIRouter()
 
@@ -151,6 +153,7 @@ async def get_templates(
             'is_published': t.is_published,
             'is_public': t.is_public if t.is_public is not None else False,
             'is_quantified': t.is_quantified,
+            'industry_id': str(t.industry_id) if t.industry_id else None,
             'created_by': str(t.created_by) if t.created_by else None,
             'can_edit': can_modify_template(current_user, t),
             'created_at': t.created_at.isoformat() if t.created_at else None,
@@ -195,6 +198,7 @@ async def create_template(
         version=template_data.version or "1.0",
         is_quantified=template_data.is_quantified if template_data.is_quantified is not None else False,
         is_public=template_data.is_public if is_admin(current_user) else False,  # 只有管理员可以设置公共模板
+        industry_id=template_data.industry_id,
         created_by=current_user.id,
     )
     db.add(template)
@@ -280,17 +284,26 @@ async def get_template(
                     "check_method": None if is_cat else item.check_method,
                     "legal_basis": None if is_cat else item.legal_basis,
                     "standard_ref": None if is_cat else item.standard_ref,
+                    "clause_no": None if is_cat else item.clause_no,
+                    "applicable_systems": None if is_cat else item.applicable_systems,
+                    "evidence_hint": None if is_cat else item.evidence_hint,
+                    "tags": None if is_cat else item.tags,
+                    "check_type": None if is_cat else item.check_type,
                     "result_type": None if is_cat else item.result_type,
                     "result_options": None if is_cat else item.result_options,
-                    "min_value": None if is_cat else (float(item.min_value) if item.min_value else None),
-                    "max_value": None if is_cat else (float(item.max_value) if item.max_value else None),
+                    "min_value": None if is_cat else _num(item.min_value),
+                    "max_value": None if is_cat else _num(item.max_value),
                     "unit": None if is_cat else item.unit,
+                    "max_score": None if is_cat else _num(item.max_score),
+                    "score_step": None if is_cat else _num(item.score_step),
+                    "pass_score": None if is_cat else _num(item.pass_score),
                     "is_required": False if is_cat else item.is_required,
                     "use_ai": False if is_cat else item.use_ai,
                     "risk_level": item.risk_level,
                     "is_category": is_cat,
-                    "score_weight": None if is_cat else (float(item.score_weight) if item.score_weight else None),
-                    "default_score": None if is_cat else (float(item.default_score) if item.default_score else None),
+                    "sort_order": item.sort_order,
+                    "score_weight": None if is_cat else _num(item.score_weight),
+                    "default_score": None if is_cat else _num(item.default_score),
                     "allow_attachment": False if is_cat else item.allow_attachment,
                     "attachment_required": False if is_cat else item.attachment_required,
                     "ai_prompt_template": None if is_cat else item.ai_prompt_template,
@@ -309,6 +322,7 @@ async def get_template(
         "is_published": template.is_published,
         "is_public": template.is_public if template.is_public is not None else False,
         "is_quantified": template.is_quantified,
+        "industry_id": str(template.industry_id) if template.industry_id else None,
         "created_by": str(template.created_by) if template.created_by else None,
         "can_edit": can_modify_template(current_user, template),
         "items": build_tree(items),
@@ -470,6 +484,7 @@ async def copy_template(
         category=source_template.category,
         version=source_template.version,
         is_quantified=source_template.is_quantified,
+        industry_id=source_template.industry_id,
         is_public=False,  # 复制的模板默认为个人模板
         created_by=current_user.id,
     )
@@ -496,11 +511,19 @@ async def copy_template(
             check_method=item.check_method,
             legal_basis=item.legal_basis,
             standard_ref=item.standard_ref,
+            clause_no=item.clause_no,
+            applicable_systems=item.applicable_systems,
+            evidence_hint=item.evidence_hint,
+            tags=item.tags,
+            check_type=item.check_type,
             result_type=item.result_type,
             result_options=item.result_options,
             min_value=item.min_value,
             max_value=item.max_value,
             unit=item.unit,
+            max_score=item.max_score,
+            score_step=item.score_step,
+            pass_score=item.pass_score,
             is_required=item.is_required,
             use_ai=item.use_ai,
             risk_level=item.risk_level,
@@ -611,9 +634,31 @@ async def get_template_items(
                 tree.append({
                     "id": str(item.id),
                     "title": item.title,
+                    "description": None if is_cat else item.description,
                     "check_method": None if is_cat else item.check_method,
+                    "legal_basis": None if is_cat else item.legal_basis,
+                    "standard_ref": None if is_cat else item.standard_ref,
+                    "clause_no": None if is_cat else item.clause_no,
+                    "applicable_systems": None if is_cat else item.applicable_systems,
+                    "evidence_hint": None if is_cat else item.evidence_hint,
+                    "tags": None if is_cat else item.tags,
+                    "check_type": None if is_cat else item.check_type,
                     "result_type": None if is_cat else item.result_type,
+                    "result_options": None if is_cat else item.result_options,
+                    "min_value": None if is_cat else _num(item.min_value),
+                    "max_value": None if is_cat else _num(item.max_value),
+                    "unit": None if is_cat else item.unit,
+                    "max_score": None if is_cat else _num(item.max_score),
+                    "score_step": None if is_cat else _num(item.score_step),
+                    "pass_score": None if is_cat else _num(item.pass_score),
                     "is_required": False if is_cat else item.is_required,
+                    "use_ai": False if is_cat else item.use_ai,
+                    "risk_level": item.risk_level,
+                    "score_weight": None if is_cat else _num(item.score_weight),
+                    "default_score": None if is_cat else _num(item.default_score),
+                    "allow_attachment": False if is_cat else item.allow_attachment,
+                    "attachment_required": False if is_cat else item.attachment_required,
+                    "ai_prompt_template": None if is_cat else item.ai_prompt_template,
                     "is_category": is_cat,
                     "sort_order": item.sort_order,
                     "parent_id": str(item.parent_id) if item.parent_id else None,
@@ -622,6 +667,33 @@ async def get_template_items(
         return tree
 
     return make_response(data=build_tree(items))
+
+
+@router.put("/{template_id}/items/reorder", response_model=ApiResponse)
+async def reorder_template_items(
+    template_id: UUID,
+    payload: TemplateItemMove,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    template = (await db.execute(select(InspectionTemplate).where(
+        InspectionTemplate.id == template_id, InspectionTemplate.is_deleted == False,
+    ).with_for_update())).scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if not can_modify_template(current_user, template):
+        raise HTTPException(status_code=403, detail="您没有权限修改此模板")
+    items = (await db.execute(select(TemplateItem).where(
+        TemplateItem.template_id == template_id, TemplateItem.is_deleted == False,
+    ).with_for_update())).scalars().all()
+    try:
+        parent = move_template_item(items, payload.item_id, payload.parent_id, payload.position)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if parent:
+        normalize_as_category(parent)
+    await db.commit()
+    return make_response(message="移动排序成功")
 
 
 @router.post("/{template_id}/items", response_model=ApiResponse)
@@ -667,11 +739,19 @@ async def create_item(
         check_method=None if is_category else item_data.check_method,
         legal_basis=None if is_category else item_data.legal_basis,
         standard_ref=None if is_category else item_data.standard_ref,
+        clause_no=None if is_category else item_data.clause_no,
+        applicable_systems=None if is_category else item_data.applicable_systems,
+        evidence_hint=None if is_category else item_data.evidence_hint,
+        tags=None if is_category else item_data.tags,
+        check_type=None if is_category else (item_data.check_type or "radio"),
         result_type=None if is_category else (item_data.result_type or "pass_fail"),
         result_options=None if is_category else item_data.result_options,
         min_value=None if is_category else item_data.min_value,
         max_value=None if is_category else item_data.max_value,
         unit=None if is_category else item_data.unit,
+        max_score=None if is_category else item_data.max_score,
+        score_step=None if is_category else item_data.score_step,
+        pass_score=None if is_category else item_data.pass_score,
         is_required=False if is_category else (item_data.is_required if item_data.is_required is not None else True),
         use_ai=False if is_category else (item_data.use_ai if item_data.use_ai is not None else False),
         risk_level=None if is_category else (item_data.risk_level or "medium"),
@@ -697,6 +777,11 @@ async def create_item(
     return make_response(data=_item_payload(item))
 
 
+def _num(value) -> Optional[float]:
+    """Numeric → float，保留 0（`if value` 会把 0 误判为 None）。"""
+    return float(value) if value is not None else None
+
+
 def _item_payload(item: TemplateItem) -> dict:
     """模板项的完整扁平序列化（创建/更新响应共用）"""
     return {
@@ -708,13 +793,26 @@ def _item_payload(item: TemplateItem) -> dict:
         "check_method": item.check_method,
         "legal_basis": item.legal_basis,
         "standard_ref": item.standard_ref,
+        "clause_no": item.clause_no,
+        "applicable_systems": item.applicable_systems,
+        "evidence_hint": item.evidence_hint,
+        "tags": item.tags,
         "result_type": item.result_type,
         "check_type": item.check_type,
+        "result_options": item.result_options,
+        "min_value": _num(item.min_value),
+        "max_value": _num(item.max_value),
+        "unit": item.unit,
+        "max_score": _num(item.max_score),
+        "score_step": _num(item.score_step),
+        "pass_score": _num(item.pass_score),
         "is_required": item.is_required,
         "is_category": bool(item.is_category),
         "risk_level": item.risk_level,
         "sort_order": item.sort_order,
         "use_ai": item.use_ai,
+        "score_weight": _num(item.score_weight),
+        "default_score": _num(item.default_score),
         "allow_attachment": item.allow_attachment,
         "attachment_required": item.attachment_required,
         "ai_prompt_template": item.ai_prompt_template,

@@ -219,7 +219,10 @@ class AuditReportGenerator:
         team_result = await self.db.execute(
             select(AuditTeamMember, User)
             .join(User, AuditTeamMember.member_id == User.id)
-            .where(AuditTeamMember.project_id == project_id)
+            .where(
+                AuditTeamMember.project_id == project_id,
+                AuditTeamMember.is_deleted == False,  # noqa: E712
+            )
         )
         team_members = team_result.all()
         

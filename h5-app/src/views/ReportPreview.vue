@@ -37,8 +37,8 @@
             <span class="cover-value">{{ reportData.inspection.inspector }}</span>
           </div>
           <div class="cover-row">
-            <span class="cover-label">检查类型</span>
-            <span class="cover-value">定期检查</span>
+            <span class="cover-label">检查模板</span>
+            <span class="cover-value">{{ reportData.inspection.template_name || '-' }}</span>
           </div>
           <div class="cover-row">
             <span class="cover-label">总体结论</span>
@@ -86,7 +86,7 @@
           <van-progress :percentage="reportData.statistics.pass_rate" :show-pivot="false" :color="getProgressColor" />
           <span class="rate-value">{{ reportData.statistics.pass_rate }}%</span>
         </div>
-        <div v-if="reportData.inspection.total_score" class="total-score">
+        <div v-if="reportData.inspection.total_score != null" class="total-score">
           得分：<span class="score-value">{{ reportData.inspection.total_score }}</span> 分
         </div>
       </div>

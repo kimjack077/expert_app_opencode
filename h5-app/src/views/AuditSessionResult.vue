@@ -222,7 +222,12 @@ const load = async () => {
 }
 
 const startReaudit = async () => {
-  if (!projectId.value || !planItemId.value) return
+  // 路由 query 可能缺 planItemId，回退到会话自身的计划项，避免按钮静默失效
+  const targetPlanItemId = planItemId.value || session.value?.plan_item_id
+  if (!projectId.value || !targetPlanItemId) {
+    showToast('缺少计划项信息，无法重新审核')
+    return
+  }
   try {
     await showConfirmDialog({
       title: '重新审核',
@@ -237,7 +242,7 @@ const startReaudit = async () => {
   try {
     const created = await createAuditSession(projectId.value, {
       title: `${planItem.value?.area_name || '现场'}审核`,
-      plan_item_id: planItemId.value,
+      plan_item_id: targetPlanItemId,
       reaudit: true
     })
     const next = unwrap(created)
@@ -246,7 +251,7 @@ const startReaudit = async () => {
     router.replace({
       name: 'AiAuditSession',
       params: { sessionId: next.id },
-      query: { projectId: projectId.value, planItemId: planItemId.value }
+      query: { projectId: projectId.value, planItemId: targetPlanItemId }
     })
   } catch (error) {
     showToast(error?.message || '开启重新审核失败')

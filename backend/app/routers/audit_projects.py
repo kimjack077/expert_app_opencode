@@ -3,14 +3,14 @@
 Audit Projects API Routes
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import select, and_, or_, func, case
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -20,7 +20,7 @@ from app.services.project_access_service import (
     project_visibility_condition,
 )
 from app.utils.response import make_response
-from app.utils.category import is_category_node, load_parent_ids
+from app.utils.category import is_category_node, load_parent_ids, parent_id_subquery
 from app.utils.activity import is_meeting_activity, requires_template
 from app.services.project_artifact_service import project_artifact_service
 from app.services.report_generator import generate_audit_report_word, generate_audit_report_pdf
@@ -55,6 +55,7 @@ from app.schemas.audit_project import (
     AuditAreaRecordCreate,
     AuditAreaRecordRequest,
     AuditAreaRecordUpdate,
+    AuditAreaRecordItemsUpdate,
     AuditAreaRecordResponse,
     NonconformityCreate,
     NonconformityRequest,
@@ -70,7 +71,10 @@ from app.schemas.audit_project import (
     AiEvidenceEvaluationRequest,
 )
 from app.utils.security import get_current_user, get_current_user_optional, get_user_from_token
-from app.utils.item_stats import classify_item
+from app.utils.item_stats import classify_item, classify_result
+from app.utils.item_completion import is_item_assessed, resolve_check_type
+from app.utils.item_write_guard import validate_item_payload
+from app.utils.roles import is_admin
 from app.utils.meeting_guard import (
     duplicate_meeting_message,
     find_duplicate_meeting,
@@ -104,6 +108,11 @@ def area_record_response(record: AuditAreaRecord) -> dict:
             "status": record.plan_item.status,
         }
     items = record.items or []
+    # 响应侧提供统一展示字段，快照仅由服务端维护，不作为客户端可写字段。
+    for item in value.get("items", []):
+        for field in ("check_type", "result_options", "min_value", "max_value", "unit"):
+            if item.get(f"item_{field}") is not None:
+                item[field] = item[f"item_{field}"]
     value["items_count"] = len(items)
     # 原实现用 `result == "pass" or evaluation_3level in {"1","2"}` 的 `or` 组合，
     # 存在两个缺陷：① 一个条目可能同时计入合格与不合格（双计）；
@@ -115,6 +124,55 @@ def area_record_response(record: AuditAreaRecord) -> dict:
     value["fail_count"] = sum(1 for b in buckets if b == "fail")
     value["na_count"] = sum(1 for b in buckets if b == "na")
     return value
+
+
+def _has_area_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (list, tuple, dict)):
+        return bool(value)
+    return str(value).strip().lower() not in {"", "null"}
+
+
+def _area_item_assessed(item: Any, template: Any = None) -> bool:
+    """区域填报复用类型判据；显式不适用适用于所有类型，0 是有效值。"""
+    source = template if template is not None else item
+    get_type = source.get if isinstance(source, dict) else lambda key: getattr(source, key, None)
+    kind = get_type("check_type") or get_type("item_check_type")
+    get_value = item.get if isinstance(item, dict) else lambda key: getattr(item, key, None)
+    if classify_item(item) == "na":
+        return True
+    if kind == "checkbox":
+        return _has_area_value(get_value("multi_value"))
+    if kind == "photo":
+        return _has_area_value(get_value("photos"))
+    return is_item_assessed(source, item)
+
+
+def _start_audit_project(project: AuditProject, now: datetime) -> None:
+    if project.status == "planning":
+        project.status = "in_progress"
+        project.actual_start = project.actual_start or now
+
+
+async def _sync_project_after_area_plan(
+    db: AsyncSession, project: AuditProject, plan_item: AuditPlanItem, now: datetime,
+) -> None:
+    """仅同步状态，不调用会覆盖区域检查项的 task→formal 数据复制。"""
+    if project.status in {"cancelled", "completed"}:
+        return
+    _start_audit_project(project, now)
+    remaining = (await db.execute(
+        select(func.count(AuditPlanItem.id)).where(
+            AuditPlanItem.project_id == project.id,
+            AuditPlanItem.is_deleted == False,  # noqa: E712
+            AuditPlanItem.id != plan_item.id,
+            AuditPlanItem.status != "completed",
+        )
+    )).scalar() or 0
+    if not remaining:
+        project.status = "completed"
+        project.actual_end = project.actual_end or now
 
 
 def _task_progress_fields(
@@ -137,14 +195,14 @@ def _task_progress_fields(
     total_clause_count = int(template_item_count or 0) or len(clause_keys)
 
     if confirmed_record_count is None or record_exceptions is None:
-        record_items = list(getattr(record, "items", None) or [])
+        record_items = [
+            item for item in (getattr(record, "items", None) or [])
+            if not is_category_node(item) and _area_item_assessed(item)
+        ]
         if confirmed_record_count is None:
             confirmed_record_count = len(record_items)
         if record_exceptions is None:
-            record_exceptions = sum(
-                1 for item in record_items
-                if str(getattr(item, "evaluation_3level", "") or "") == "3"
-            )
+            record_exceptions = sum(classify_item(item) == "fail" for item in record_items)
 
     completion_rate = (
         round(min(100, confirmed_record_count / total_clause_count * 100), 2)
@@ -346,20 +404,47 @@ async def get_my_audit_tasks(
 
         latest_record_ids = [r.id for r in latest_records_by_plan.values() if r.id]
         if latest_record_ids:
-            # 单个聚合查询统计各记录的已确认数和异常数，避免将 InspectionRecordItem 全部实例化
+            # 批量只取完成判据需要的字段，不按占位行数计完成，也不加载证据等大字段。
             item_stats_rows = (
                 await db.execute(
                     select(
                         InspectionRecordItem.audit_area_record_id,
-                        func.count(InspectionRecordItem.id),
-                        func.count(case((InspectionRecordItem.evaluation_3level == "3", 1))),
+                        InspectionRecordItem.template_item_id,
+                        InspectionRecordItem.item_check_type,
+                        InspectionRecordItem.radio_value,
+                        InspectionRecordItem.result,
+                        InspectionRecordItem.evaluation_3level,
+                        InspectionRecordItem.numeric_value,
+                        InspectionRecordItem.score_value,
+                        InspectionRecordItem.text_value,
+                        InspectionRecordItem.multi_value,
+                        InspectionRecordItem.result_value,
+                        InspectionRecordItem.result_text,
+                        InspectionRecordItem.photos,
+                        TemplateItem.check_type,
+                        TemplateItem.result_type,
                     )
-                    .where(InspectionRecordItem.audit_area_record_id.in_(latest_record_ids))
-                    .group_by(InspectionRecordItem.audit_area_record_id)
+                    .outerjoin(TemplateItem, TemplateItem.id == InspectionRecordItem.template_item_id)
+                    .where(
+                        InspectionRecordItem.audit_area_record_id.in_(latest_record_ids),
+                        or_(
+                            InspectionRecordItem.template_item_id.is_(None),
+                            and_(
+                                TemplateItem.is_deleted == False,  # noqa: E712
+                                TemplateItem.is_category.is_not(True),
+                                TemplateItem.id.not_in(parent_id_subquery()),
+                            ),
+                        ),
+                    )
                 )
-            ).all()
-            for r_id, total_cnt, exc_cnt in item_stats_rows:
-                record_stats_by_id[r_id] = (int(total_cnt or 0), int(exc_cnt or 0))
+            ).mappings().all()
+            for row in item_stats_rows:
+                item = dict(row)
+                if not _area_item_assessed(item):
+                    continue
+                r_id = item["audit_area_record_id"]
+                total_cnt, exc_cnt = record_stats_by_id.get(r_id, (0, 0))
+                record_stats_by_id[r_id] = (total_cnt + 1, exc_cnt + (classify_item(item) == "fail"))
 
         nonconformities = (
             await db.execute(
@@ -784,10 +869,52 @@ async def update_plan_item(
     plan_item = result.scalar_one_or_none()
     if not plan_item:
         raise HTTPException(status_code=404, detail="审核计划项不存在")
-    await ensure_project_access(db, plan_item.project_id, current_user, require_manage=True)
+
+    update_fields = plan_item_update.model_dump(exclude_unset=True)
+    # 「我的审核任务」的"开始"是被分配成员的日常操作：仅改 status 时
+    # 放宽到项目成员即可；其余字段变更仍要求项目管理权限。
+    status_only = set(update_fields) == {"status"}
+    project = await ensure_project_access(
+        db, plan_item.project_id, current_user, require_manage=not status_only
+    )
+    old_status = plan_item.status
+    if "status" in update_fields:
+        new_status = update_fields["status"]
+        if new_status not in ("pending", "in_progress", "completed", "cancelled"):
+            raise HTTPException(status_code=422, detail="无效的计划项状态")
+        if plan_item.inspection_task_id and new_status in {"completed", "cancelled"}:
+            raise HTTPException(
+                status_code=409,
+                detail="关联任务的计划项请通过任务完成/取消接口，或提交区域记录完成",
+            )
+        if old_status in {"completed", "cancelled"} and new_status != old_status:
+            raise HTTPException(status_code=409, detail="已结束的计划项不能回退状态")
+        if plan_item.inspection_task_id and old_status == "in_progress" and new_status == "pending":
+            raise HTTPException(status_code=409, detail="已开始的关联计划项不能回退状态")
+        is_manager = (
+            is_admin(current_user.role)
+            or str(project.created_by) == str(current_user.id)
+            or str(project.team_leader_id) == str(current_user.id)
+        )
+        if status_only and not is_manager and not (
+            old_status == "pending" and new_status == "in_progress"
+        ):
+            raise HTTPException(status_code=403, detail="仅项目负责人可变更为此状态")
+
+    starting = old_status == "pending" and update_fields.get("status") == "in_progress"
+    inspection_task = None
+    if plan_item.inspection_task_id:
+        inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
+        if starting and (
+            not inspection_task or inspection_task.is_deleted
+            or inspection_task.status not in {"pending", "in_progress"}
+        ):
+            raise HTTPException(status_code=409, detail="关联任务当前状态不允许开始")
+    if starting and project.status in {"cancelled", "completed"}:
+        raise HTTPException(status_code=409, detail="已结束的审核项目不能开始计划项")
 
     # 更新审核计划项字段
-    for field, value in plan_item_update.model_dump(exclude_unset=True).items():
+    for field, value in update_fields.items():
         setattr(plan_item, field, value)
 
     # 合并后的最终状态必须是「检查类活动有模板」。Schema 只能看到请求体里
@@ -798,12 +925,19 @@ async def update_plan_item(
             detail="请选择检查模板（检查类审核活动必须绑定检查模板）",
         )
 
-    # 同步更新关联的检查任务
-    if plan_item.inspection_task_id:
-        inspection_task = await db.get(InspectionTask, plan_item.inspection_task_id)
+    now = datetime.now(timezone.utc)
+    if starting:
+        _start_audit_project(project, now)
         if inspection_task:
-            # 获取项目和企业信息
-            project = await db.get(AuditProject, plan_item.project_id)
+            inspection_task.status = "in_progress"
+            inspection_task.started_at = inspection_task.started_at or now
+    elif old_status != "completed" and plan_item.status == "completed":
+        # 无关联任务的会议等计划仍可正常完成。
+        await _sync_project_after_area_plan(db, project, plan_item, now)
+
+    # 只改状态不应顺带重建任务检查项；其余编辑保留已有的元数据同步。
+    if not status_only and plan_item.inspection_task_id:
+        if inspection_task:
             enterprise = None
             if project:
                 enterprise = await db.get(Enterprise, project.enterprise_id)
@@ -924,17 +1058,23 @@ async def create_area_record(
     current_user: User = Depends(get_current_user),
 ):
     """创建审核区域记录"""
-    await ensure_project_access(db, project_id, current_user)
-    # 生成记录编号
-    record_no = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    project = await ensure_project_access(db, project_id, current_user)
+    record_no = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:6]}"
 
     db_record = AuditAreaRecord(
         project_id=project_id,
         record_no=record_no,
         recorded_by=current_user.id,
-        **record.model_dump(),
+        **record.model_dump(exclude={"items", "status"}),
+        items=[], status="draft",
     )
     db.add(db_record)
+    await db.flush()
+    await _save_area_record_items(db, db_record, record.items)
+    if record.status == "submitted":
+        await _submit_area_record(db, db_record, project, {"status": "submitted"})
+    else:
+        db_record.status = record.status
     await db.commit()
     await db.refresh(db_record)
     return make_response(db_record)
@@ -989,6 +1129,91 @@ async def get_area_record(
     return make_response(area_record_response(record))
 
 
+async def _submit_area_record(
+    db: AsyncSession, record: AuditAreaRecord, project: AuditProject, updates: dict,
+) -> None:
+    """校验区域自身的填报并推进状态，绝不从任务流反向覆盖检查项。"""
+    if not _has_area_value(updates.get("conclusion", record.conclusion)):
+        raise HTTPException(status_code=422, detail="请填写最终审核结论后再提交")
+    if project.status == "cancelled":
+        raise HTTPException(status_code=409, detail="已取消的审核项目不能提交记录")
+
+    plan = await db.get(AuditPlanItem, record.plan_item_id) if record.plan_item_id else None
+    if record.plan_item_id and (not plan or plan.is_deleted or plan.project_id != record.project_id):
+        raise HTTPException(status_code=409, detail="关联审核计划项不可用")
+    if plan and plan.status == "cancelled":
+        raise HTTPException(status_code=409, detail="已取消的计划项不能提交记录")
+
+    template_id = updates.get("template_id", record.template_id) or (plan.template_id if plan else None)
+    if plan and plan.template_id and template_id != plan.template_id:
+        raise HTTPException(status_code=422, detail="区域记录模板必须与关联计划项一致")
+    if plan and requires_template(plan.activity_type) and not template_id:
+        raise HTTPException(status_code=422, detail="检查类审核活动必须绑定检查模板")
+
+    items = list(record.items or [])
+    if template_id:
+        templates = (await db.execute(select(TemplateItem).where(
+            TemplateItem.template_id == template_id,
+            TemplateItem.is_deleted == False,  # noqa: E712
+        ))).scalars().all()
+        parent_ids = {item.parent_id for item in templates if item.parent_id}
+        leaves = {item.id: item for item in templates if not is_category_node(item, parent_ids)}
+        assessed_ids = {
+            item.template_item_id for item in items
+            if item.template_item_id in leaves
+            and _area_item_assessed(item, leaves[item.template_item_id])
+        }
+        missing = [item.title for item in leaves.values() if item.is_required and item.id not in assessed_ids]
+        if missing:
+            raise HTTPException(
+                status_code=422, detail=f"存在未填报的必填检查项：{'、'.join(missing[:3])}",
+            )
+        has_assessed = bool(assessed_ids)
+    else:
+        has_assessed = any(_area_item_assessed(item) for item in items)
+    if not has_assessed:
+        raise HTTPException(status_code=422, detail="请先完成至少一项检查记录，再提交")
+
+    task = await db.get(InspectionTask, plan.inspection_task_id) if plan and plan.inspection_task_id else None
+    if plan and plan.inspection_task_id and (not task or task.is_deleted or task.status == "cancelled"):
+        raise HTTPException(status_code=409, detail="关联任务当前状态不允许提交")
+    area_id = updates.get("area_id", record.area_id)
+    area = await db.get(AuditArea, area_id) if area_id else None
+    if area_id and (not area or area.project_id != record.project_id):
+        raise HTTPException(status_code=422, detail="关联审核区域不可用")
+    if not area and plan:
+        area = (await db.execute(select(AuditArea).where(
+            AuditArea.project_id == record.project_id,
+            AuditArea.area_name == plan.area_name,
+        ).order_by(AuditArea.created_at.desc()).limit(1))).scalars().first()
+        if not area:
+            area = AuditArea(
+                project_id=record.project_id, area_name=plan.area_name, area_type=plan.area_type,
+                responsible_team_member_ids=plan.assigned_member_ids or [],
+                audit_clauses=plan.clauses or [], status="completed",
+            )
+            db.add(area)
+            await db.flush()
+
+    for field, value in updates.items():
+        setattr(record, field, value)
+    record.template_id = template_id
+    record.status = "submitted"
+    if area:
+        record.area_id = area.id
+        area.status = "completed"
+    now = datetime.now(timezone.utc)
+    if task:
+        task.status = "completed"
+        task.started_at = task.started_at or now
+        task.completed_at = task.completed_at or now
+    if plan:
+        plan.status = "completed"
+        await _sync_project_after_area_plan(db, project, plan, now)
+    else:
+        _start_audit_project(project, now)
+
+
 @router.put("/records/{record_id}")
 async def update_area_record(
     record_id: UUID,
@@ -996,25 +1221,205 @@ async def update_area_record(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """更新审核区域记录"""
+    """更新审核区域记录；提交必须校验并同步关联业务状态。"""
     result = await db.execute(
         select(AuditAreaRecord).where(AuditAreaRecord.id == record_id)
+        .options(selectinload(AuditAreaRecord.items))
+        .with_for_update()
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="审核区域记录不存在")
+    project = await ensure_project_access(db, record.project_id, current_user)
+
+    # 验证权限：只有主填写人或协作填写人可以更新
+    if record.recorded_by != current_user.id and current_user.id not in (record.co_recorders or []):
+        raise HTTPException(status_code=403, detail="无权限更新此记录")
+
+    updates = record_update.model_dump(exclude_unset=True)
+    if record.status == "submitted":
+        if updates == {"status": "submitted"}:
+            return make_response(record)
+        raise HTTPException(status_code=409, detail="该审核记录已提交，不可修改或退回")
+    if "status" in updates and updates["status"] is None:
+        raise HTTPException(status_code=422, detail="无效的区域记录状态")
+    updates.pop("items", None)
+    if "template_id" in updates and record.template_id and updates["template_id"] != record.template_id and record.items:
+        raise HTTPException(status_code=409, detail="已有填报明细的记录不可切换模板，请新建记录")
+    # 先应用表头，再在同一事务写明细及校验提交；任一步失败均由 get_db 回滚。
+    for field, value in updates.items():
+        if field != "status":
+            setattr(record, field, value)
+    if record_update.items is not None:
+        await _save_area_record_items(db, record, record_update.items)
+    if updates.get("status") == "submitted":
+        await _submit_area_record(db, record, project, updates)
+    else:
+        for field, value in updates.items():
+            setattr(record, field, value)
+
+    await db.commit()
+    await db.refresh(record)
+    return make_response(record)
+
+
+@router.put("/records/{record_id}/items")
+async def update_area_record_items(
+    record_id: UUID,
+    payload: AuditAreaRecordItemsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量保存区域记录检查项 —— AuditRecordEdit 抽屉填报的落库入口。
+
+    此前前端只提交表头字段，抽屉里填的判定/证据/照片刷新即丢（P0 数据丢失）。
+    按 id 或 (记录, template_item_id) 匹配既有项，缺失则按模板创建并补快照。
+    """
+    result = await db.execute(
+        select(AuditAreaRecord)
+        .where(AuditAreaRecord.id == record_id)
+        .options(selectinload(AuditAreaRecord.items))
+        .with_for_update()
     )
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=404, detail="审核区域记录不存在")
     await ensure_project_access(db, record.project_id, current_user)
 
-    # 验证权限：只有主填写人或协作填写人可以更新
-    if record.recorded_by != current_user.id and current_user.id not in record.co_recorders:
+    # 与 update_area_record 同一口径：主填写人或协作填写人可写
+    if record.recorded_by != current_user.id and current_user.id not in (
+        record.co_recorders or []
+    ):
         raise HTTPException(status_code=403, detail="无权限更新此记录")
+    if record.status == "submitted":
+        raise HTTPException(status_code=409, detail="该审核记录已提交，检查项不可再修改")
 
-    for field, value in record_update.model_dump(exclude_unset=True).items():
-        setattr(record, field, value)
-
+    saved = await _save_area_record_items(db, record, payload.items)
     await db.commit()
-    await db.refresh(record)
-    return make_response(record)
+    return make_response(data={"saved": saved}, message="检查项已保存")
+
+
+async def _save_area_record_items(db: AsyncSession, record: AuditAreaRecord, entries) -> int:
+    """复用保存逻辑，不提交事务；拒绝混入其它模板及重复检查项。"""
+    plan = await db.get(AuditPlanItem, record.plan_item_id) if record.plan_item_id else None
+    if record.plan_item_id and (not plan or plan.is_deleted or plan.project_id != record.project_id):
+        raise HTTPException(status_code=422, detail="关联审核计划项不可用")
+    template_id = record.template_id or (plan.template_id if plan else None)
+    if plan and plan.template_id and template_id != plan.template_id:
+        raise HTTPException(status_code=422, detail="区域记录模板必须与关联计划项一致")
+    parent_ids = await load_parent_ids(db, template_id=template_id) if template_id else set()
+    existing_by_id = {str(i.id): i for i in record.items or []}
+    existing_by_template = {
+        str(i.template_item_id): i for i in record.items or [] if i.template_item_id
+    }
+
+    writable_fields = (
+        "result",
+        "radio_value",
+        "evaluation_3level",
+        "score_value",
+        "numeric_value",
+        "text_value",
+        "multi_value",
+        "audit_evidence",
+        "audit_findings",
+        "rectification_suggestion",
+        "inspector_note",
+        "photos",
+    )
+
+    saved = 0
+    seen = set()
+    for entry in entries:
+        data = entry.normalized_updates()
+        item = None
+        if entry.id is not None:
+            item = existing_by_id.get(str(entry.id))
+            if item is None:
+                raise HTTPException(
+                    status_code=404, detail=f"检查项 {entry.id} 不属于该记录"
+                )
+        elif entry.template_item_id is not None:
+            item = existing_by_template.get(str(entry.template_item_id))
+
+        template_item_id = item.template_item_id if item else entry.template_item_id
+        if item and entry.template_item_id and entry.template_item_id != item.template_item_id:
+            raise HTTPException(status_code=422, detail="记录项与模板项不一致")
+        if template_item_id in seen:
+            raise HTTPException(status_code=422, detail="不能重复保存同一检查项")
+        seen.add(template_item_id)
+        template = await db.get(TemplateItem, template_item_id) if template_item_id else None
+        if template_item_id and (
+            not template or template.is_deleted or not template_id
+            or str(template.template_id) != str(template_id)
+        ):
+            raise HTTPException(status_code=422, detail="检查项不属于当前记录模板")
+        if is_category_node(template, parent_ids):
+            raise HTTPException(status_code=422, detail="分类目录不能填写检查结果")
+        has_snapshot = bool(item and item.item_check_type)
+        kind = resolve_check_type(item if has_snapshot else template)
+        validation_data = dict(data)
+        # 不适用在各类检查项均可表达；其它值按当前类型校验。
+        if classify_result(data.get("radio_value")) == "na":
+            validation_data.pop("radio_value", None)
+        errors = validate_item_payload(
+            check_type=None if kind == "photo" else kind,
+            payload=validation_data,
+            result_options=item.item_result_options if has_snapshot else (template.result_options if template else None),
+            allowed_result_values=["pass", "fail", "na", "pending_rectification", "observe"] if kind in {"radio", "audit_3level"} else None,
+        )
+        if errors:
+            raise HTTPException(status_code=422, detail="；".join(errors))
+
+        if item is None:
+            if entry.template_item_id is None:
+                raise HTTPException(
+                    status_code=422, detail="新建检查项必须提供 template_item_id"
+                )
+            # 未填写的新模板项不创建占位行；既有项仍须执行下面的显式清空。
+            if not entry.ensure_exists and not any(_has_area_value(data.get(field)) for field in writable_fields):
+                continue
+            item = InspectionRecordItem(
+                audit_area_record_id=record.id,
+                template_item_id=entry.template_item_id,
+                item_title=template.title,
+                item_description=template.description,
+                item_check_method=template.check_method,
+                item_legal_basis=template.legal_basis,
+                item_standard_ref=template.standard_ref,
+                item_risk_level=template.risk_level,
+                item_check_type=resolve_check_type(template),
+                item_result_options=template.result_options,
+                item_min_value=template.min_value,
+                item_max_value=template.max_value,
+                item_unit=template.unit,
+                item_score_weight=template.score_weight,
+                item_default_score=template.default_score,
+                item_allow_attachment=bool(template.allow_attachment),
+                item_attachment_required=bool(template.attachment_required),
+            )
+            record.items.append(item)
+            db.add(item)
+            await db.flush()
+            existing_by_id[str(item.id)] = item
+            existing_by_template[str(entry.template_item_id)] = item
+
+        for field in writable_fields:
+            if field in data:
+                setattr(item, field, data[field])
+
+        # 清空新字段时同步清掉旧兼容值，否则完成判据仍会读到上一次的填写。
+        kind = resolve_check_type(item)
+        value_field = {"numeric": "numeric_value", "score": "score_value"}.get(kind)
+        if value_field and value_field in data:
+            item.result_value = data[value_field]
+        if kind == "text" and "text_value" in data:
+            item.result_text = data["text_value"]
+        item.updated_at = datetime.now(timezone.utc)
+        saved += 1
+
+    await db.flush()
+    return saved
 
 
 # ==================== Nonconformity Routes ====================

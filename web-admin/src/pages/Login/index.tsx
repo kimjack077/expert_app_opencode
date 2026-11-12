@@ -42,9 +42,9 @@ export default function Login() {
     const role = value as 'admin' | 'expert' | 'custom'
     setSelectedRole(role)
     if (role === 'admin') {
-      form.setFieldsValue({ username: 'admin', password: 'password123' })
+      form.setFieldsValue({ username: 'admin', password: 'admin123' })
     } else if (role === 'expert') {
-      form.setFieldsValue({ username: 'expert', password: 'password123' })
+      form.setFieldsValue({ username: 'expert', password: 'expert123' })
     } else {
       form.resetFields()
     }
@@ -188,37 +188,38 @@ export default function Login() {
             autoComplete="off"
             layout="vertical"
           >
-            <Form.Item
-              name="username"
-              rules={[{ required: true, message: '请输入用户名' }]}
-              style={{ marginBottom: 18 }}
-            >
-              <div>
-                <label className="efis-input-label">账号 / 用户名</label>
+            {/* Form.Item 必须直接包裹输入控件，否则 value/onChange 注入到 div 上，手动输入无法入表单 */}
+            <div style={{ marginBottom: 18 }}>
+              <label className="efis-input-label">账号 / 用户名</label>
+              <Form.Item
+                name="username"
+                rules={[{ required: true, message: '请输入用户名' }]}
+                style={{ marginBottom: 0 }}
+              >
                 <Input
                   prefix={<UserOutlined className="efis-input-icon" />}
                   placeholder="请输入用户名"
                   className="efis-input-wrapper"
                   size="large"
                 />
-              </div>
-            </Form.Item>
+              </Form.Item>
+            </div>
 
-            <Form.Item
-              name="password"
-              rules={[{ required: true, message: '请输入登录密码' }]}
-              style={{ marginBottom: 18 }}
-            >
-              <div>
-                <label className="efis-input-label">登录密码</label>
+            <div style={{ marginBottom: 18 }}>
+              <label className="efis-input-label">登录密码</label>
+              <Form.Item
+                name="password"
+                rules={[{ required: true, message: '请输入登录密码' }]}
+                style={{ marginBottom: 0 }}
+              >
                 <Input.Password
                   prefix={<LockOutlined className="efis-input-icon" />}
                   placeholder="请输入密码"
                   className="efis-input-wrapper"
                   size="large"
                 />
-              </div>
-            </Form.Item>
+              </Form.Item>
+            </div>
 
             <div
               style={{

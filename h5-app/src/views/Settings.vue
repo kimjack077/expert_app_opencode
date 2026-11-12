@@ -122,13 +122,46 @@
         <span>当前版本: v1.0.0</span>
       </div>
     </div>
+
+    <van-dialog
+      v-model:show="pwdDialogShow"
+      title="修改密码"
+      show-cancel-button
+      :before-close="onPwdBeforeClose"
+      confirm-button-text="确认修改"
+    >
+      <div class="pwd-form">
+        <van-field
+          v-model="pwdForm.old_password"
+          type="password"
+          label="当前密码"
+          placeholder="请输入当前密码"
+          autocomplete="current-password"
+        />
+        <van-field
+          v-model="pwdForm.new_password"
+          type="password"
+          label="新密码"
+          placeholder="至少 6 位"
+          autocomplete="new-password"
+        />
+        <van-field
+          v-model="pwdForm.confirm_password"
+          type="password"
+          label="确认新密码"
+          placeholder="再次输入新密码"
+          autocomplete="new-password"
+        />
+      </div>
+    </van-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast, showConfirmDialog } from 'vant'
+import { changePassword as changePasswordApi } from '../api/auth.js'
 
 const router = useRouter()
 
@@ -136,6 +169,13 @@ const settings = ref({
   notification: true,
   sound: true,
   vibration: true
+})
+
+const pwdDialogShow = ref(false)
+const pwdForm = reactive({
+  old_password: '',
+  new_password: '',
+  confirm_password: ''
 })
 
 const loadSettings = () => {
@@ -190,7 +230,38 @@ const exportData = () => {
 }
 
 const changePassword = () => {
-  showToast('修改密码功能开发中')
+  pwdForm.old_password = ''
+  pwdForm.new_password = ''
+  pwdForm.confirm_password = ''
+  pwdDialogShow.value = true
+}
+
+// van-dialog 的 before-close：确认时校验并提交，失败返回 false 保持弹窗打开
+const onPwdBeforeClose = async (action) => {
+  if (action !== 'confirm') return true
+  if (!pwdForm.old_password) {
+    showToast('请输入当前密码')
+    return false
+  }
+  if (!pwdForm.new_password || pwdForm.new_password.length < 6) {
+    showToast('新密码至少 6 位')
+    return false
+  }
+  if (pwdForm.new_password !== pwdForm.confirm_password) {
+    showToast('两次输入的新密码不一致')
+    return false
+  }
+  try {
+    await changePasswordApi({
+      old_password: pwdForm.old_password,
+      new_password: pwdForm.new_password
+    })
+    showToast({ type: 'success', message: '密码修改成功' })
+    return true
+  } catch {
+    // 请求拦截器统一显示接口失败信息，保留对话框供用户修正。
+    return false
+  }
 }
 
 const goBack = () => {
@@ -320,5 +391,9 @@ onMounted(() => {
   padding: 20px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.pwd-form {
+  padding: 8px 0 16px;
 }
 </style>

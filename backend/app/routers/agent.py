@@ -14,9 +14,11 @@ from app.database import AsyncSessionLocal, get_db
 from app.models.user import User
 from app.models.agent_conversation import AgentConversation, AgentMessage
 from app.models.record import InspectionRecord, InspectionRecordItem
+from app.models.task import InspectionTask
 from app.services.agent_actions import execute_action, registered_actions
 from app.utils.roles import ADMIN_ROLES
 from app.services.agent_service import agent_service
+from app.services.formal_audit_sync_service import can_access_linked_task
 from app.services.project_access_service import ensure_project_access
 from app.utils.security import get_current_user
 
@@ -29,6 +31,7 @@ router = APIRouter()
 class ChatContext(BaseModel):
     page: Optional[str] = None
     record_id: Optional[str] = None
+    task_id: Optional[str] = None
     current_item_id: Optional[str] = None
     enterprise_id: Optional[str] = None
     media_file_id: Optional[str] = None
@@ -101,6 +104,22 @@ async def _authorize_chat_context(
 
     if current_user.role in ADMIN_ROLES:
         return
+
+    # 任务模式（H5 任务检查页）上下文带的是 task_id 而非 record_id，
+    # 按任务归属校验：分配人本人，或经正式审核计划项关联可访问。
+    task_id = context.get("task_id")
+    if task_id:
+        try:
+            task_uuid = UUID(str(task_id))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="检查任务 ID 格式不正确")
+        task = await db.get(InspectionTask, task_uuid)
+        if not task or task.is_deleted:
+            raise HTTPException(status_code=404, detail="检查任务不存在")
+        if str(task.assigned_to) != str(current_user.id) and not await can_access_linked_task(
+            db, task, current_user
+        ):
+            raise HTTPException(status_code=403, detail="无权访问该检查任务")
 
     record_id = context.get("record_id")
     item_id = context.get("current_item_id")

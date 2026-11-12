@@ -944,6 +944,10 @@ const runQualityCheck = async () => {
   try {
     qualityCheck.value = unwrap(await checkAuditQuality(projectId.value, sessionId.value))
     showToast(blockers.value.length ? `发现 ${blockers.value.length} 个阻断项` : '完整性检查通过')
+    return true
+  } catch (error) {
+    showToast(requestErrorMessage(error, '完整性检查失败'))
+    return false
   } finally {
     checking.value = false
   }
@@ -978,7 +982,8 @@ const goResultPage = () => {
 
 const submitSession = async () => {
   if (isCompleted.value) return showToast('审核记录已提交')
-  await runQualityCheck()
+  const qualityOk = await runQualityCheck()
+  if (!qualityOk) return
   if (blockers.value.length) return
   if (!conclusion.value.trim()) return showToast('请填写最终审核结论')
   try {

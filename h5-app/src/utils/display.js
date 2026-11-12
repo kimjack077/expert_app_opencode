@@ -11,6 +11,14 @@ export function roleLabel(role) {
   return map[role] || role || '用户'
 }
 
+/** 去掉复用在 remarks 中的机器汇总，保留用户原有任务说明。 */
+export function taskDescription(task = {}) {
+  return String(task.remarks || '').split(/[|\n]/)
+    .map(part => part.trim())
+    .filter(part => part && !/^(?:共检查\s*\d+\s*项|最终判定\s*[:：]|判定说明\s*[:：]|合格\s*[:：]?\s*\d+|不合格\s*[:：]?\s*\d+|不适用\s*[:：]?\s*\d+)/.test(part))
+    .join('；')
+}
+
 export function formatTaskDisplay(task = {}) {
   const raw = String(task.title || '').trim()
   if (!raw) {

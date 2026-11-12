@@ -256,6 +256,11 @@ const onSubmit = async () => {
       if (refreshToken) {
         localStorage.setItem('refresh_token', refreshToken)
       }
+      // 持久化显示名，供首页问候与检查记录署名使用（此前从未写入，恒为「检查员」）
+      const userInfo = res.data?.user
+      if (userInfo) {
+        localStorage.setItem('userName', userInfo.full_name || userInfo.username || '')
+      }
       if (rememberMe.value) {
         localStorage.setItem('rememberedUsername', form.username)
       } else {

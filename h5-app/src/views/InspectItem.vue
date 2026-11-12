@@ -479,7 +479,8 @@ const showAgentPanel = ref(false)
 const lastUploadedMediaId = ref(null)
 
 const agentContext = computed(() => ({
-  recordId: route.params.id,
+  recordId: isTaskMode.value ? '' : route.params.id,
+  taskId: isTaskMode.value ? route.params.id : '',
   currentItemId: route.params.itemId,
   currentItemTitle: itemData.value?.title || '',
   enterpriseId: itemData.value?.enterprise_id,
@@ -825,6 +826,24 @@ const setupPhotos = () => {
   }))
 }
 
+// 将模板里各种历史别名归一为表单/保存逻辑识别的规范类型，
+// 与后端 resolve_check_type 同口径：number→numeric、textarea→text、
+// multi/multiselect→multi_check、radio/pass_fail→pass_fail。
+// 不归一时，'number' 这类别名会落到默认单选分支，保存时又匹配不到任何
+// 写入分支，导致填了结果却静默丢失。
+const canonicalResultType = (resultType, checkType) => {
+  const alias = {
+    number: 'numeric',
+    textarea: 'text',
+    multi: 'multi_check',
+    multiselect: 'multi_check',
+    radio: 'pass_fail',
+  }
+  let t = resultType || checkType || 'pass_fail'
+  t = alias[t] || t
+  return t
+}
+
 // 加载数据（支持 Record 模式与 Task 模式）
 const fetchItemData = async () => {
   loading.value = true
@@ -901,12 +920,15 @@ const fetchItemData = async () => {
       }
     }
 
-    const allTemplateItems = flattenTemplateItems(rawTemplate?.items || [])
-    const tplItem = allTemplateItems.find((it) => String(it.id) === String(itemId)) ||
-      taskRecords.find((r) => String(r.template_item_id) === String(itemId))?.template_item ||
-      { id: itemId, title: '检查项' }
-
     const taskRec = taskRecords.find((r) => String(r.template_item_id) === String(itemId) || String(r.id) === String(itemId))
+    const allTemplateItems = flattenTemplateItems(rawTemplate?.items || [])
+    // 优先用任务记录携带的模板项快照（含打分/数值元数据与规范类型）；
+    // itemId 可能是记录 ID 而非模板项 ID，直接拿它在模板里找会落空，
+    // 退化成无元数据的裸项，故再按 taskRec.template_item_id 兜底匹配。
+    const tplItem = taskRec?.template_item ||
+      allTemplateItems.find((it) => String(it.id) === String(itemId)) ||
+      allTemplateItems.find((it) => String(it.id) === String(taskRec?.template_item_id)) ||
+      { id: itemId, title: '检查项' }
 
     const defaultOptions = [
       { label: '合格', value: 'pass' },
@@ -914,8 +936,15 @@ const fetchItemData = async () => {
       { label: '不适用', value: 'not_applicable' }
     ]
 
+    const normType = canonicalResultType(tplItem.result_type, tplItem.check_type)
+    const taskPhotos = taskRec?.photos || []
+    const multiVals = normType === 'multi_check'
+      ? (taskRec?.result_text || '').split(',').map((s) => s.trim()).filter(Boolean)
+      : []
+
     itemData.value = {
       ...tplItem,
+      result_type: normType,
       task_id: task.id,
       enterprise_id: task.enterprise_id || null,
       enterprise_name: task.target_name || '',
@@ -931,7 +960,7 @@ const fetchItemData = async () => {
       text_value: taskRec?.result_text || '',
       problem_description: taskRec?.inspector_note || '',
       inspector_note: taskRec?.inspector_note || '',
-      photos: [],
+      photos: taskPhotos,
       // 任务检查项记录 ID：用于照片上传后与条目建立关联
       record_id: taskRec?.id || '',
     }
@@ -942,13 +971,13 @@ const fetchItemData = async () => {
       result_text: itemData.value.result_text || '',
       score_value: itemData.value.score_value || '',
       radio_value: itemData.value.radio_value || '',
-      multi_value: [],
+      multi_value: multiVals,
       numeric_value: itemData.value.numeric_value || '',
       text_value: itemData.value.text_value || '',
       problem_description: itemData.value.problem_description || '',
       rectification_suggestion: '',
       inspector_note: itemData.value.inspector_note || '',
-      photos: [],
+      photos: [...taskPhotos],
     }
 
     setupPhotos()

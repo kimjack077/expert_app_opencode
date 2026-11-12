@@ -822,29 +822,49 @@ export default function InspectionForm({ backPath = '/records', onComplete }: In
 
   const handleUpload = async (uploadInfo: any) => {
     const file = uploadInfo.file as File
-    if (!currentItem) return
+    if (!currentItem || isCompleted) {
+      uploadInfo.onError?.(new Error('当前检查项不可上传'))
+      return
+    }
     try {
-      const uploadOpts = isTaskMode
-        ? { task_id: taskId || undefined, record_id: currentItem.id }
-        : { record_id: currentItem.id || recordId || undefined }
+      let uploadOpts: { task_id?: string; record_id?: string }
+      let savedItemId = currentItem.id
+      const templateItemId = currentItem.template_item_id || currentItem.id
+      if (isTaskMode) {
+        uploadOpts = { task_id: taskId || undefined, record_id: currentItem.id }
+      } else {
+        if (!recordId) throw new Error('缺少检查记录 ID')
+        // 记录模式下 currentItem.id 在首次保存前是「模板项 ID」，直接当 record_id
+        // 会让后端找不到对应明细（media_files.record_id 落空、附件成孤儿）。
+        // 先 upsert 出明细拿到真正的 InspectionRecordItem.id，再上传关联。
+        if (!savedItemId || savedItemId === templateItemId) {
+          const ensureRes: any = await recordApi.createRecordItem(recordId, { template_item_id: templateItemId })
+          savedItemId = ensureRes.data?.id
+        }
+        if (!savedItemId) throw new Error('检查项尚未保存，无法上传附件')
+        uploadOpts = { record_id: savedItemId }
+        if (savedItemId !== currentItem.id) {
+          setFlatItems((prev) => prev.map((item, idx) =>
+            idx === currentIndex ? { ...item, id: savedItemId } : item
+          ))
+        }
+      }
       const res: any = await mediaApi.upload(file, uploadOpts)
       const photoUrl = res.data?.file_path
       if (photoUrl) {
         const currentPhotos = currentItem.photos || []
         const updatedPhotos = [...currentPhotos, photoUrl]
-        const updatedItems = flatItems.map((item, idx) => {
-          if (idx === currentIndex) {
-            return { ...item, photos: updatedPhotos }
-          }
-          return item
-        })
-        setFlatItems(updatedItems)
         if (!isTaskMode && recordId) {
-          await recordApi.createRecordItem(recordId, {
-            template_item_id: currentItem.template_item_id || currentItem.id,
-            photos: updatedPhotos,
-          })
+          try {
+            await recordApi.updateRecordItem(recordId, savedItemId, { photos: updatedPhotos })
+          } catch (error) {
+            if (res.data?.id) await mediaApi.deleteMedia(res.data.id).catch(() => {})
+            throw error
+          }
         }
+        setFlatItems((prev) => prev.map((item, idx) =>
+          idx === currentIndex ? { ...item, photos: updatedPhotos } : item
+        ))
       }
       message.success('上传成功')
       if (uploadInfo.onSuccess) uploadInfo.onSuccess({}, uploadInfo.file)

@@ -180,38 +180,43 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords } from '../api/records'
-import { getTasks } from '../api/tasks'
+import { getTaskStatistics } from '../api/tasks'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
 const userName = ref(localStorage.getItem('userName') || '')
 
-const tasksLoading = ref(false)
-const recentTasks = ref([])
 const recordsLoading = ref(false)
 const recentRecords = ref([])
 
+// 顶部汇总走后端全量口径，避免用最近 5 条任务累加导致数字对不上
+const taskStats = ref({ total: 0, pending: 0, in_progress: 0, completed: 0, cancelled: 0 })
+
 const stats = computed(() => {
   return {
-    pending: recentTasks.value.filter(t => t.status === 'pending').length,
-    inProgress: recentTasks.value.filter(t => t.status === 'in_progress').length,
-    completed: recentTasks.value.filter(t => t.status === 'completed').length,
+    pending: taskStats.value.pending,
+    inProgress: taskStats.value.in_progress,
+    completed: taskStats.value.completed,
   }
 })
 
 const totalTasks = computed(() => {
-  return recentTasks.value.length
+  return taskStats.value.total
 })
 
-const fetchTasks = async () => {
-  tasksLoading.value = true
+const fetchStatistics = async () => {
   try {
-    const res = await getTasks({ limit: 5 })
-    recentTasks.value = res.data?.items || res.data || []
+    const res = await getTaskStatistics()
+    const d = res.data || {}
+    taskStats.value = {
+      total: d.total ?? 0,
+      pending: d.pending ?? 0,
+      in_progress: d.in_progress ?? 0,
+      completed: d.completed ?? 0,
+      cancelled: d.cancelled ?? 0,
+    }
   } catch (error) {
-    console.error('获取任务失败:', error)
-  } finally {
-    tasksLoading.value = false
+    console.error('获取任务统计失败:', error)
   }
 }
 
@@ -230,8 +235,8 @@ const fetchRecords = async () => {
 const fetchAllData = async () => {
   try {
     await Promise.all([
-      fetchTasks(),
-      fetchRecords()
+      fetchRecords(),
+      fetchStatistics()
     ])
   } catch (error) {
     console.error('加载数据失败:', error)

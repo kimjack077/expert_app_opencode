@@ -45,6 +45,7 @@ def project_visibility_condition(user: User):
         AuditProject.id.in_(
             select(AuditTeamMember.project_id).where(
                 AuditTeamMember.member_id == user.id,
+                AuditTeamMember.is_deleted == False,  # noqa: E712
             )
         ),
     )
@@ -80,6 +81,7 @@ async def ensure_project_access(
         select(AuditTeamMember.id).where(
             AuditTeamMember.project_id == project.id,
             AuditTeamMember.member_id == user.id,
+            AuditTeamMember.is_deleted == False,  # noqa: E712
         )
     )
     # 用 first() 而非 scalar_one_or_none()：历史数据可能存在同一成员的重复行，

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Card, Descriptions, Tag, Button, Space, message, Progress, Table,
-  Form, Input, Select, DatePicker, Upload, Drawer, Spin, Alert, Badge, Image
+  Form, Input, InputNumber, Checkbox, Select, DatePicker, Upload, Drawer, Spin, Alert, Badge, Image
 } from 'antd'
 import {
   ArrowLeftOutlined, SaveOutlined, SendOutlined, CameraOutlined,
@@ -14,6 +14,8 @@ import dayjs from 'dayjs'
 import { auditRecordApi, auditPlanApi, auditAIApi, auditProjectApi } from '@/services/auditProjectApi'
 import { templateApi, mediaApi } from '@/services/api'
 import EnterpriseRiskProfile from '@/components/EnterpriseRiskProfile'
+import { isItemAssessed, normalizeVerdictFields, resolveCheckType, countBuckets } from '@/utils/completion'
+import { normalizeResultOptions } from '@/utils/resultOptions'
 import type { UploadProps } from 'antd'
 
 const { TextArea } = Input
@@ -21,6 +23,8 @@ const { TextArea } = Input
 interface RecordItem {
   id: string
   template_item_id: string
+  // 已落库的检查记录项 ID；未填写过的模板节点没有该值（此时 id 是模板项 ID）
+  record_item_id?: string
   title: string
   description?: string
   check_method?: string
@@ -28,6 +32,13 @@ interface RecordItem {
   is_category: boolean
   children?: RecordItem[]
   result_type?: string
+  check_type?: string
+  item_check_type?: string
+  min_value?: number
+  max_value?: number
+  unit?: string
+  max_score?: number
+  score_step?: number
   result_options?: any
   // 必填相关
   is_required?: boolean
@@ -53,7 +64,7 @@ export default function AuditRecordEdit() {
   const { projectId, recordId } = useParams<{ projectId: string; recordId: string }>()
   const [searchParams] = useSearchParams()
   const planItemId = searchParams.get('planItemId')
-  const readOnly = searchParams.get('mode') === 'view'
+  const viewMode = searchParams.get('mode') === 'view'
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
@@ -61,6 +72,8 @@ export default function AuditRecordEdit() {
   const [project, setProject] = useState<any>(null)
   const [planItem, setPlanItem] = useState<any>(null)
   const [record, setRecord] = useState<any>(null)
+  // 已提交的记录后端拒绝再写检查项，页面同步进入只读
+  const readOnly = viewMode || record?.status === 'submitted'
   const [template, setTemplate] = useState<any>(null)
   const [templates, setTemplates] = useState<any[]>([])
   const [treeItems, setTreeItems] = useState<RecordItem[]>([])
@@ -86,24 +99,17 @@ export default function AuditRecordEdit() {
         ? buildTreeData(item.children, recordItemsMap)
         : undefined
 
-      let radioVal = recordItem?.radio_value
-      if (!radioVal && recordItem) {
-        if (recordItem.result === 'pass' || recordItem.evaluation_3level === '1' || recordItem.evaluation_3level === '2') {
-          radioVal = 'pass'
-        } else if (recordItem.result === 'fail' || recordItem.evaluation_3level === '3') {
-          radioVal = 'fail'
-        }
-      }
-
       const mergedItem: RecordItem = {
         ...item,
         ...(recordItem || {}),
         title: item.title || recordItem?.item_title,
         id: recordItem?.id || item.id,
+        record_item_id: recordItem?.id,
         template_item_id: item.id,
-        result: recordItem?.result,
-        radio_value: radioVal,
-        evaluation_3level: recordItem?.evaluation_3level,
+        ...normalizeVerdictFields(recordItem),
+        score_value: recordItem?.score_value ?? recordItem?.result_value,
+        numeric_value: recordItem?.numeric_value ?? recordItem?.result_value,
+        text_value: recordItem?.text_value ?? recordItem?.result_text,
         audit_evidence: recordItem?.audit_evidence || recordItem?.inspector_note,
         audit_findings: recordItem?.audit_findings || recordItem?.problem_description,
         rectification_suggestion: recordItem?.rectification_suggestion,
@@ -146,23 +152,24 @@ export default function AuditRecordEdit() {
       setFlatItems(flat)
     } else if (recordItems && recordItems.length > 0) {
       const flat: RecordItem[] = recordItems.map((item: any) => {
-        let radioVal = item.radio_value
-        if (!radioVal) {
-          if (item.result === 'pass' || item.evaluation_3level === '1' || item.evaluation_3level === '2') {
-            radioVal = 'pass'
-          } else if (item.result === 'fail' || item.evaluation_3level === '3') {
-            radioVal = 'fail'
-          }
-        }
         return {
+          ...item,
           id: item.id,
+          record_item_id: item.id,
           template_item_id: item.template_item_id || item.id,
           title: item.item_title || item.title || item.clause_no_snapshot || '检查项',
           description: item.description,
           is_category: false,
-          result: item.result,
-          radio_value: radioVal,
-          evaluation_3level: item.evaluation_3level,
+          ...normalizeVerdictFields(item),
+          check_type: item.item_check_type,
+          result_options: item.item_result_options,
+          min_value: item.min_value,
+          max_value: item.max_value,
+          unit: item.item_unit,
+          score_value: item.score_value,
+          numeric_value: item.numeric_value,
+          text_value: item.text_value,
+          multi_value: item.multi_value,
           audit_evidence: item.audit_evidence || item.inspector_note,
           audit_findings: item.audit_findings || item.problem_description,
           rectification_suggestion: item.rectification_suggestion,
@@ -263,7 +270,35 @@ export default function AuditRecordEdit() {
     }
   }
 
-  const handleSaveRecord = async () => {
+  // 抽屉/表格里填的结果此前只存在组件 state，刷新即丢；保存时全量落库
+  const buildItemsPayload = () =>
+    flatItems
+      .filter((i) => !i.is_category)
+      .map((i) => {
+        const payload: any = {
+          radio_value: i.radio_value ?? null,
+          evaluation_3level: i.evaluation_3level ?? null,
+          score_value: i.score_value ?? null,
+          numeric_value: i.numeric_value ?? null,
+          text_value: i.text_value ?? null,
+          multi_value: i.multi_value ?? null,
+          audit_evidence: i.audit_evidence ?? null,
+          audit_findings: i.audit_findings ?? null,
+          rectification_suggestion: i.rectification_suggestion ?? null,
+          inspector_note: i.inspector_note ?? null,
+          photos: i.photos || [],
+        }
+        // 已落库的项按记录项 ID 定位；新项只能给模板项 ID
+        // （未填写过的树节点 id 就是模板项 ID，不能当记录项 ID 提交）
+        if (i.record_item_id) {
+          payload.id = i.record_item_id
+        } else {
+          payload.template_item_id = i.template_item_id
+        }
+        return payload
+      })
+
+  const handleSaveRecord = async (submit = false) => {
     if (readOnly) return
 
     try {
@@ -273,19 +308,38 @@ export default function AuditRecordEdit() {
       const data = {
         ...values,
         audit_date: values.audit_date?.format('YYYY-MM-DD'),
-        plan_item_id: planItemId,
+        ...(planItemId ? { plan_item_id: planItemId } : {}),
         template_id: values.template_id || template?.id,
+        items: buildItemsPayload(),
+        ...(submit ? { status: 'submitted' } : {}),
       }
 
-      if (recordId && recordId !== 'new') {
-        await auditRecordApi.update(recordId!, data)
-        message.success('记录已更新')
-      } else {
+      const isNew = !recordId || recordId === 'new'
+      let effectiveRecordId: string
+      if (isNew) {
         const res = await auditRecordApi.create(projectId!, data)
-        message.success('记录已创建')
-        navigate(`/audit-projects/${projectId}/records/${res.data.id}`, { replace: true })
+        effectiveRecordId = res.data.id
+      } else {
+        await auditRecordApi.update(recordId!, data)
+        effectiveRecordId = recordId!
+      }
+
+      if (submit) {
+        setRecord((prev: any) => (prev ? { ...prev, status: 'submitted' } : prev))
+        message.success('审核记录已提交')
+      } else {
+        message.success(isNew ? '记录已创建' : '记录已更新')
+      }
+
+      if (isNew) {
+        const qs = new URLSearchParams()
+        if (planItemId) qs.set('planItemId', planItemId)
+        if (submit) qs.set('mode', 'view')
+        const suffix = qs.toString() ? `?${qs.toString()}` : ''
+        navigate(`/audit-projects/${projectId}/records/${effectiveRecordId}${suffix}`, { replace: true })
       }
     } catch (error: any) {
+      if (error?.errorFields) return
       message.error(error.response?.data?.message || '保存失败')
     } finally {
       setSaving(false)
@@ -319,7 +373,7 @@ export default function AuditRecordEdit() {
     const updateTreeNode = (nodes: RecordItem[]): RecordItem[] => {
       return nodes.map((node) => {
         if (node.id === item.id || node.template_item_id === item.template_item_id) {
-          return { ...node, [field]: value }
+          return { ...node, ...changes }
         }
         if (node.children && node.children.length > 0) {
           return { ...node, children: updateTreeNode(node.children) }
@@ -328,12 +382,14 @@ export default function AuditRecordEdit() {
       })
     }
 
+    const changes = field === 'radio_value'
+      ? normalizeVerdictFields({ radio_value: value }) : { [field]: value }
     const newTree = updateTreeNode(treeItems)
     setTreeItems(newTree)
     setFlatItems(extractFlatCheckItems(newTree))
 
     if (selectedItem && (selectedItem.id === item.id || selectedItem.template_item_id === item.template_item_id)) {
-      setSelectedItem({ ...selectedItem, [field]: value })
+      setSelectedItem({ ...selectedItem, ...changes })
     }
   }
 
@@ -381,16 +437,37 @@ export default function AuditRecordEdit() {
       if (uploadInfo.onError) uploadInfo.onError(new Error('请先保存记录'))
       return
     }
+    let uploadedMediaId: string | undefined
     try {
       // 优先用检查记录项 ID，后端据此换算为任务检查项，保住照片与条目的关联
-      const res: any = await mediaApi.upload(file, { record_id: selectedItem?.id || recordId })
+      if (!selectedItem) throw new Error('请先选择检查项')
+      let savedItemId = selectedItem.record_item_id
+      if (!savedItemId) {
+        const payload = buildItemsPayload().find((item) => item.template_item_id === selectedItem.template_item_id)
+        if (!payload) throw new Error('检查项不存在')
+        await auditRecordApi.saveItems(recordId, [{ ...payload, ensure_exists: true }])
+        const saved = await auditRecordApi.get(recordId)
+        savedItemId = saved.data?.items?.find((item: any) => item.template_item_id === selectedItem.template_item_id)?.id
+      }
+      if (!savedItemId) throw new Error('检查项尚未保存，请先填写检查结果')
+      const res: any = await mediaApi.upload(file, { record_id: savedItemId })
+      uploadedMediaId = res.data?.id
       const photoUrl = res.data?.file_path
       if (photoUrl && selectedItem) {
         const updatedPhotos = [...(selectedItem.photos || []), photoUrl]
-        handleItemChange(selectedItem, 'photos', updatedPhotos)
+        await auditRecordApi.saveItems(recordId, [{ id: savedItemId, photos: updatedPhotos }])
+        const update = (nodes: RecordItem[]): RecordItem[] => nodes.map(node =>
+          node.template_item_id === selectedItem.template_item_id
+            ? { ...node, id: savedItemId!, record_item_id: savedItemId, photos: updatedPhotos }
+            : { ...node, children: node.children ? update(node.children) : undefined })
+        const updatedTree = update(treeItems)
+        setTreeItems(updatedTree)
+        setFlatItems(extractFlatCheckItems(updatedTree))
+        setSelectedItem({ ...selectedItem, id: savedItemId, record_item_id: savedItemId, photos: updatedPhotos })
       }
       if (uploadInfo.onSuccess) uploadInfo.onSuccess({}, uploadInfo.file)
     } catch (error) {
+      if (uploadedMediaId) await mediaApi.deleteMedia(uploadedMediaId).catch(() => {})
       message.error('上传失败')
       if (uploadInfo.onError) uploadInfo.onError(error)
     }
@@ -403,23 +480,46 @@ export default function AuditRecordEdit() {
   }
 
   // 统计结果与进度
-  const passCount = useMemo(() => flatItems.filter((i) => i.radio_value === 'pass' || i.result === 'pass' || i.evaluation_3level === '1' || i.evaluation_3level === '2').length, [flatItems])
-  const failCount = useMemo(() => flatItems.filter((i) => i.radio_value === 'fail' || i.result === 'fail' || i.evaluation_3level === '3').length, [flatItems])
-  const naCount = useMemo(() => flatItems.filter((i) => i.radio_value === 'na' || i.radio_value === 'not_applicable').length, [flatItems])
+  const buckets = useMemo(() => countBuckets(flatItems), [flatItems])
+  const passCount = buckets.pass
+  const failCount = buckets.fail
+  const naCount = buckets.na
   const pendingCount = useMemo(() => flatItems.filter((i) => i.radio_value === 'pending_rectification').length, [flatItems])
   const completedCount = useMemo(() => {
-    return flatItems.filter((item) =>
-      item.radio_value ||
-      item.result ||
-      item.evaluation_3level ||
-      (item.score_value !== undefined && item.score_value !== null && String(item.score_value) !== '') ||
-      (item.numeric_value !== undefined && item.numeric_value !== null && String(item.numeric_value) !== '') ||
-      item.text_value ||
-      item.audit_evidence
-    ).length
+    return flatItems.filter((item) => isItemAssessed(item)).length
   }, [flatItems])
   const totalCount = flatItems.length
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
+
+  const renderResultInput = (item: RecordItem) => {
+    const kind = resolveCheckType(item)
+    const common = { disabled: readOnly, 'aria-labelledby': 'area-result-label' }
+    if (kind === 'numeric' || kind === 'score') {
+      const field = kind === 'score' ? 'score_value' : 'numeric_value'
+      return <Space><InputNumber {...common}
+        value={item[field] == null ? null : Number(item[field])}
+        min={kind === 'score' ? 0 : item.min_value}
+        max={kind === 'score' ? item.max_score : item.max_value}
+        step={kind === 'score' ? (item.score_step ?? 1) : undefined}
+        onChange={(value) => handleItemChange(item, field, value)}
+        placeholder={kind === 'score' ? '请输入得分' : '请输入数值'} />
+        <span>{kind === 'score' ? '分' : item.unit}</span></Space>
+    }
+    if (kind === 'multi') return <Checkbox.Group {...common}
+      options={normalizeResultOptions(item.result_options)} value={item.multi_value || []}
+      onChange={(values) => handleItemChange(item, 'multi_value', values)} />
+    if (kind === 'text') return <TextArea {...common} rows={4} value={item.text_value || ''}
+      onChange={(event) => handleItemChange(item, 'text_value', event.target.value)}
+      placeholder="请输入检查结果描述" />
+    if (kind === 'photo') return <span>请在下方上传现场照片</span>
+    const configured = normalizeResultOptions(item.result_options)
+    return <Select {...common} value={item.radio_value} allowClear style={{ width: 220 }}
+      placeholder="选择检查结果" onChange={(value) => handleItemChange(item, 'radio_value', value)}
+      options={configured.length ? configured : [
+        { value: 'pass', label: '合格' }, { value: 'fail', label: '不合格' },
+        { value: 'pending_rectification', label: '待整改' }, { value: 'na', label: '不适用' },
+      ]} />
+  }
 
   // 检查项表格列定义（层级树形展示）
   const itemColumns = [
@@ -441,7 +541,7 @@ export default function AuditRecordEdit() {
       render: (_: any, item: RecordItem) => {
         if (item.is_category) {
           const childCheckItems = extractFlatCheckItems(item.children || [])
-          const childCompleted = childCheckItems.filter(i => !!i.radio_value || !!i.text_value || !!i.evaluation_3level || !!i.result).length
+          const childCompleted = childCheckItems.filter(i => isItemAssessed(i)).length
           const childTotal = childCheckItems.length
           const allPass = childTotal > 0 && childCheckItems.every(i => i.radio_value === 'pass' || i.evaluation_3level === '1' || i.evaluation_3level === '2' || i.result === 'pass')
 
@@ -564,6 +664,7 @@ export default function AuditRecordEdit() {
         if (item.text_value) {
           return <Tag color="default">已填写</Tag>
         }
+        if (item.multi_value?.length) return <Tag color="processing">已选 {item.multi_value.length} 项</Tag>
         return <Tag color="warning">未检查</Tag>
       },
     },
@@ -600,6 +701,7 @@ export default function AuditRecordEdit() {
   }
 
   return (
+    <Form form={form} layout="vertical" component={false}>
     <div style={{ padding: '16px 20px', background: '#f1f5f9', minHeight: '100vh' }}>
       {/* 顶部导航与操作栏 */}
       <div
@@ -650,7 +752,7 @@ export default function AuditRecordEdit() {
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
-              onClick={handleSaveRecord}
+              onClick={() => handleSaveRecord(false)}
               style={{ borderRadius: 6 }}
             >
               保存记录
@@ -659,6 +761,8 @@ export default function AuditRecordEdit() {
               <Button
                 type="primary"
                 icon={<SendOutlined />}
+                loading={saving}
+                onClick={() => handleSaveRecord(true)}
                 style={{ background: '#16a34a', borderColor: '#16a34a', borderRadius: 6 }}
               >
                 提交审核
@@ -765,7 +869,7 @@ export default function AuditRecordEdit() {
                 </Descriptions.Item>
               </Descriptions>
             ) : (
-              <Form form={form} layout="vertical">
+              <div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px 16px' }}>
                   <Form.Item
                     name="audit_date"
@@ -821,7 +925,7 @@ export default function AuditRecordEdit() {
                     <Select.Option value="En">En - 能源</Select.Option>
                   </Select>
                 </Form.Item>
-              </Form>
+              </div>
             )}
           </Card>
 
@@ -924,7 +1028,7 @@ export default function AuditRecordEdit() {
                 {record?.conclusion || '暂未填写审核结论'}
               </div>
             ) : (
-              <Form form={form} layout="vertical">
+              <div>
                 <Form.Item
                   name="conclusion"
                   label="审核结论与总结评价"
@@ -940,7 +1044,7 @@ export default function AuditRecordEdit() {
                     style={{ borderRadius: 6 }}
                   />
                 </Form.Item>
-              </Form>
+              </div>
             )}
 
             {/* AI 评估结果提示 */}
@@ -1076,23 +1180,12 @@ export default function AuditRecordEdit() {
               )}
 
               <div style={{ marginBottom: 14 }}>
-                <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 13, color: '#334155' }}>
+                <div id="area-result-label" style={{ marginBottom: 6, fontWeight: 500, fontSize: 13, color: '#334155' }}>
                   {selectedItem.is_required !== false && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
                   检查结论
                 </div>
                 <Space style={{ width: '100%', marginBottom: 8 }}>
-                  <Select
-                    value={selectedItem.radio_value}
-                    disabled={readOnly}
-                    onChange={(value) => handleItemChange(selectedItem, 'radio_value', value)}
-                    style={{ width: 220 }}
-                    placeholder="选择检查结果"
-                  >
-                    <Select.Option value="pass">合格</Select.Option>
-                    <Select.Option value="fail">不合格</Select.Option>
-                    <Select.Option value="pending_rectification">待整改</Select.Option>
-                    <Select.Option value="na">不适用</Select.Option>
-                  </Select>
+                  {renderResultInput(selectedItem)}
                   {selectedItem.evaluation_3level && (
                     <Tag color={selectedItem.evaluation_3level === '1' ? 'success' : selectedItem.evaluation_3level === '3' ? 'error' : 'warning'} style={{ padding: '3px 8px', borderRadius: 4, fontWeight: 600 }}>
                       {selectedItem.evaluation_3level === '1' ? '符合' : selectedItem.evaluation_3level === '3' ? '不符合' : '基本符合'}
@@ -1159,7 +1252,7 @@ export default function AuditRecordEdit() {
               </div>
 
               {/* 现场照片 */}
-              {(selectedItem.allow_attachment || selectedItem.attachment_required || (selectedItem.photos && selectedItem.photos.length > 0)) && (
+              {(resolveCheckType(selectedItem) === 'photo' || selectedItem.allow_attachment || selectedItem.attachment_required || (selectedItem.photos && selectedItem.photos.length > 0)) && (
                 <div>
                   <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 13, color: '#334155' }}>
                     {selectedItem.attachment_required && <span style={{ color: '#ff4d4f', marginRight: 4 }}>*</span>}
@@ -1198,5 +1291,6 @@ export default function AuditRecordEdit() {
         )}
       </Drawer>
     </div>
+    </Form>
   )
 }

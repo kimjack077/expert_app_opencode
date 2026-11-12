@@ -128,6 +128,10 @@ export const auditRecordApi = {
   // 更新审核区域记录
   update: (recordId: string, data: any) => 
     api.put(`/api/audit-projects/records/${recordId}`, data),
+
+  // 批量保存检查项结果
+  saveItems: (recordId: string, items: any[]) =>
+    api.put(`/api/audit-projects/records/${recordId}/items`, { items }),
 }
 
 // ==================== 不符合项 API ====================

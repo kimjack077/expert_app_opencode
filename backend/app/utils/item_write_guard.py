@@ -40,6 +40,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Optional
+from app.utils.item_stats import classify_result
 
 # check_type → 该类型唯一合法的结果字段
 CHECK_TYPE_RESULT_FIELD: dict[str, str] = {
@@ -49,6 +50,7 @@ CHECK_TYPE_RESULT_FIELD: dict[str, str] = {
     "numeric": "numeric_value",
     "text": "text_value",
     "audit_3level": "radio_value",
+    "photo": "photos",
 }
 
 # check_type 历史别名。
@@ -63,6 +65,10 @@ CHECK_TYPE_ALIASES: dict[str, str] = {
     # 历史模板里数值型写过 ``number``（见 template_items.result_type 实测值），
     # 前端也仍在使用该字面量，必须映射到 numeric 才不会被判成未知类型而拒绝。
     "number": "numeric",
+    "multi": "multi_check",
+    "multiselect": "multi_check",
+    "checkbox": "multi_check",
+    "textarea": "text",
 }
 
 # 全部结果承载字段（用于检测"写错了字段"）
@@ -82,6 +88,7 @@ CHECK_TYPE_LABEL: dict[str, str] = {
     "numeric": "数值",
     "text": "文本",
     "audit_3level": "三级评估",
+    "photo": "照片",
 }
 
 FIELD_LABEL: dict[str, str] = {
@@ -90,6 +97,7 @@ FIELD_LABEL: dict[str, str] = {
     "multi_value": "多选结果(multi_value)",
     "numeric_value": "数值结果(numeric_value)",
     "text_value": "文本结果(text_value)",
+    "photos": "现场照片(photos)",
 }
 
 _MAX_TEXT_LENGTH = 20000
@@ -215,6 +223,11 @@ def validate_item_payload(
         for field in RESULT_PAYLOAD_FIELDS
         if not _is_blank(payload.get(field))
     }
+    if normalized == "photo" and not _is_blank(payload.get("photos")):
+        provided["photos"] = payload["photos"]
+    # 所有类型均可标记不适用；附件仍可独立保存，不算其它类型的结果字段。
+    if normalized not in {"radio", "audit_3level"} and classify_result(provided.get("radio_value")) == "na":
+        provided.pop("radio_value", None)
 
     # ---- 2. 字段白名单：只在「该写的字段为空、却写了别的字段」时拒绝 ----
     #

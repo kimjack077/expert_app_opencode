@@ -5,6 +5,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
 import { formatTaskDisplay } from '@/utils/display'
 import dayjs from 'dayjs'
+import { useAuthStore } from '@/stores/auth'
+import { isAdminRole } from '@/utils/roles'
 
 const { TextArea } = Input
 
@@ -14,6 +16,7 @@ export default function Tasks() {
   const [tasks, setTasks] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [users, setUsers] = useState<any[]>([])
+  const user = useAuthStore(state => state.user)
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [form] = Form.useForm()
@@ -56,8 +59,9 @@ export default function Tasks() {
   }, [tasks, keyword])
 
   const fetchUsers = async () => {
+    if (!isAdminRole(user?.role)) return
     try {
-      const res: any = await userApi.getUsers()
+      const res: any = await userApi.getUserOptions()
       const userList = res.data || res || []
       setUsers(Array.isArray(userList) ? userList : [])
     } catch (error) {
@@ -82,7 +86,7 @@ export default function Tasks() {
 
   const fetchTemplates = async () => {
     try {
-      const res: any = await templateApi.getTemplates({ is_published: true })
+      const res: any = await templateApi.getTemplates({ is_published: true, limit: 100 })
       setTemplates(res.data || [])
     } catch (error) {
       console.error('Failed to fetch templates:', error)
@@ -100,8 +104,8 @@ export default function Tasks() {
       setModalVisible(false)
       form.resetFields()
       fetchTasks()
-    } catch (error) {
-      message.error('创建失败')
+    } catch (error: any) {
+      message.error(error.response?.data?.message || error.response?.data?.detail || '创建失败')
     }
   }
 
@@ -214,10 +218,10 @@ export default function Tasks() {
           {record.status === 'completed' && (
             <Button
               size="small"
-              icon={<ReloadOutlined />}
-              onClick={() => navigate(`/inspection/${record.id}`)}
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/tasks/${record.id}`)}
             >
-              重新检查
+              查看检查结果
             </Button>
           )}
           <Button
@@ -312,7 +316,7 @@ export default function Tasks() {
             <Select
               placeholder="选择检查人员"
               allowClear
-              options={users.map((u) => ({ value: u.id, label: u.real_name || u.username }))}
+              options={users.map((u) => ({ value: u.id, label: u.full_name || u.username }))}
             />
           </Form.Item>
           <Form.Item name="target_name" label="被检查对象">

@@ -277,6 +277,7 @@ const streamChat = async (message) => {
         message,
         context: {
           record_id: props.context.recordId,
+          task_id: props.context.taskId || undefined,
           current_item_id: props.context.currentItemId,
           enterprise_id: props.context.enterpriseId,
           media_file_id: props.context.mediaFileId || undefined,

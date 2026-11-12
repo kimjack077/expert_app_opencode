@@ -74,6 +74,8 @@ export const templateApi = {
     api.post(`/templates/${templateId}/items`, data),
   updateItem: (itemId: string, data: any) =>
     api.put(`/templates/items/${itemId}`, data),
+  reorderItems: (templateId: string, data: { item_id: string; parent_id: string | null; position: number }) =>
+    api.put(`/templates/${templateId}/items/reorder`, data),
   deleteItem: (itemId: string) =>
     api.delete(`/templates/items/${itemId}`),
 }
@@ -139,9 +141,10 @@ export const enterpriseApi = {
     api.post(`/enterprises/${enterpriseId}/products`, data),
 
 
-  getRectifications: (enterpriseId: string) => api.get(`/enterprises/${enterpriseId}/rectifications`),
+  getRectifications: (enterpriseId: string) =>
+    api.get('/enterprises/rectifications/', { params: { enterprise_id: enterpriseId } }),
   createRectification: (enterpriseId: string, data: any) =>
-    api.post(`/enterprises/${enterpriseId}/rectifications`, data),
+    api.post('/enterprises/rectifications/', { ...data, enterprise_id: enterpriseId }),
 }
 
 export const knowledgeApi = {
@@ -222,12 +225,13 @@ export const recordApi = {
   // 记录检查项
   getRecordItems: (recordId: string) => api.get(`/records/${recordId}/items`),
   createRecordItem: (recordId: string, data: any) => api.post(`/records/${recordId}/items`, data),
+  // 后端没有 PUT /items/{id}，POST /items 本身是按 id/template_item_id 匹配的 upsert
   updateRecordItem: (recordId: string, itemId: string, data: any) =>
-    api.put(`/records/${recordId}/items/${itemId}`, data),
+    api.post(`/records/${recordId}/items`, { id: itemId, ...data }),
   correctSubmittedRecordItem: (recordId: string, itemId: string, data: any) =>
     api.patch(`/records/${recordId}/items/${itemId}/correction`, data),
-  deleteRecordItem: (recordId: string, itemId: string) =>
-    api.delete(`/records/${recordId}/items/${itemId}`),
+  getItemHistoryStats: (recordId: string, itemId: string) =>
+    api.get(`/records/${recordId}/items/${itemId}/history-stats`),
 
   // 报告相关
   getRecordReport: (recordId: string) => api.get(`/records/${recordId}/report`),
@@ -380,6 +384,8 @@ export const industryApi = {
 
 export const userApi = {
   getUsers: (params?: any) => api.get('/users', { params }),
+  // 轻量选员列表：所有登录用户可用（GET /users 仅管理员），返回 {id,username,full_name,role}
+  getUserOptions: (params?: any) => api.get('/users/options', { params }),
   getUser: (id: string) => api.get(`/users/${id}`),
   createUser: (data: any) => api.post('/users', data),
   updateUser: (id: string, data: any) => api.put(`/users/${id}`, data),

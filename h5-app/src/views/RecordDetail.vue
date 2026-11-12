@@ -118,7 +118,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { showToast, ImagePreview } from 'vant'
+import { showToast, showImagePreview } from 'vant'
 import { getRecord } from '../api/records'
 import { hasQuantifiedItems } from '../utils/display.js'
 import TreeItem from '../components/TreeItem.vue'
@@ -254,7 +254,7 @@ const flattenItems = (items) => {
 }
 
 const previewImage = (src, list) => {
-  ImagePreview.show({
+  showImagePreview({
     images: list,
     startPosition: list.findIndex(img => img === src),
   })

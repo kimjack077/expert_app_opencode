@@ -24,6 +24,8 @@ import ProjectDocuments from './components/ProjectDocuments'
 import ProjectArtifacts from './components/ProjectArtifacts'
 import MeetingManagement from './components/MeetingManagement'
 import MarkdownView from '@/components/common/MarkdownView'
+import { useAuthStore } from '@/stores/auth'
+import { isAdminRole } from '@/utils/roles'
 
 const auditTypeMap: Record<string, string> = {
   initial: '初审',
@@ -40,6 +42,9 @@ export default function AuditProjectDetail() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [project, setProject] = useState<any>(null)
+  const user = useAuthStore(state => state.user)
+  const canManageTeam = isAdminRole(user?.role) || !!(user && project &&
+    [project.created_by, project.team_leader_id].includes(user.id))
   const [progress, setProgress] = useState<any>(null)
   const [aiModalVisible, setAiModalVisible] = useState(false)
   const [aiModalTitle, setAiModalTitle] = useState('AI 审核准备建议')
@@ -432,7 +437,7 @@ export default function AuditProjectDetail() {
               {
                 key: 'team',
                 label: '审核组',
-                children: <TeamManagement projectId={id!} />,
+                children: <TeamManagement projectId={id!} canManage={canManageTeam} />,
               },
               {
                 key: 'plan',
