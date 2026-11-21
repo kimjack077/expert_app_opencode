@@ -135,3 +135,48 @@ tests_e2e_20260914/
 fast_deploy.py
 w_login.yaml
 
+# ===== 2026-11-21 仓库瘦身：以下资料仅保留本地，不入库 =====
+# 企业审核样例文件包
+山东盛发焦化有限公司(审核文件包再认证)/
+# 测试资料、截图与临时验证目录
+测试/
+测试截图_*/
+_fe_test_*/
+_fulltest_*/
+_verify/
+_pw/
+test_reports/
+backups/
+screenshots/
+tests_e2e_*/
+# 根目录测试报告与调试残留
+/EFIS_*.md
+/系统*.md
+/问题*.md
+/诊断*.md
+/修复记录*.md
+/今日工作*.md
+/本地性能*.md
+/性能优化*.md
+/TEST_*.md
+/test_*.md
+/MVP 实施总结.md
+/MVP 完成报告.md
+/_*
+/x.txt
+/manual_content.txt
+/audit-statistics-dashboard.png
+# 根目录样例办公文档/压缩包
+/*.docx
+/*.doc
+/*.zip
+# docs 只保留 agents 开发文档
+docs/*
+!docs/agents/
+# 本地部署/运维脚本（含服务器信息，不入库）
+deploy_server.py
+deploy_web_admin.py
+deploy_h5_task_fix.py
+cleanup_server.py
+upload_project_docs.py
+
