@@ -1,4 +1,4 @@
-import request from './request'
+import request, { fetchWithTokenRetry } from './request'
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL !== undefined
@@ -107,19 +107,22 @@ export async function streamInspectionBriefing(
   model,
   { onMetadata, onContent, onDone },
 ) {
-  const token = localStorage.getItem('token')
   const params = new URLSearchParams()
   if (model) params.set('model', model)
   const query = params.toString()
-  const response = await fetch(
-    `${API_BASE_URL}/api/agent/briefing/${enterpriseId}/stream${query ? `?${query}` : ''}`,
-    {
-      headers: {
-        'Authorization': token ? `Bearer ${token}` : '',
-        'Accept': 'text/event-stream',
+  // 401 时走与 axios 拦截器一致的单飞续期并重试一次；刷新失败已跳登录页
+  const response = await fetchWithTokenRetry((token) =>
+    fetch(
+      `${API_BASE_URL}/api/agent/briefing/${enterpriseId}/stream${query ? `?${query}` : ''}`,
+      {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'Accept': 'text/event-stream',
+        },
       },
-    },
+    )
   )
+  if (!response) return
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
@@ -140,7 +143,13 @@ export async function streamInspectionBriefing(
 
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
-      const event = JSON.parse(line.slice(6))
+      let event
+      try {
+        event = JSON.parse(line.slice(6))
+      } catch (e) {
+        // 跳过坏行，避免一条脏数据中断整个简报并抛出英文解析错误
+        continue
+      }
       if (event.type === 'metadata') {
         onMetadata?.(event.data)
       } else if (event.type === 'content') {

@@ -89,6 +89,7 @@ async def get_records(
     status: Optional[str] = Query(None),
     overall_result: Optional[str] = Query(None, description="总体结果: pass, partial_pass, fail"),
     enterprise_name: Optional[str] = Query(None, description="企业名称模糊搜索"),
+    keyword: Optional[str] = Query(None, description="关键词模糊搜索：企业名称/模板名称"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
@@ -127,6 +128,14 @@ async def get_records(
                 Enterprise.name.ilike(f"%{enterprise_name}%")
             )
         )
+    if keyword:
+        conditions.append(
+            or_(
+                InspectionRecord.enterprise_name.ilike(f"%{keyword}%"),
+                Enterprise.name.ilike(f"%{keyword}%"),
+                InspectionTemplate.name.ilike(f"%{keyword}%"),
+            )
+        )
     if start_date:
         try:
             conditions.append(
@@ -154,8 +163,10 @@ async def get_records(
     )
     # 按企业名称筛选时需要 join Enterprise 表（多对一 join 不会产生行重复，
     # 因此窗口计数 count(*) over() 的结果不受影响）
-    if enterprise_name:
+    if enterprise_name or keyword:
         query = query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
+    if keyword:
+        query = query.outerjoin(InspectionTemplate, InspectionRecord.template_id == InspectionTemplate.id)
 
     query = query.where(*conditions)
 
@@ -184,8 +195,10 @@ async def get_records(
     total = int(rows[0][1]) if rows else 0
     if not rows and skip:
         count_query = select(func.count(InspectionRecord.id))
-        if enterprise_name:
+        if enterprise_name or keyword:
             count_query = count_query.outerjoin(Enterprise, InspectionRecord.enterprise_id == Enterprise.id)
+        if keyword:
+            count_query = count_query.outerjoin(InspectionTemplate, InspectionRecord.template_id == InspectionTemplate.id)
         total = (await db.execute(count_query.where(*conditions))).scalar() or 0
 
     record_list = []

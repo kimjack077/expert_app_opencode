@@ -167,7 +167,14 @@ async function downloadWithAuth(url: string, filename: string) {
   })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
-    throw new Error(`导出失败: HTTP ${resp.status} ${text}`)
+    let detail = ''
+    try {
+      const parsed = JSON.parse(text)
+      if (typeof parsed?.detail === 'string') detail = parsed.detail
+    } catch {
+      // 非 JSON 错误体，回退到通用提示
+    }
+    throw new Error(detail || `导出失败（HTTP ${resp.status}）`)
   }
   const blob = await resp.blob()
   const link = document.createElement('a')
@@ -193,17 +200,17 @@ export const auditReportApi = {
     api.put(`/api/audit-projects/report/${reportId}`, data),
   
   // 导出 Word 格式报告
-  exportWord: (projectId: string) =>
+  exportWord: (projectId: string, filename?: string) =>
     downloadWithAuth(
       `${API_BASE_URL}/api/audit-projects/${projectId}/export/word`,
-      `audit_report_${projectId}.docx`
+      filename || `audit_report_${projectId}.docx`
     ),
 
   // 导出 PDF 格式报告
-  exportPdf: (projectId: string) =>
+  exportPdf: (projectId: string, filename?: string) =>
     downloadWithAuth(
       `${API_BASE_URL}/api/audit-projects/${projectId}/export/pdf`,
-      `audit_report_${projectId}.pdf`
+      filename || `audit_report_${projectId}.pdf`
     ),
 }
 

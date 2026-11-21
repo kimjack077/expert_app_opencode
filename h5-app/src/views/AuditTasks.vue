@@ -84,7 +84,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
-import { createAuditSession, getMyAuditTasks, listAuditSessions } from '../api/auditProjects'
+import { createAuditSession, getMyAuditTasks, listAuditSessions, rememberAuditSessionContext } from '../api/auditProjects'
 
 const router = useRouter()
 const tasks = ref([])
@@ -207,6 +207,7 @@ const openCompletedResult = async (task) => {
     const sessions = Array.isArray(response?.data) ? response.data : []
     const session = matchSession(sessions, task.id, ['completed', 'active'])
     if (session?.id) {
+      rememberAuditSessionContext(session.id, task.project_id, task.id)
       router.push({
         name: 'AuditSessionResult',
         params: { sessionId: session.id },
@@ -251,6 +252,7 @@ const openAgentSession = async (task) => {
       session = created?.data
     }
     if (!session?.id) throw new Error('未能创建审核会话')
+    rememberAuditSessionContext(session.id, task.project_id, task.id)
     router.push({
       name: 'AiAuditSession',
       params: { sessionId: session.id },

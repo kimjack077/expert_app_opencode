@@ -155,3 +155,35 @@ export function submitAuditSession(projectId, sessionId, data) {
     data
   })
 }
+
+// ==================== 会话上下文持久化 ====================
+// sessionId → { projectId, planItemId } 的 sessionStorage 映射。
+// 会话页刷新/直达时 URL query 可能丢失 projectId，按 sessionId 恢复，
+// 避免发出 /audit-projects//sessions/… 这类空参请求变成死页。
+
+const SESSION_CONTEXT_KEY = 'efis:audit-session-context'
+
+// 进入会话时写入（跳转来源与会话页自身都会调用）
+export function rememberAuditSessionContext(sessionId, projectId, planItemId = '') {
+  if (!sessionId || !projectId) return
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_CONTEXT_KEY)
+    const map = raw ? JSON.parse(raw) : {}
+    map[sessionId] = { projectId: String(projectId), planItemId: String(planItemId || '') }
+    window.sessionStorage.setItem(SESSION_CONTEXT_KEY, JSON.stringify(map))
+  } catch {
+    // 存储不可用时静默降级，URL 参数仍可用
+  }
+}
+
+export function recallAuditSessionContext(sessionId) {
+  if (!sessionId) return null
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_CONTEXT_KEY)
+    const map = raw ? JSON.parse(raw) : {}
+    const entry = map[sessionId]
+    return entry && entry.projectId ? entry : null
+  } catch {
+    return null
+  }
+}

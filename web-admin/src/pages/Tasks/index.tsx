@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm, Typography } from 'antd'
 import { PlusOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -26,37 +26,39 @@ export default function Tasks() {
     searchParams.get('status')
   )
   const [keyword, setKeyword] = useState('')
+  // 服务端搜索关键词（输入防抖后生效），搜索时重置回第一页
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 })
+  const [total, setTotal] = useState(0)
 
   /** 切换状态筛选，并把条件同步回 URL，便于分享/刷新保持筛选 */
   const handleStatusChange = (value?: string | null) => {
     const next = value || null
     setStatusFilter(next)
+    setPagination((prev) => ({ ...prev, current: 1 }))
     const params = new URLSearchParams(searchParams)
     if (next) params.set('status', next)
     else params.delete('status')
     setSearchParams(params, { replace: true })
   }
 
-  // 三个请求互不依赖，并发发出：原实现是串行 await（tasks→templates→users），
-  // 在远程库环境下总耗时等于三次往返之和。
+  // 下拉数据与列表互不依赖，只在进入页面时拉取一次
   useEffect(() => {
-    void Promise.all([fetchTasks(), fetchTemplates(), fetchUsers()])
-  }, [statusFilter])
+    void Promise.all([fetchTemplates(), fetchUsers()])
+  }, [])
 
-  const filteredTasks = useMemo(() => {
-    const q = keyword.trim().toLowerCase()
-    if (!q) return tasks
-    return tasks.filter((t) => {
-      const display = formatTaskDisplay(t)
-      return (
-        String(t.title || '').toLowerCase().includes(q) ||
-        String(t.target_name || '').toLowerCase().includes(q) ||
-        String(t.task_no || '').toLowerCase().includes(q) ||
-        String(display.primary || '').toLowerCase().includes(q) ||
-        String(display.secondary || '').toLowerCase().includes(q)
-      )
-    })
-  }, [tasks, keyword])
+  // 关键词防抖后走服务端 search 参数（后端按标题/任务号/检查对象模糊匹配）
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearchKeyword(keyword.trim())
+      setPagination((prev) => (prev.current === 1 ? prev : { ...prev, current: 1 }))
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [keyword])
+
+  useEffect(() => {
+    void fetchTasks()
+  }, [statusFilter, searchKeyword, pagination.current, pagination.pageSize])
 
   const fetchUsers = async () => {
     if (!isAdminRole(user?.role)) return
@@ -66,19 +68,26 @@ export default function Tasks() {
       setUsers(Array.isArray(userList) ? userList : [])
     } catch (error) {
       console.error('Failed to fetch users:', error)
+      message.error('人员列表加载失败，请刷新重试')
     }
   }
 
   const fetchTasks = async () => {
     setLoading(true)
     try {
-      // 表格无后端分页，依赖一次性取回（后端默认 limit=20 会截断）
-      const params: any = { limit: 100 }
+      // 服务端分页：page/pageSize → skip/limit，total 用后端返回值
+      const params: any = {
+        skip: (pagination.current - 1) * pagination.pageSize,
+        limit: pagination.pageSize,
+      }
       if (statusFilter) params.status = statusFilter
+      if (searchKeyword) params.search = searchKeyword
       const res: any = await taskApi.getTasks(params)
-      setTasks(res.data?.items || res.data || [])
+      setTasks(res.data?.items || [])
+      setTotal(Number(res.data?.total ?? 0))
     } catch (error) {
       console.error('Failed to fetch tasks:', error)
+      message.error('任务列表加载失败，请刷新重试')
     } finally {
       setLoading(false)
     }
@@ -90,6 +99,7 @@ export default function Tasks() {
       setTemplates(res.data || [])
     } catch (error) {
       console.error('Failed to fetch templates:', error)
+      message.error('检查模板加载失败，请刷新重试')
     }
   }
 
@@ -287,11 +297,19 @@ export default function Tasks() {
 
       <Card>
         <Table
-          dataSource={filteredTasks}
+          dataSource={tasks}
           columns={columns}
           rowKey="id"
           loading={loading}
           scroll={{ x: 900 }}
+          pagination={{
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
+            onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
+          }}
         />
       </Card>
 

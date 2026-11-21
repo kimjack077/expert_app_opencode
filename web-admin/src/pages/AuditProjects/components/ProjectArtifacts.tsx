@@ -22,6 +22,8 @@ import {
   CheckCircleOutlined,
   CloudDownloadOutlined,
   FileDoneOutlined,
+  FilePdfOutlined,
+  FileWordOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
   SyncOutlined,
@@ -29,6 +31,7 @@ import {
 } from '@ant-design/icons'
 
 import {
+  auditReportApi,
   projectArtifactApi,
   projectSessionApi,
   saveDownloadedBlob,
@@ -41,6 +44,8 @@ const { Text } = Typography
 
 interface Props {
   projectId: string
+  /** 用于导出文件命名（项目名 + 报告后缀） */
+  projectTitle?: string
 }
 
 const unwrap = (response: any) => response?.data ?? response
@@ -109,7 +114,7 @@ const getErrorMessage = (error: any, fallback: string) => {
 
 type QualityIssue = NonNullable<ProjectQualityCheck['issues']>[number]
 
-export default function ProjectArtifacts({ projectId }: Props) {
+export default function ProjectArtifacts({ projectId, projectTitle }: Props) {
   const [artifacts, setArtifacts] = useState<ProjectArtifact[]>([])
   const [sessions, setSessions] = useState<ProjectAuditSession[]>([])
   const [quality, setQuality] = useState<ProjectQualityCheck>()
@@ -118,6 +123,24 @@ export default function ProjectArtifacts({ projectId }: Props) {
   const [generating, setGenerating] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string>()
   const [downloadingPackage, setDownloadingPackage] = useState(false)
+  const [exportingFormat, setExportingFormat] = useState<'word' | 'pdf' | null>(null)
+
+  const handleExportReport = async (format: 'word' | 'pdf') => {
+    setExportingFormat(format)
+    try {
+      const baseName = `${projectTitle || projectId}_审核报告`
+      if (format === 'word') {
+        await auditReportApi.exportWord(projectId, `${baseName}.docx`)
+      } else {
+        await auditReportApi.exportPdf(projectId, `${baseName}.pdf`)
+      }
+      message.success('报告导出成功，下载已开始')
+    } catch (error: any) {
+      message.error(error?.message || '报告导出失败，请稍后重试')
+    } finally {
+      setExportingFormat(null)
+    }
+  }
 
   const fetchData = async (silent = false) => {
     if (!silent) setLoading(true)
@@ -518,6 +541,22 @@ export default function ProjectArtifacts({ projectId }: Props) {
           <Col>
             <Space wrap>
               <Button icon={<ReloadOutlined />} onClick={() => fetchData()} loading={loading}>刷新</Button>
+              <Button
+                icon={<FileWordOutlined />}
+                loading={exportingFormat === 'word'}
+                disabled={exportingFormat !== null}
+                onClick={() => handleExportReport('word')}
+              >
+                导出 Word
+              </Button>
+              <Button
+                icon={<FilePdfOutlined />}
+                loading={exportingFormat === 'pdf'}
+                disabled={exportingFormat !== null}
+                onClick={() => handleExportReport('pdf')}
+              >
+                导出 PDF
+              </Button>
               <Button
                 icon={<SafetyCertificateOutlined />}
                 loading={checking}

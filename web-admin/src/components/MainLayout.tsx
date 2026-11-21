@@ -286,14 +286,14 @@ export default function MainLayout() {
               />
             </Tooltip>
 
-            {/* 在线文档与操作指南 */}
-            <Tooltip title="在线使用文档与操作指南 (新标签页查看)">
+            {/*后端 Swagger 挂在 /api/docs（见 backend/app/main.py docs_url） */}
+            <Tooltip title="API 文档 (新标签页查看)">
               <Button
                 type="text"
                 className="header-icon-btn"
                 style={{ color: '#0284c7' }}
                 icon={<QuestionCircleOutlined style={{ fontSize: 16 }} />}
-                onClick={() => window.open('/docs', '_blank')}
+                onClick={() => window.open('/api/docs', '_blank')}
               />
             </Tooltip>
 

@@ -302,8 +302,8 @@ class AuditReportGenerator:
         }
         p = doc.add_paragraph()
         p.add_run(f"审核类型：{audit_type_map.get(project.audit_type, project.audit_type)}\n")
-        p.add_run(f"认证体系：{', '.join(project.certification_systems)}\n")
-        p.add_run(f"审核准则：{', '.join(project.audit_criteria)}\n")
+        p.add_run(f"认证体系：{', '.join(project.certification_systems or [])}\n")
+        p.add_run(f"审核准则：{', '.join(project.audit_criteria or [])}\n")
         
         # 1.3 审核组成员
         doc.add_heading('1.3 审核组成员', 2)
@@ -322,7 +322,7 @@ class AuditReportGenerator:
             row_cells[1].text = member.role
             row_cells[2].text = member.registration_no or '-'
             row_cells[3].text = member.registration_level or '-'
-            row_cells[4].text = ', '.join(member.responsible_systems)
+            row_cells[4].text = ', '.join(member.responsible_systems or [])
         
         # 1.4 审核日期
         doc.add_heading('1.4 审核日期', 2)

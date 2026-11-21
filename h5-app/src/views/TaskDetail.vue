@@ -238,6 +238,7 @@ import {
   createAuditSession,
   getMyAuditTasks,
   listAuditSessions,
+  rememberAuditSessionContext,
 } from '../api/auditProjects.js'
 import {
   cacheTaskForOffline,
@@ -542,6 +543,7 @@ const openAiAuditSession = async () => {
           }
         }
 
+        rememberAuditSessionContext(session.id, projectId, planItemId)
         router.push({
           name: 'AiAuditSession',
           params: { sessionId: session.id },

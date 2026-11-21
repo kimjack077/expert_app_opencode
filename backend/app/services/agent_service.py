@@ -2401,6 +2401,8 @@ class AgentService:
                 "project_id": project_id,
                 "audit_session_id": session_id,
                 "draft_count": len(draft_ids),
+                "draft_ids": draft_ids,
+                "action": "confirm",
                 "safe_only": safe_only,
                 "confirm_endpoint": f"/api/audit-projects/{project_id}/sessions/{session_id}/drafts/confirm",
                 "confirm_method": "POST",

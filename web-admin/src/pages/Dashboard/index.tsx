@@ -59,25 +59,38 @@ export default function Dashboard() {
     analyticsApi
       .getDashboard()
       .then((res: any) => setStats(res.data ?? null))
-      .catch((error) => console.error('Failed to fetch dashboard stats:', error))
+      .catch((error) => {
+        console.error('Failed to fetch dashboard stats:', error)
+        // 同一 key 合并多请求失败的提示，避免同时弹一堆重复 toast
+        message.error({ content: '工作台数据加载失败，请刷新重试', key: 'dashboard-load-error' })
+      })
       .finally(() => setLoadingStats(false))
 
     taskApi
       .getTasks({ limit: 8 })
       .then((res: any) => setRecentTasks(res.data?.items || []))
-      .catch((error) => console.error('Failed to fetch recent tasks:', error))
+      .catch((error) => {
+        console.error('Failed to fetch recent tasks:', error)
+        message.error({ content: '工作台数据加载失败，请刷新重试', key: 'dashboard-load-error' })
+      })
       .finally(() => setLoadingTasks(false))
 
     analyticsApi
       .getEnterpriseRisk()
       .then((res: any) => setEnterpriseRisk(res.data ?? null))
-      .catch((error) => console.error('Failed to fetch enterprise risk:', error))
+      .catch((error) => {
+        console.error('Failed to fetch enterprise risk:', error)
+        message.error({ content: '工作台数据加载失败，请刷新重试', key: 'dashboard-load-error' })
+      })
       .finally(() => setLoadingRisk(false))
 
     statisticsApi
       .getOverview()
       .then((res: any) => setProjectOverview(res.data ?? null))
-      .catch((error) => console.error('Failed to fetch project overview:', error))
+      .catch((error) => {
+        console.error('Failed to fetch project overview:', error)
+        message.error({ content: '工作台数据加载失败，请刷新重试', key: 'dashboard-load-error' })
+      })
       .finally(() => setLoadingOverview(false))
   }
 
@@ -89,7 +102,10 @@ export default function Dashboard() {
         end_date: dateRange[1].format('YYYY-MM-DD'),
       })
       .then((res: any) => setTrends(res.data ?? null))
-      .catch((error) => console.error('Failed to fetch trends:', error))
+      .catch((error) => {
+        console.error('Failed to fetch trends:', error)
+        message.error({ content: '趋势数据加载失败，请刷新重试', key: 'dashboard-trends-error' })
+      })
       .finally(() => setLoadingTrends(false))
   }
 

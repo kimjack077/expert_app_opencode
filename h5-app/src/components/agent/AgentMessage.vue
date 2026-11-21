@@ -34,12 +34,14 @@
           </div>
         </div>
 
-        <AgentActionCard
-          v-if="message.actionProposal"
-          :action="message.actionProposal"
-          @confirm="$emit('confirm-action', message.actionProposal)"
-          @cancel="$emit('cancel-action', message.actionProposal)"
-        />
+        <template v-for="(proposal, pIndex) in message.actionProposals || []" :key="pIndex">
+          <AgentActionCard
+            v-if="proposal"
+            :action="proposal"
+            @confirm="$emit('confirm-action', proposal)"
+            @cancel="$emit('cancel-action', proposal)"
+          />
+        </template>
       </div>
 
       <div class="message-time">{{ formatTime(message.timestamp) }}</div>

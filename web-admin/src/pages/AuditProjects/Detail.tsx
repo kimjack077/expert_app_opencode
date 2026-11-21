@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography, Tooltip } from 'antd'
+import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography, Tooltip, Result } from 'antd'
 import { useParams, useNavigate } from 'react-router-dom'
 import { 
   EditOutlined, 
@@ -41,6 +41,7 @@ export default function AuditProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [project, setProject] = useState<any>(null)
   const user = useAuthStore(state => state.user)
   const canManageTeam = isAdminRole(user?.role) || !!(user && project &&
@@ -62,10 +63,12 @@ export default function AuditProjectDetail() {
 
   const fetchProject = async () => {
     setLoading(true)
+    setLoadError(false)
     try {
       const response = await auditProjectApi.get(id!)
       setProject(response.data)
     } catch (error: any) {
+      setLoadError(true)
       message.error(error.response?.data?.message || '获取项目详情失败')
     } finally {
       setLoading(false)
@@ -180,6 +183,34 @@ export default function AuditProjectDetail() {
   }
 
   if (!project) {
+    // 加载失败时给出错误态与重试入口，避免永远停留在「加载中...」
+    if (loadError) {
+      return (
+        <div style={{ padding: '24px' }}>
+          <Result
+            status="warning"
+            title="项目详情加载失败"
+            subTitle="请检查网络后重试，或返回列表重新进入。"
+            extra={[
+              <Button
+                type="primary"
+                key="retry"
+                loading={loading}
+                onClick={() => {
+                  fetchProject()
+                  fetchProgress()
+                }}
+              >
+                重试
+              </Button>,
+              <Button key="back" onClick={() => navigate('/audit-projects')}>
+                返回列表
+              </Button>,
+            ]}
+          />
+        </div>
+      )
+    }
     return <div style={{ padding: '24px' }}>加载中...</div>
   }
 
@@ -484,7 +515,7 @@ export default function AuditProjectDetail() {
                     报告与资料包
                   </Space>
                 ),
-                children: <ProjectArtifacts projectId={id!} />,
+                children: <ProjectArtifacts projectId={id!} projectTitle={project.title} />,
               },
             ]}
           />

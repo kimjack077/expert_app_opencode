@@ -67,6 +67,7 @@ class InspectionRecordBase(BaseModel):
 
 class InspectionRecordCreate(InspectionRecordBase):
     template_item_id: UUID = Field(..., description="绑定的模板检查项ID")
+    media_ids: Optional[List[UUID]] = None
 
 
 class InspectionRecordUpdate(BaseModel):

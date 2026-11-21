@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, update
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
@@ -1131,6 +1131,16 @@ async def create_or_update_record(
             record.result_text = record_data.result_text
         if record_data.inspector_note is not None:
             record.inspector_note = record_data.inspector_note
+        if record_data.media_ids:
+            await db.execute(
+                update(MediaFile)
+                .where(
+                    MediaFile.id.in_(record_data.media_ids),
+                    MediaFile.task_id == task.id,
+                    MediaFile.is_deleted == False,  # noqa: E712
+                )
+                .values(record_id=record.id)
+            )
         record.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(record)
@@ -1162,6 +1172,17 @@ async def create_or_update_record(
         recorded_by=current_user.id,
     )
     db.add(record)
+    await db.flush()
+    if record_data.media_ids:
+        await db.execute(
+            update(MediaFile)
+            .where(
+                MediaFile.id.in_(record_data.media_ids),
+                MediaFile.task_id == task.id,
+                MediaFile.is_deleted == False,  # noqa: E712
+            )
+            .values(record_id=record.id)
+        )
     await db.commit()
     await db.refresh(record)
 

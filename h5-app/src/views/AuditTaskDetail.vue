@@ -13,7 +13,8 @@ import { showToast } from 'vant'
 import {
   createAuditSession,
   getAuditPlanItem,
-  listAuditSessions
+  listAuditSessions,
+  rememberAuditSessionContext
 } from '../api/auditProjects'
 
 const route = useRoute()
@@ -38,6 +39,7 @@ onMounted(async () => {
         .sort((a, b) => String(b.completed_at || b.created_at || '').localeCompare(String(a.completed_at || a.created_at || '')))[0]
         || list.find((item) => item.context_snapshot?.plan_item_id === planItemId)
       if (!completed?.id) throw new Error('未找到审核结果')
+      rememberAuditSessionContext(completed.id, projectId, planItemId)
       await router.replace({
         name: 'AuditSessionResult',
         params: { sessionId: completed.id },
@@ -54,6 +56,7 @@ onMounted(async () => {
       title: `${planItem.area_name || '现场'}审核`
     }))
 
+    rememberAuditSessionContext(session.id, projectId, planItemId)
     await router.replace({
       name: 'AiAuditSession',
       params: { sessionId: session.id },

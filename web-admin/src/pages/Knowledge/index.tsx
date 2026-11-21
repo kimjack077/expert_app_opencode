@@ -101,6 +101,7 @@ export default function Knowledge() {
       setDocuments(res.data || [])
     } catch (error) {
       console.error('Failed to fetch documents:', error)
+      message.error('知识文档加载失败，请刷新重试')
     } finally {
       setLoading(false)
     }
@@ -112,6 +113,7 @@ export default function Knowledge() {
       setGuidelines(res.data || [])
     } catch (error) {
       console.error('Failed to fetch guidelines:', error)
+      message.error('审核依据加载失败，请刷新重试')
     }
   }
 

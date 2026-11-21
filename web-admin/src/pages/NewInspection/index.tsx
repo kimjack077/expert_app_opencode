@@ -22,7 +22,7 @@ export default function NewInspection() {
 
   const fetchTemplates = async () => {
     try {
-      const res: any = await templateApi.getTemplates({ is_published: true })
+      const res: any = await templateApi.getTemplates({ is_published: true, limit: 100 })
       setTemplates(res.data || [])
     } catch (error) {
       console.error('Failed to fetch templates:', error)

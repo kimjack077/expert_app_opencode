@@ -34,7 +34,7 @@ interface Message {
   content: string
   timestamp: number
   toolCalls?: ToolCall[]
-  actionConfirm?: AgentAction
+  actionConfirms?: AgentAction[]
   citations?: Citation[]
 }
 
@@ -147,20 +147,20 @@ export default function AgentMessageRenderer({ message }: Props) {
         </div>
       )}
 
-      {message.actionConfirm && message.actionConfirm.status !== 'pending' && (
-        <div className={`action-status ${message.actionConfirm.status}`} role="status">
-          {message.actionConfirm.status === 'confirmed' && <><CheckCircleOutlined /> 已确认并写入</>}
-          {message.actionConfirm.status === 'cancelled' && <><CloseCircleOutlined /> 已拒绝</>}
-          {message.actionConfirm.status === 'failed' && (
+      {message.actionConfirms?.filter((action) => action.status !== 'pending').map((action) => (
+        <div key={action.actionIndex ?? 0} className={`action-status ${action.status}`} role="status">
+          {action.status === 'confirmed' && <><CheckCircleOutlined /> 已确认并写入</>}
+          {action.status === 'cancelled' && <><CloseCircleOutlined /> 已拒绝</>}
+          {action.status === 'failed' && (
             <>
               <ExclamationCircleOutlined /> 写入失败
-              {message.actionConfirm.data?.failure_reason
-                ? `：${String(message.actionConfirm.data.failure_reason)}`
+              {action.data?.failure_reason
+                ? `：${String(action.data.failure_reason)}`
                 : '，可重新向 Agent 发起操作'}
             </>
           )}
         </div>
-      )}
+      ))}
     </div>
   )
 }

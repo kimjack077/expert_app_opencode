@@ -103,7 +103,8 @@ interface ChatMessage {
   content: string
   timestamp: number
   toolCalls?: ToolCall[]
-  actionConfirm?: AgentAction
+  /** 一轮可产生多个提案（后端按 action_index 编号），逐张渲染确认卡 */
+  actionConfirms?: AgentAction[]
   citations?: Citation[]
 }
 
@@ -185,7 +186,16 @@ const normalizeAction = (event: any): AgentAction => {
 const loadStoredConversations = (): Conversation[] => {
   try {
     const stored = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
-    return Array.isArray(stored) ? stored.slice(0, 20) : []
+    if (!Array.isArray(stored)) return []
+    // 旧版本地历史用单槽 actionConfirm，回放前迁移成数组，避免丢卡
+    return stored.slice(0, 20).map((conversation: any) => ({
+      ...conversation,
+      messages: (conversation.messages || []).map((item: any) => {
+        if (item.actionConfirms || !item.actionConfirm) return item
+        const { actionConfirm, ...rest } = item
+        return { ...rest, actionConfirms: [actionConfirm] }
+      }),
+    }))
   } catch {
     return []
   }
@@ -200,7 +210,7 @@ export default function AgentSidebar({ context }: Props) {
   const [conversationId, setConversationId] = useState<string>()
   const [conversations, setConversations] = useState<Conversation[]>(loadStoredConversations)
   const [historyQuery, setHistoryQuery] = useState('')
-  const [applyingMessageId, setApplyingMessageId] = useState<string>()
+  const [applyingActionKey, setApplyingActionKey] = useState<string>()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const previousContextKeyRef = useRef<string>()
@@ -371,14 +381,21 @@ export default function AgentSidebar({ context }: Props) {
               const proposal = typeof event.action === 'object' ? event.action : event
               const messageId = String(event.message_id || proposal?.message_id || serverMessageId || '')
               const actionIndex = Number(event.action_index ?? proposal?.action_index ?? 0)
-              updateAssistant(assistantId, (item) => ({
-                ...item,
-                actionConfirm: {
+              updateAssistant(assistantId, (item) => {
+                const next: AgentAction = {
                   ...normalizeAction(proposal),
                   messageId: messageId || undefined,
                   actionIndex: Number.isFinite(actionIndex) ? actionIndex : 0,
-                },
-              }))
+                }
+                const existing = item.actionConfirms || []
+                const index = existing.findIndex((card) => (card.actionIndex ?? 0) === next.actionIndex)
+                return {
+                  ...item,
+                  actionConfirms: index >= 0
+                    ? existing.map((card, i) => (i === index ? next : card))
+                    : [...existing, next],
+                }
+              })
             } else if (event.type === 'citations' || event.type === 'citation') {
               const values = event.type === 'citation' ? [event.citation || event] : event.citations || []
               updateAssistant(assistantId, (item) => ({ ...item, citations: values.map(asCitation) }))
@@ -470,13 +487,22 @@ export default function AgentSidebar({ context }: Props) {
   }
 
   const handleActionConfirm = async (messageId: string, action: AgentAction, modifiedData?: Record<string, unknown>) => {
-    setApplyingMessageId(messageId)
+    const actionIndex = action.actionIndex ?? 0
+    setApplyingActionKey(`${messageId}:${actionIndex}`)
+    // 按 messageId + actionIndex 定位本轮多张卡中的对应一张回写状态
+    const updateCard = (item: ChatMessage, patch: (card: AgentAction) => AgentAction): ChatMessage => ({
+      ...item,
+      actionConfirms: (item.actionConfirms || []).map((card) =>
+        (card.actionIndex ?? 0) === actionIndex ? patch(card) : card
+      ),
+    })
     try {
       const serverMessage = await persistAction(action, modifiedData)
-      updateAssistant(messageId, (item) => ({
-        ...item,
-        actionConfirm: item.actionConfirm ? { ...item.actionConfirm, status: 'confirmed', data: { ...item.actionConfirm.data, ...(modifiedData || {}) } } : undefined,
-      }))
+      updateAssistant(messageId, (item) => updateCard(item, (card) => ({
+        ...card,
+        status: 'confirmed',
+        data: { ...card.data, ...(modifiedData || {}) },
+      })))
       message.success(serverMessage || '操作已确认并写入系统')
       // BUG-25：Agent 确认写入后，宿主页面（如项目详情的会议/计划/团队面板）无感知，
       // 需手动刷新才能看到新数据。这里广播确认事件，由各面板监听并自行刷新。
@@ -487,28 +513,25 @@ export default function AgentSidebar({ context }: Props) {
       )
     } catch (error) {
       const reason = (error as Error)?.message || '确认操作失败'
-      updateAssistant(messageId, (item) => ({
-        ...item,
-        actionConfirm: item.actionConfirm
-          ? {
-              ...item.actionConfirm,
-              status: 'failed',
-              // 把服务端具体原因（如「该项目已存在首次会议记录…」）带到卡片内联展示，
-              // 而不是只弹一个转瞬即逝的全局提示。
-              data: { ...item.actionConfirm.data, failure_reason: reason },
-            }
-          : undefined,
-      }))
+      updateAssistant(messageId, (item) => updateCard(item, (card) => ({
+        ...card,
+        status: 'failed',
+        // 把服务端具体原因（如「该项目已存在首次会议记录…」）带到卡片内联展示，
+        // 而不是只弹一个转瞬即逝的全局提示。
+        data: { ...card.data, failure_reason: reason },
+      })))
       message.error(reason)
     } finally {
-      setApplyingMessageId(undefined)
+      setApplyingActionKey(undefined)
     }
   }
 
-  const cancelAction = (messageId: string) => {
+  const cancelAction = (messageId: string, actionIndex: number) => {
     updateAssistant(messageId, (item) => ({
       ...item,
-      actionConfirm: item.actionConfirm ? { ...item.actionConfirm, status: 'cancelled' } : undefined,
+      actionConfirms: (item.actionConfirms || []).map((card) =>
+        (card.actionIndex ?? 0) === actionIndex ? { ...card, status: 'cancelled' } : card
+      ),
     }))
   }
 
@@ -591,14 +614,15 @@ export default function AgentSidebar({ context }: Props) {
                 {chatMessage.role === 'assistant' && <div className="message-avatar"><RobotOutlined /></div>}
                 <div className="message-content">
                   <AgentMessageRenderer message={chatMessage} />
-                  {chatMessage.actionConfirm?.status === 'pending' && (
+                  {chatMessage.actionConfirms?.map((action) => action.status === 'pending' && (
                     <AgentActionConfirm
-                      action={chatMessage.actionConfirm}
-                      applying={applyingMessageId === chatMessage.id}
-                      onConfirm={(data) => handleActionConfirm(chatMessage.id, chatMessage.actionConfirm!, data)}
-                      onCancel={() => cancelAction(chatMessage.id)}
+                      key={action.actionIndex ?? 0}
+                      action={action}
+                      applying={applyingActionKey === `${chatMessage.id}:${action.actionIndex ?? 0}`}
+                      onConfirm={(data) => handleActionConfirm(chatMessage.id, action, data)}
+                      onCancel={() => cancelAction(chatMessage.id, action.actionIndex ?? 0)}
                     />
-                  )}
+                  ))}
                   <div className="message-time">{new Date(chatMessage.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
               </div>

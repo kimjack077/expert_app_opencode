@@ -451,7 +451,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { showToast, showSuccessToast, showNotify } from 'vant'
-import request from '../api/request.js'
+import request, { fetchWithTokenRetry } from '../api/request.js'
 import { getTask, getTaskRecords, getTemplateItems, submitCheckRecord } from '../api/tasks.js'
 import { getRecordItem } from '../api/records.js'
 import { processPhoto, blobToBase64 } from '../utils/photoUtils.js'
@@ -518,6 +518,11 @@ const formData = ref({
 })
 
 const photoList = ref([])
+// 本次会话上传、尚未关联记录的照片媒体 id（任务模式先拍照后保存），保存时随 media_ids 提交
+const sessionMediaIds = ref([])
+// 照片路径 → media id 映射：删除已上传照片时用于调 DELETE /api/media/{id}
+const photoMediaIds = ref({})
+const normPhotoKey = (url) => String(url || '').replace(/\\/g, '/').replace(/^\/+/, '')
 
 // 计算属性
 const hasKnowledgeBase = computed(() => {
@@ -980,6 +985,17 @@ const fetchItemData = async () => {
       photos: [...taskPhotos],
     }
 
+    // 已有照片删除需要 media id：任务记录接口只回传文件路径，这里补一份路径→id 映射
+    try {
+      const mediaRes = await request.get(`/media/task/${task.id}`)
+      const files = Array.isArray(mediaRes?.data) ? mediaRes.data : []
+      files.forEach((f) => {
+        if (f?.id && f?.file_path) photoMediaIds.value[normPhotoKey(f.file_path)] = f.id
+      })
+    } catch (mediaError) {
+      console.warn('获取任务媒体列表失败，已有照片删除将仅本地移除:', mediaError)
+    }
+
     setupPhotos()
     fetchHistoryStats()
 
@@ -1062,6 +1078,9 @@ const handlePhotoUpload = async (file) => {
       file.isImage = true
       if (mediaId) {
         lastUploadedMediaId.value = mediaId
+        photoMediaIds.value[normPhotoKey(filePath)] = mediaId
+        // 上传时未带 record_id（任务模式首次进入）则后端尚未关联，先跟踪，保存时随 media_ids 提交
+        if (!itemData.value?.record_id) sessionMediaIds.value.push(mediaId)
       }
       showSuccessToast('上传成功')
     } else {
@@ -1075,9 +1094,27 @@ const handlePhotoUpload = async (file) => {
   }
 }
 
-const onPhotoDelete = (file, detail) => {
+const onPhotoDelete = async (file, detail) => {
   const index = detail?.index ?? 0
-  formData.value.photos.splice(index, 1)
+  const key = normPhotoKey(file.url || file.content)
+  const mediaId = photoMediaIds.value[key]
+  if (mediaId) {
+    try {
+      await request.delete(`/media/${mediaId}`, { skipErrorToast: true })
+      delete photoMediaIds.value[key]
+      sessionMediaIds.value = sessionMediaIds.value.filter((id) => id !== mediaId)
+    } catch (error) {
+      // 服务端删除失败：van-uploader 已移除预览项，放回原位保持两边一致
+      const restored = [...photoList.value]
+      restored.splice(Math.min(index, restored.length), 0, file)
+      photoList.value = restored
+      showToast('删除照片失败，请重试')
+      return
+    }
+  }
+  // 按路径匹配移除本地项，避免存在上传失败项时索引错位
+  const idx = formData.value.photos.findIndex((p) => normPhotoKey(p) === key)
+  if (idx >= 0) formData.value.photos.splice(idx, 1)
 }
 
 // AI 生成
@@ -1090,7 +1127,6 @@ const generateAI = async () => {
   try {
     const recordId = route.params.id
     const itemId = route.params.itemId
-    const token = localStorage.getItem('token')
     
     const API_BASE_URL =
       import.meta.env.VITE_API_URL !== undefined
@@ -1100,12 +1136,14 @@ const generateAI = async () => {
       ? `${API_BASE_URL}/api/tasks/${recordId}/records/${itemId}/ai-stream`
       : `${API_BASE_URL}/api/records/${recordId}/items/${itemId}/ai-stream`
 
-    const response = await fetch(url, {
+    // 401 时走与 axios 拦截器一致的单飞续期并重试一次；刷新失败已跳登录页
+    const response = await fetchWithTokenRetry((token) => fetch(url, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': token ? `Bearer ${token}` : '',
         'Accept': 'text/event-stream',
       },
-    })
+    }))
+    if (!response) return
     
     if (!response.ok) {
       throw new Error('请求失败')
@@ -1235,7 +1273,10 @@ const saveItem = async () => {
         payload.inspector_note = formData.value.inspector_note
       }
 
+      // 契约 C1：先拍照后保存的照片尚无记录可挂，随保存提交 media_ids 由后端关联到本记录
+      if (sessionMediaIds.value.length) payload.media_ids = [...sessionMediaIds.value]
       await submitCheckRecord(recordId, payload)
+      sessionMediaIds.value = []
       showSuccessToast('保存成功')
       // 任务模式回到任务执行页（旧跳转 /inspection/:id 不带 mode 会先打一条
       // /records/:id 404 再回退任务链，污染控制台且多一次往返）。

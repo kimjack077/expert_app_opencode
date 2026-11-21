@@ -26,6 +26,7 @@ from app.models.record import InspectionRecordItem
 from app.models.task import InspectionTask
 from app.models.template import TemplateItem
 from app.models.user import User
+from app.routers.audit_projects import _sync_project_after_area_plan
 from app.routers.auth import get_current_user
 from app.utils.category import is_category_node, load_parent_ids
 from app.schemas.project_agent import (
@@ -1374,6 +1375,9 @@ async def submit_session(project_id: UUID, session_id: UUID, payload: dict[str, 
             if plan:
                 plan.status="completed"
                 await _sync_inspection_task_status(db, plan, "completed", completed_at)
+                project=await db.get(AuditProject, project_id)
+                if project:
+                    await _sync_project_after_area_plan(db, project, plan, completed_at)
             else:
                 print(f"[submit_session] plan_item {context['plan_item_id']} not found, skipping")
         # 先 commit 让数据持久化，避免序列化关系时触发 lazy load 绿let 错误

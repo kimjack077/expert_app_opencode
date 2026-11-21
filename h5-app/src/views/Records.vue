@@ -6,7 +6,7 @@
         <div class="header-top">
           <div class="header-info">
             <h1 class="page-title">检查记录</h1>
-            <p class="page-subtitle">{{ filteredRecords.length }} 条记录</p>
+            <p class="page-subtitle">共 {{ total }} 条记录</p>
           </div>
           <div class="header-actions">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -68,8 +68,10 @@
     <van-pull-refresh v-model="refreshing" @refresh="onRefresh" class="refresh-container">
       <van-list
         v-model:loading="loading"
+        v-model:error="loadError"
         :finished="finished"
         finished-text=""
+        error-text="加载失败，点击重试"
         @load="onLoad"
       >
         <div class="record-list">
@@ -169,7 +171,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords } from '../api/records'
 import BottomNav from '../components/BottomNav.vue'
@@ -181,8 +183,13 @@ const records = ref([])
 const loading = ref(false)
 const finished = ref(false)
 const refreshing = ref(false)
+const loadError = ref(false)
 const page = ref(1)
 const pageSize = 10
+// 后端返回的匹配总数：徽章与「共 N 条」统一用它，不再按已加载页计数
+const total = ref(0)
+let searchTimer = null
+let fetchSeq = 0
 
 const filterTabs = [
   { label: '全部', value: 'all' },
@@ -194,23 +201,16 @@ const resultCounts = computed(() => {
   const pass = records.value.filter(r => r.overall_result === 'pass').length
   const partial = records.value.filter(r => r.overall_result === 'partial_pass').length
   const fail = records.value.filter(r => r.overall_result === 'fail').length
-  // 待判定 = 总数扣除已出结论的，保证「四项之和 = 共 N 条」在页面上闭合
-  const pending = Math.max(records.value.length - pass - partial - fail, 0)
+  // 待判定 = 后端总数扣除已出结论的，保证「四项之和 = 共 N 条」在页面上闭合
+  const pending = Math.max(total.value - pass - partial - fail, 0)
   return { pass, partial_pass: partial, fail, pending }
 })
 
 const filteredRecords = computed(() => {
+  // 关键词过滤已交给服务端 keyword 参数，这里只保留状态页签的本地筛选
   let result = records.value
   if (activeFilter.value !== 'all') {
     result = result.filter(r => r.status === activeFilter.value)
-  }
-  if (searchText.value) {
-    const keyword = searchText.value.toLowerCase()
-    result = result.filter(r => 
-      r.template?.name?.toLowerCase().includes(keyword) ||
-      r.enterprise_name?.toLowerCase().includes(keyword) ||
-      r.enterprise?.name?.toLowerCase().includes(keyword)
-    )
   }
   return result
 })
@@ -250,31 +250,42 @@ const formatDate = (dateStr) => {
 }
 
 const fetchRecords = async (isRefresh = false) => {
+  const seq = ++fetchSeq
+  loadError.value = false
   try {
-    const res = await getRecords({
+    const params = {
       page: page.value,
       limit: pageSize,
-    })
-    
+    }
+    const keyword = searchText.value.trim()
+    if (keyword) params.keyword = keyword
+    const res = await getRecords(params)
+    if (seq !== fetchSeq) return
+
     const items = res.data?.items || []
+    total.value = Number(res.data?.total) || 0
     if (isRefresh) {
       records.value = items
     } else {
       records.value.push(...items)
     }
-    
+
     if (items.length < pageSize) {
       finished.value = true
     }
+    // 只在成功后翻页：失败递增 page 会跳页漏数据
+    page.value++
   } catch (error) {
+    if (seq !== fetchSeq) return
     console.error('获取记录失败:', error)
+    // 错误态由 van-list error-text 提示并支持点击重试（拦截器另有友好 toast）
+    loadError.value = true
   }
 }
 
 const onLoad = async () => {
   await fetchRecords()
   loading.value = false
-  page.value++
 }
 
 const onRefresh = async () => {
@@ -284,16 +295,31 @@ const onRefresh = async () => {
   refreshing.value = false
 }
 
-const onSearch = () => {
+// 搜索走服务端：重置分页与列表后重新拉取
+const resetAndFetch = async () => {
   page.value = 1
   finished.value = false
   records.value = []
-  onLoad()
+  total.value = 0
+  loading.value = true
+  await fetchRecords()
+  loading.value = false
+}
+
+// 输入防抖 300ms，避免每敲一个字打一次接口
+watch(searchText, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(resetAndFetch, 300)
+})
+onUnmounted(() => clearTimeout(searchTimer))
+
+const onSearch = () => {
+  clearTimeout(searchTimer)
+  resetAndFetch()
 }
 
 const clearSearch = () => {
   searchText.value = ''
-  onSearch()
 }
 
 const goToDetail = (record) => {

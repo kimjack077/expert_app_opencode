@@ -18,6 +18,47 @@ const request = axios.create({
   withCredentials: false,
 })
 
+// 刷新失败后的统一退场：清 token、跳登录页（axios 拦截器与 fetch 流式共用）
+const forceRelogin = () => {
+  localStorage.removeItem('token')
+  localStorage.removeItem('refresh_token')
+  setTimeout(() => {
+    window.location.href = '/h5/login'
+  }, 100)
+  try {
+    showToast({ type: 'fail', message: '登录已过期，请重新登录' })
+  } catch (e) {
+    console.error('Toast error:', e)
+  }
+}
+
+/**
+ * 单飞刷新 access token：axios 拦截器与原生 fetch 流式调用共享同一刷新请求，
+ * 并发 401 只会触发一次 /auth/refresh。
+ */
+export const refreshAccessToken = () => {
+  refreshingPromise = refreshingPromise || tryRefreshToken()
+  return refreshingPromise.finally(() => {
+    refreshingPromise = null
+  })
+}
+
+/**
+ * 原生 fetch（SSE 流式）调用的 401 自动续期。
+ * buildRequest(token) 负责构造并发起请求；收到 401 时刷新 token 并用新 token
+ * 重试一次；刷新失败按拦截器同样方式清登录态并跳登录页，返回 null。
+ */
+export const fetchWithTokenRetry = async (buildRequest) => {
+  const response = await buildRequest(localStorage.getItem('token'))
+  if (response.status !== 401) return response
+  const newToken = await refreshAccessToken()
+  if (!newToken) {
+    forceRelogin()
+    return null
+  }
+  return buildRequest(newToken)
+}
+
 // 请求拦截器
 request.interceptors.request.use(
   (config) => {
@@ -102,10 +143,7 @@ request.interceptors.response.use(
       if (status === 401) {
         // 单飞刷新：并发 401 只触发一次刷新请求
         if (!config?._retried) {
-          refreshingPromise = refreshingPromise || tryRefreshToken()
-          const newToken = await refreshingPromise.finally(() => {
-            refreshingPromise = null
-          })
+          const newToken = await refreshAccessToken()
           if (newToken) {
             config._retried = true
             config.headers = config.headers || {}
@@ -113,17 +151,7 @@ request.interceptors.response.use(
             return request(config)
           }
         }
-        localStorage.removeItem('token')
-        localStorage.removeItem('refresh_token')
-        // 延迟跳转，避免在拦截器中直接操作DOM
-        setTimeout(() => {
-          window.location.href = '/h5/login'
-        }, 100)
-        try {
-          showToast({ type: 'fail', message: '登录已过期，请重新登录' })
-        } catch (e) {
-          console.error('Toast error:', e)
-        }
+        forceRelogin()
       } else if (!error.config?.skipErrorToast) {
         try {
           showToast({ type: 'fail', message: toFriendlyMessage(status, data?.detail) })

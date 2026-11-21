@@ -2,7 +2,7 @@
   <div v-if="!online" class="offline-banner" role="status">
     <van-icon name="warning-o" />
     <div class="offline-banner-text">
-      <span>网络已断开，未提交的文字草稿会保存在本机；照片上传和正式保存需恢复网络</span>
+      <span>网络已断开，可查看已缓存内容；填写与提交需要联网</span>
       <span class="offline-cache-line">
         <template v-if="summary.count > 0">
           已缓存 {{ summary.count }} 份检查资料 · 最近缓存 {{ formatCachedAt(summary.lastCachedAt) }}

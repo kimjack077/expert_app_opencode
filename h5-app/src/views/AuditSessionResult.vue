@@ -2,7 +2,10 @@
   <main class="result-page">
     <van-nav-bar title="审核结果" left-arrow fixed placeholder @click-left="router.push('/today-audit')" />
 
-    <van-skeleton v-if="loading" title :row="8" class="loading-card" />
+    <van-empty v-if="contextMissing" description="会话参数缺失，请从审核任务重新进入">
+      <van-button round type="primary" @click="router.push('/today-audit')">返回今日审核</van-button>
+    </van-empty>
+    <van-skeleton v-else-if="loading" title :row="8" class="loading-card" />
 
     <template v-else-if="session.id">
       <section class="hero" :class="{ completed: isCompleted }">
@@ -133,15 +136,24 @@ import { showConfirmDialog, showToast } from 'vant'
 import {
   createAuditSession,
   getAuditPlanItem,
-  getAuditSession
+  getAuditSession,
+  recallAuditSessionContext,
+  rememberAuditSessionContext
 } from '../api/auditProjects'
 
 const route = useRoute()
 const router = useRouter()
 
-const projectId = computed(() => String(route.query.projectId || ''))
 const sessionId = computed(() => String(route.params.sessionId || ''))
-const planItemId = computed(() => String(route.query.planItemId || ''))
+// 刷新/直达会丢 URL query：按 sessionId 从 sessionStorage 恢复项目上下文，
+// 仍拿不到时展示友好错误态，绝不发出空 projectId 的请求
+const restoredContext = recallAuditSessionContext(sessionId.value)
+const projectId = ref(String(route.query.projectId || restoredContext?.projectId || ''))
+const planItemId = ref(String(route.query.planItemId || restoredContext?.planItemId || ''))
+const contextMissing = computed(() => !projectId.value || !sessionId.value)
+if (!contextMissing.value) {
+  rememberAuditSessionContext(sessionId.value, projectId.value, planItemId.value)
+}
 
 const loading = ref(true)
 const reauditing = ref(false)
@@ -205,6 +217,10 @@ const formatTime = (value) => {
 }
 
 const load = async () => {
+  if (contextMissing.value) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     if (!projectId.value || !sessionId.value) throw new Error('缺少项目或会话参数')
@@ -248,6 +264,7 @@ const startReaudit = async () => {
     const next = unwrap(created)
     if (!next?.id) throw new Error('未能创建重新审核会话')
     showToast('已开启重新审核')
+    rememberAuditSessionContext(next.id, projectId.value, targetPlanItemId)
     router.replace({
       name: 'AiAuditSession',
       params: { sessionId: next.id },

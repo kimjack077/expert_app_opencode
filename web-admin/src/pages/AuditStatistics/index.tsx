@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Row, Col, Card, Table, Tag, Space, Select, Spin, Empty } from 'antd'
+import { Row, Col, Card, Table, Tag, Space, Select, Spin, Empty, message } from 'antd'
 import {
   ProjectOutlined,
   CheckCircleOutlined,
@@ -132,6 +132,8 @@ export default function AuditStatistics() {
       setOverview(res.data)
     } catch (error) {
       console.error('Failed to fetch overview:', error)
+      // 同一 key 合并本页多请求失败的提示，避免重复 toast刷屏
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -144,6 +146,7 @@ export default function AuditStatistics() {
       setProjectDistribution(statusRes.data || [])
     } catch (error) {
       console.error('Failed to fetch project distribution:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -153,6 +156,7 @@ export default function AuditStatistics() {
       setProjectTrend(res.data || [])
     } catch (error) {
       console.error('Failed to fetch project trend:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -164,6 +168,7 @@ export default function AuditStatistics() {
       setNcDistribution(res.data || [])
     } catch (error) {
       console.error('Failed to fetch NC distribution:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -175,6 +180,7 @@ export default function AuditStatistics() {
       setNcBySystem(res.data || [])
     } catch (error) {
       console.error('Failed to fetch NC by system:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -186,6 +192,7 @@ export default function AuditStatistics() {
       setNcByClause(res.data || [])
     } catch (error) {
       console.error('Failed to fetch NC by clause:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -195,6 +202,7 @@ export default function AuditStatistics() {
       setNcTrend(res.data || [])
     } catch (error) {
       console.error('Failed to fetch NC trend:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -206,6 +214,7 @@ export default function AuditStatistics() {
       setAuditorWorkload(res.data || [])
     } catch (error) {
       console.error('Failed to fetch auditor workload:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 
@@ -215,6 +224,7 @@ export default function AuditStatistics() {
       setAuditorRanking(res.data || [])
     } catch (error) {
       console.error('Failed to fetch auditor ranking:', error)
+      message.error({ content: '统计数据加载失败，请刷新重试', key: 'audit-statistics-load-error' })
     }
   }
 

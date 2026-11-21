@@ -2,6 +2,11 @@
   <main class="audit-session-page">
     <van-nav-bar title="现场审核" left-arrow fixed placeholder @click-left="goBack" />
 
+    <van-empty v-if="contextMissing" description="会话参数缺失，请从审核任务重新进入">
+      <van-button round type="primary" @click="goBack">返回今日审核</van-button>
+    </van-empty>
+
+    <template v-else>
     <section class="session-summary">
       <div>
         <p class="eyebrow">{{ planItem?.area_name || session.title || '现场审核' }}</p>
@@ -403,6 +408,7 @@
       :context="agentContext"
       @project-action-applied="loadSession"
     />
+    </template>
   </main>
 </template>
 
@@ -419,6 +425,8 @@ import {
   createManualSessionRecord,
   getAuditPlanItem,
   getAuditSession,
+  recallAuditSessionContext,
+  rememberAuditSessionContext,
   submitAuditSession,
   submitSessionEvidence,
   uploadAuditSessionMedia
@@ -426,9 +434,16 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const projectId = computed(() => String(route.query.projectId || ''))
 const sessionId = computed(() => String(route.params.sessionId || ''))
-const planItemId = computed(() => String(route.query.planItemId || ''))
+// 刷新/直达会丢 URL query：按 sessionId 从 sessionStorage 恢复项目上下文，
+// 仍拿不到时展示友好错误态，绝不发出空 projectId 的请求
+const restoredContext = recallAuditSessionContext(sessionId.value)
+const projectId = ref(String(route.query.projectId || restoredContext?.projectId || ''))
+const planItemId = ref(String(route.query.planItemId || restoredContext?.planItemId || ''))
+const contextMissing = computed(() => !projectId.value || !sessionId.value)
+if (!contextMissing.value) {
+  rememberAuditSessionContext(sessionId.value, projectId.value, planItemId.value)
+}
 
 const session = ref({})
 const planItem = ref(null)
@@ -667,6 +682,10 @@ watch(
 )
 
 const loadSession = async () => {
+  if (contextMissing.value) {
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     const [sessionResponse, planResponse] = await Promise.all([
@@ -1014,6 +1033,10 @@ const submitSession = async () => {
 }
 
 onMounted(async () => {
+  if (contextMissing.value) {
+    loading.value = false
+    return
+  }
   const restored = restoreSessionDraft()
   await loadSession()
   if (restored && !isCompleted.value) showToast('已恢复本机保存的文字草稿')

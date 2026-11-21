@@ -113,6 +113,7 @@ import { ref, watch, nextTick, computed } from 'vue'
 import { showToast, showSuccessToast, showFailToast } from 'vant'
 import AgentMessage from './AgentMessage.vue'
 import { confirmAgentAction, getAgentActionRegistry } from '../../api/agent'
+import { fetchWithTokenRetry } from '../../api/request'
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
@@ -265,12 +266,12 @@ const streamChat = async (message) => {
   abortController.value = new AbortController()
 
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`${API_BASE_URL}/api/agent/chat`, {
+    // 401 时走与 axios 拦截器一致的单飞续期并重试一次；刷新失败已跳登录页
+    const response = await fetchWithTokenRetry((token) => fetch(`${API_BASE_URL}/api/agent/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'Authorization': token ? `Bearer ${token}` : '',
         'Accept': 'text/event-stream',
       },
       body: JSON.stringify({
@@ -292,7 +293,8 @@ const streamChat = async (message) => {
         conversation_id: conversationId.value || undefined
       }),
       signal: abortController.value.signal
-    })
+    }))
+    if (!response) return
 
     if (!response.ok) {
       throw new Error('请求失败')
@@ -342,12 +344,16 @@ const streamChat = async (message) => {
               )
               messages.value[messageIndex] = { ...currentMsg, toolCalls }
             } else if (data.type === 'action_proposal') {
-              const currentMsg = messages.value[messageIndex]
-              messages.value[messageIndex] = {
-                ...currentMsg,
-                actionProposal: buildActionProposal(data)
+              const proposal = buildActionProposal(data)
+              if (proposal) {
+                const currentMsg = messages.value[messageIndex]
+                // 一轮可能产出多张提案卡：追加进数组，避免后一张覆盖前一张
+                messages.value[messageIndex] = {
+                  ...currentMsg,
+                  actionProposals: [...(currentMsg.actionProposals || []), proposal]
+                }
+                scrollToBottom()
               }
-              scrollToBottom()
             } else if (data.type === 'done') {
               const currentMsg = messages.value[messageIndex]
               if (currentMsg.toolCalls && currentMsg.toolCalls.length > 0) {
@@ -510,9 +516,19 @@ const executeLegacyProjectAction = async (action) => {
   return payload?.data || payload
 }
 
-const handleConfirmAction = async (messageIndex, action) => {
+// 一轮多卡：按提案对象（或 message_id + action_index + action）定位，只更新对应那张卡
+const updateProposalStatus = (messageIndex, action, status) => {
   const currentMsg = messages.value[messageIndex]
+  if (!currentMsg) return
+  const proposals = (currentMsg.actionProposals || []).map(p =>
+    p === action || (p.messageId === action.messageId && p.actionIndex === action.actionIndex && p.action === action.action)
+      ? { ...p, status }
+      : p
+  )
+  messages.value[messageIndex] = { ...currentMsg, actionProposals: proposals }
+}
 
+const handleConfirmAction = async (messageIndex, action) => {
   try {
     let result = null
 
@@ -557,26 +573,16 @@ const handleConfirmAction = async (messageIndex, action) => {
       showSuccessToast('已确认并写入当前审核项目')
     }
 
-    messages.value[messageIndex] = {
-      ...currentMsg,
-      actionProposal: { ...action, status: 'confirmed' }
-    }
+    updateProposalStatus(messageIndex, action, 'confirmed')
   } catch (error) {
     console.error('采纳建议失败:', error)
     showFailToast('填写失败，请手动填写')
-    messages.value[messageIndex] = {
-      ...currentMsg,
-      actionProposal: { ...action, status: 'failed' }
-    }
+    updateProposalStatus(messageIndex, action, 'failed')
   }
 }
 
 const handleCancelAction = (messageIndex, action) => {
-  const currentMsg = messages.value[messageIndex]
-  messages.value[messageIndex] = {
-    ...currentMsg,
-    actionProposal: { ...action, status: 'cancelled' }
-  }
+  updateProposalStatus(messageIndex, action, 'cancelled')
 }
 
 watch(() => props.show, (newVal) => {

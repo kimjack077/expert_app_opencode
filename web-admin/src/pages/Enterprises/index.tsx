@@ -69,6 +69,7 @@ export default function Enterprises() {
       setTotal(res.data?.total || 0)
     } catch (error) {
       console.error('Failed to fetch enterprises:', error)
+      message.error('企业列表加载失败，请刷新重试')
     } finally {
       if (sequence === requestSequence.current) setLoading(false)
     }
