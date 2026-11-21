@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +89,7 @@ async def get_records(
     inspector_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     overall_result: Optional[str] = Query(None, description="总体结果: pass, partial_pass, fail"),
+    pending: Optional[bool] = Query(None, description="仅显示待判定记录"),
     enterprise_name: Optional[str] = Query(None, description="企业名称模糊搜索"),
     keyword: Optional[str] = Query(None, description="关键词模糊搜索：企业名称/模板名称"),
     start_date: Optional[str] = Query(None),
@@ -120,6 +122,17 @@ async def get_records(
         conditions.append(InspectionRecord.status == status)
     if overall_result:
         conditions.append(InspectionRecord.overall_result == overall_result)
+    if pending is True:
+        # 与 /statistics 保持一致：只有三种规范结论不属于「待判定」；
+        # 历史数据里的 NULL、空字符串或异常值都应能被列表筛出来。
+        conditions.append(
+            or_(
+                InspectionRecord.overall_result.is_(None),
+                InspectionRecord.overall_result.notin_(
+                    ("pass", "partial_pass", "fail")
+                ),
+            )
+        )
     if enterprise_name:
         # 搜索企业名称：检查手动输入的 enterprise_name 或关联的企业名称
         conditions.append(
@@ -1099,6 +1112,45 @@ async def create_or_update_record_item(
             "id": str(record_item.id),
             "template_item_id": str(record_item.template_item_id),
         }
+    )
+
+
+@router.put("/{record_id}/items/{item_id}", response_model=ApiResponse)
+async def update_record_item_by_id(
+    record_id: UUID,
+    item_id: UUID,
+    item_data: InspectionRecordItemCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按条目 ID（或模板项 ID）更新检查记录项，兼容 H5 端 PUT 契约"""
+    if item_data.id is not None and item_data.id != item_id:
+        raise HTTPException(status_code=422, detail="路径与请求体的记录项 ID 不一致")
+
+    existing = (
+        await db.execute(
+            select(InspectionRecordItem).where(
+                InspectionRecordItem.record_id == record_id,
+                InspectionRecordItem.id == item_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        if item_data.template_item_id is not None and item_data.template_item_id != existing.template_item_id:
+            raise HTTPException(status_code=422, detail="记录项与模板项不一致")
+        item_data = item_data.model_copy(update={"id": item_id})
+    else:
+        if item_data.id is not None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        if item_data.template_item_id is not None and item_data.template_item_id != item_id:
+            raise HTTPException(status_code=422, detail="路径与请求体的模板项 ID 不一致")
+        # 模板归属、写权限、提交态和结果校验统一由原写入入口负责。
+        item_data = item_data.model_copy(update={"template_item_id": item_id})
+    return await create_or_update_record_item(
+        record_id=str(record_id),
+        item_data=item_data,
+        db=db,
+        current_user=current_user,
     )
 
 

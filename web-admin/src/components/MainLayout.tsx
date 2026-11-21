@@ -158,7 +158,12 @@ export default function MainLayout() {
           background: '#ffffff',
         }}
       >
-        <div className={`sidebar-logo ${collapsed ? 'collapsed' : ''}`}>
+        <div
+          className={`sidebar-logo ${collapsed ? 'collapsed' : ''}`}
+          onClick={() => navigate('/dashboard')}
+          title="返回工作台"
+          style={{ cursor: 'pointer' }}
+        >
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -203,7 +208,14 @@ export default function MainLayout() {
         <div className="sidebar-menu-wrapper">
           <Menu
             mode="inline"
-            selectedKeys={[location.pathname]}
+            selectedKeys={[(() => {
+              const p = location.pathname
+              if (p.startsWith('/audit-projects')) return '/audit-projects'
+              if (p.startsWith('/tasks') || p.startsWith('/inspection')) return '/tasks'
+              if (p.startsWith('/records') || p.startsWith('/record/')) return '/records'
+              if (p.startsWith('/audit-item/')) return '/my-audit-tasks'
+              return p
+            })()]}
             defaultOpenKeys={['现场工作', '项目管理', '基础配置']}
             items={menuItems}
             onClick={({ key }) => {

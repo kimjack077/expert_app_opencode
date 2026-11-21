@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, Tree, message, Space, Tag, Radio, InputNumber, Switch, Empty, Row, Col, Tooltip, Divider, RadioChangeEvent, Alert } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, CheckCircleOutlined, FolderOutlined, FileTextOutlined, PlusCircleOutlined, SaveOutlined, CloseOutlined, ArrowLeftOutlined, CopyOutlined, RobotOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, CheckCircleOutlined, FolderOutlined, FileTextOutlined, PlusCircleOutlined, SaveOutlined, CloseOutlined, ArrowLeftOutlined, CopyOutlined, RobotOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import { templateApi, industryApi } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { canManageTemplates, isAdminRole } from '@/utils/roles'
@@ -78,6 +78,12 @@ export default function Templates() {
   const role = useAuthStore((state) => state.user?.role)
   const canCreateTemplates = canManageTemplates(role)
   const [templates, setTemplates] = useState<any[]>([])
+  const [searchText, setSearchText] = useState('')
+  const [publishFilter, setPublishFilter] = useState<string | undefined>(undefined)
+  const [industryFilter, setIndustryFilter] = useState<string | undefined>(undefined)
+  const requestSeq = useRef(0)
+  const [listPage, setListPage] = useState(1)
+  const [listPageSize, setListPageSize] = useState(10)
   const [loading, setLoading] = useState(false)
   const [templateModal, setTemplateModal] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<any>(null)
@@ -112,9 +118,17 @@ export default function Templates() {
   const canEditSelectedTemplate = canCreateTemplates && selectedTemplate?.can_edit === true
 
   useEffect(() => {
-    fetchTemplates()
     fetchIndustries()
   }, [])
+
+  useEffect(() => {
+    setListPage(1)
+    const timer = setTimeout(fetchTemplates, 300)
+    return () => {
+      clearTimeout(timer)
+      requestSeq.current++
+    }
+  }, [searchText, publishFilter, industryFilter])
 
   const fetchIndustries = async () => {
     try {
@@ -126,16 +140,33 @@ export default function Templates() {
   }
 
   const fetchTemplates = async () => {
+    const seq = ++requestSeq.current
     setLoading(true)
     try {
-      // 后端默认 limit=20 且不返回 total；本页是前端分页，必须一次取够，
-      // 否则第 21 个模板之后永远翻不到。
-      const res: any = await templateApi.getTemplates({ limit: 100 })
-      setTemplates(res.data || [])
+      // 接口返回数组，按后端筛选分页取齐，再供表格分页，避免截断到前 100 条。
+      const items: any[] = []
+      const limit = 100
+      for (let skip = 0; ; skip += limit) {
+        const res: any = await templateApi.getTemplates({
+          skip,
+          limit,
+          search: searchText.trim() || undefined,
+          is_published: publishFilter ? publishFilter === 'published' : undefined,
+          industry_id: industryFilter,
+        })
+        if (seq !== requestSeq.current) return
+        const batch = res.data || []
+        items.push(...batch)
+        if (batch.length < limit) break
+      }
+      setTemplates(items)
     } catch (error) {
+      if (seq !== requestSeq.current) return
+      setTemplates([])
+      message.error('获取模板列表失败')
       console.error('Failed to fetch templates:', error)
     } finally {
-      setLoading(false)
+      if (seq === requestSeq.current) setLoading(false)
     }
   }
 
@@ -198,8 +229,8 @@ export default function Templates() {
           fetchTemplates()
         }
       }
-    } catch (error) {
-      message.error('操作失败')
+    } catch (error: any) {
+      message.error(error?.response?.data?.message || error?.response?.data?.detail || '操作失败')
     }
   }
 
@@ -856,8 +887,13 @@ export default function Templates() {
       title: '模板名称',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string) => (
-        <span style={{ fontWeight: 500, color: '#1a1a2e' }}>{name}</span>
+      render: (name: string, record: any) => (
+        <a
+          onClick={() => fetchTemplateDetail(record.id)}
+          style={{ fontWeight: 500, color: 'var(--primary-color)', cursor: 'pointer' }}
+        >
+          {name}
+        </a>
       )
     },
     {
@@ -1291,13 +1327,54 @@ export default function Templates() {
       </div>
 
       <Card variant="borderless">
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索模板名称、编码、类别或描述"
+            style={{ width: 240 }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          <Select
+            placeholder="发布状态"
+            allowClear
+            style={{ width: 130 }}
+            value={publishFilter}
+            onChange={(val) => setPublishFilter(val)}
+            options={[
+              { value: 'published', label: '已发布' },
+              { value: 'draft', label: '草稿' },
+            ]}
+          />
+          <Select
+            placeholder="所属行业"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            style={{ width: 180 }}
+            value={industryFilter}
+            onChange={(val) => setIndustryFilter(val)}
+            options={industries.map((ind: any) => ({ value: ind.id, label: ind.name }))}
+          />
+          {(searchText || publishFilter || industryFilter) && (
+            <Button onClick={() => { setSearchText(''); setPublishFilter(undefined); setIndustryFilter(undefined) }}>
+              重置
+            </Button>
+          )}
+          <Button icon={<ReloadOutlined />} onClick={() => fetchTemplates()} loading={loading}>
+            刷新
+          </Button>
+        </Space>
         <Table
           columns={columns}
           dataSource={templates}
           loading={loading}
           rowKey="id"
           pagination={{
-            pageSize: 10,
+            current: listPage,
+            pageSize: listPageSize,
+            onChange: (page, pageSize) => { setListPage(page); setListPageSize(pageSize) },
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total) => `共 ${total} 条记录`,

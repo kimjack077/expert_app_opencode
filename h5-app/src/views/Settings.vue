@@ -22,7 +22,7 @@
               <span class="item-label">消息通知</span>
               <span class="item-desc">接收任务提醒和系统通知</span>
             </div>
-            <van-switch v-model="settings.notification" size="22" />
+            <van-switch v-model="settings.notification" size="22" @click.stop @change="onSettingToggle('notification')" />
           </div>
           
           <div class="settings-item" @click="toggleSound">
@@ -37,7 +37,7 @@
               <span class="item-label">提示音</span>
               <span class="item-desc">操作反馈声音</span>
             </div>
-            <van-switch v-model="settings.sound" size="22" />
+            <van-switch v-model="settings.sound" size="22" @click.stop @change="onSettingToggle('sound')" />
           </div>
           
           <div class="settings-item" @click="toggleVibration">
@@ -53,7 +53,7 @@
               <span class="item-label">震动反馈</span>
               <span class="item-desc">操作时震动提示</span>
             </div>
-            <van-switch v-model="settings.vibration" size="22" />
+            <van-switch v-model="settings.vibration" size="22" @click.stop @change="onSettingToggle('vibration')" />
           </div>
         </div>
       </div>
@@ -71,7 +71,7 @@
             </div>
             <div class="item-content">
               <span class="item-label">清除缓存</span>
-              <span class="item-desc">清除本地缓存数据</span>
+              <span class="item-desc">{{ cacheDesc }}</span>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="item-arrow">
               <path d="m9 18 6-6-6-6"/>
@@ -160,8 +160,10 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { showToast, showConfirmDialog } from 'vant'
-import { changePassword as changePasswordApi } from '../api/auth.js'
+import { showToast, closeToast, showConfirmDialog } from 'vant'
+import { changePassword as changePasswordApi, getCurrentUser } from '../api/auth.js'
+import { getRecords } from '../api/records.js'
+import { clearCache as clearOfflineCache, getCacheSummary } from '@/utils/offlineCache.js'
 
 const router = useRouter()
 
@@ -178,46 +180,79 @@ const pwdForm = reactive({
   confirm_password: ''
 })
 
+const cacheDesc = ref('清除本地离线任务与临时缓存')
+const exporting = ref(false)
+
+const refreshCacheSummary = () => {
+  try {
+    const summary = getCacheSummary()
+    if (summary && summary.count > 0) {
+      const kb = Math.max(1, Math.round((summary.bytes || 0) / 1024))
+      cacheDesc.value = `已缓存 ${summary.count} 项离线数据（约 ${kb} KB）`
+    } else {
+      cacheDesc.value = '当前无本地离线缓存'
+    }
+  } catch {
+    cacheDesc.value = '清除本地离线任务与临时缓存'
+  }
+}
+
 const loadSettings = () => {
   const saved = localStorage.getItem('app_settings')
   if (saved) {
-    settings.value = { ...settings.value, ...JSON.parse(saved) }
+    try {
+      settings.value = { ...settings.value, ...JSON.parse(saved) }
+    } catch {
+      // ignore corrupted settings
+    }
   }
+  refreshCacheSummary()
 }
 
 const saveSettings = () => {
   localStorage.setItem('app_settings', JSON.stringify(settings.value))
 }
 
+const settingLabels = {
+  notification: '消息通知',
+  sound: '提示音',
+  vibration: '震动反馈',
+}
+
+const onSettingToggle = (key) => {
+  saveSettings()
+  const label = settingLabels[key] || ''
+  showToast(settings.value[key] ? `已开启${label}` : `已关闭${label}`)
+}
+
 const toggleNotification = () => {
   settings.value.notification = !settings.value.notification
-  saveSettings()
-  showToast(settings.value.notification ? '已开启消息通知' : '已关闭消息通知')
+  onSettingToggle('notification')
 }
 
 const toggleSound = () => {
   settings.value.sound = !settings.value.sound
-  saveSettings()
-  showToast(settings.value.sound ? '已开启提示音' : '已关闭提示音')
+  onSettingToggle('sound')
 }
 
 const toggleVibration = () => {
   settings.value.vibration = !settings.value.vibration
-  saveSettings()
-  showToast(settings.value.vibration ? '已开启震动反馈' : '已关闭震动反馈')
+  onSettingToggle('vibration')
 }
 
 const clearCache = async () => {
   try {
     await showConfirmDialog({
       title: '清除缓存',
-      message: '确定要清除本地缓存数据吗？这不会影响您的账户数据。',
+      message: '确定要清除本地离线缓存数据吗？这不会影响已提交到云端的记录。',
       confirmButtonText: '清除',
       cancelButtonText: '取消',
     })
+    clearOfflineCache()
     localStorage.removeItem('cached_enterprises')
     localStorage.removeItem('cached_templates')
-    showToast({ type: 'success', message: '缓存已清除' })
+    refreshCacheSummary()
+    showToast({ type: 'success', message: '本地缓存已清除' })
   } catch (error) {
     if (error?.message !== 'cancel' && error !== 'cancel') {
       console.error('清除缓存失败:', error)
@@ -225,8 +260,64 @@ const clearCache = async () => {
   }
 }
 
-const exportData = () => {
-  showToast('数据导出功能开发中')
+const exportData = async () => {
+  if (exporting.value) return
+  exporting.value = true
+  let resultMessage = ''
+  let resultType = 'text'
+  try {
+    showToast({ type: 'loading', message: '正在准备导出数据...', forbidClick: true, duration: 0 })
+    const userRes = await getCurrentUser()
+    if (!userRes.data?.id) throw new Error('无法获取当前检查员信息')
+    const items = []
+    const pageSize = 100
+    for (let page = 1; ; page++) {
+      const res = await getRecords({ page, limit: pageSize, inspector_id: userRes.data.id })
+      const batch = res.data?.items || []
+      items.push(...batch)
+      const total = res.data?.total
+      if (batch.length < pageSize || (total != null && items.length >= Number(total))) break
+    }
+    if (items.length === 0) {
+      resultMessage = '暂无可导出的检查记录'
+      return
+    }
+    const statusMap = { draft: '草稿', submitted: '已提交' }
+    const resultMap = { pass: '合格', partial_pass: '基本合格', fail: '不合格' }
+    const escapeCell = (v) => {
+      const s = v === null || v === undefined ? '' : String(v)
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const headers = ['企业名称', '检查模板', '状态', '总体结论', '总分', '检查日期']
+    const rows = items.map((r) => [
+      r.enterprise_name || r.enterprise?.name || '未指定企业',
+      r.template?.name || '未知模板',
+      statusMap[r.status] || r.status || '',
+      resultMap[r.overall_result] || '待判定',
+      r.total_score ?? '',
+      r.inspection_date ? String(r.inspection_date).slice(0, 10) : '',
+    ])
+    const csv = '\uFEFF' + [headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const today = new Date().toISOString().slice(0, 10)
+    link.href = url
+    link.download = `易审通_检查记录_${today}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    resultType = 'success'
+    resultMessage = `已导出 ${items.length} 条记录`
+  } catch (error) {
+    console.error('导出失败:', error)
+    resultMessage = '导出失败，请稍后重试'
+  } finally {
+    closeToast()
+    exporting.value = false
+    if (resultMessage) showToast({ type: resultType, message: resultMessage })
+  }
 }
 
 const changePassword = () => {

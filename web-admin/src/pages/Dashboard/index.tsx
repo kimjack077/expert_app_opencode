@@ -138,7 +138,11 @@ export default function Dashboard() {
       item.compliant_items,
       item.non_compliant_items,
     ])
-    return [headers, ...rows].map((row) => row.join(',')).join('\n')
+    const escapeCell = (v: any) => {
+      const s = v === null || v === undefined ? '' : String(v)
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    return [headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\n')
   }
 
   const downloadCSV = (content: string, filename: string) => {

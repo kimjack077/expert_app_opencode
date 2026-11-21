@@ -69,6 +69,8 @@ async def get_templates(
     limit: int = Query(20, ge=1, le=100),
     category: Optional[str] = None,
     is_published: Optional[bool] = None,
+    industry_id: Optional[UUID] = None,
+    search: Optional[str] = Query(None, description="按模板名称/编码/描述模糊搜索"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -96,8 +98,20 @@ async def get_templates(
         query = query.where(InspectionTemplate.category == category)
     if is_published is not None:
         query = query.where(InspectionTemplate.is_published == is_published)
+    if industry_id is not None:
+        query = query.where(InspectionTemplate.industry_id == industry_id)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                InspectionTemplate.name.ilike(pattern),
+                InspectionTemplate.code.ilike(pattern),
+                InspectionTemplate.description.ilike(pattern),
+                InspectionTemplate.category.ilike(pattern),
+            )
+        )
 
-    query = query.order_by(InspectionTemplate.created_at.desc()).offset(skip).limit(limit)
+    query = query.order_by(InspectionTemplate.created_at.desc(), InspectionTemplate.id.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     templates = result.scalars().all()
 

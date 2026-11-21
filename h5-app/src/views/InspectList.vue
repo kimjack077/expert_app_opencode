@@ -212,11 +212,12 @@ const progressColor = computed(() => {
 
 // 方法
 const isResultFilled = (result) => {
-  return (
+  if (!result) return false
+  return Boolean(
     result.radio_value ||
-    result.score_value ||
-    result.numeric_value ||
-    result.text_value ||
+    (result.score_value !== null && result.score_value !== undefined && result.score_value !== '') ||
+    (result.numeric_value !== null && result.numeric_value !== undefined && result.numeric_value !== '') ||
+    (typeof result.text_value === 'string' ? result.text_value.trim() : result.text_value) ||
     (result.multi_value && result.multi_value.length > 0)
   )
 }
@@ -238,7 +239,7 @@ const getResultText = (item) => {
   if (result.score_value !== undefined && result.score_value !== null) {
     return `${result.score_value}分`
   }
-  if (result.numeric_value) {
+  if (result.numeric_value !== null && result.numeric_value !== undefined && result.numeric_value !== '') {
     return result.numeric_value + (item.unit || '')
   }
   

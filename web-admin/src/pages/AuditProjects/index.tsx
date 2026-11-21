@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import {
-  Card, Table, Button, Space, Tag, message, Modal, Dropdown, Input, Select, Tooltip,
+  Card, Table, Button, Space, Tag, message, Modal, Dropdown, Input, Select, Tooltip, Typography,
 } from 'antd'
 import {
-  PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, MoreOutlined, SearchOutlined,
+  PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, MoreOutlined, SearchOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { auditProjectApi } from '@/services/auditProjectApi'
@@ -124,6 +124,15 @@ export default function AuditProjects() {
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
+      render: (title: string, record: AuditProject) => (
+        <Typography.Link
+          strong
+          onClick={() => navigate(`/audit-projects/${record.id}`)}
+          style={{ color: 'var(--text-main)' }}
+        >
+          {title}
+        </Typography.Link>
+      ),
     },
     {
       title: '审核类型',
@@ -255,7 +264,12 @@ export default function AuditProjects() {
             allowClear
             style={{ width: 140 }}
             value={draftFilters.status}
-            onChange={(value) => setDraftFilters((prev) => ({ ...prev, status: value }))}
+            onChange={(value) => {
+              const next = { ...draftFilters, status: value }
+              setDraftFilters(next)
+              setPagination((prev) => ({ ...prev, current: 1 }))
+              setFilters(next)
+            }}
             options={STATUS_OPTIONS}
           />
           <Select
@@ -263,13 +277,21 @@ export default function AuditProjects() {
             allowClear
             style={{ width: 140 }}
             value={draftFilters.audit_type}
-            onChange={(value) => setDraftFilters((prev) => ({ ...prev, audit_type: value }))}
+            onChange={(value) => {
+              const next = { ...draftFilters, audit_type: value }
+              setDraftFilters(next)
+              setPagination((prev) => ({ ...prev, current: 1 }))
+              setFilters(next)
+            }}
             options={AUDIT_TYPE_OPTIONS}
           />
           <Button type="primary" onClick={handleSearch}>
             查询
           </Button>
           <Button onClick={handleReset}>重置</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => fetchProjects()} loading={loading}>
+            刷新
+          </Button>
         </Space>
 
         <Table

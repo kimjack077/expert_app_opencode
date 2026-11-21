@@ -130,11 +130,22 @@ export const getCachedEntry = (kind, id) => {
 
 export const isCached = (kind, id) => !!getCachedEntry(kind, id)
 
-/** 缓存总览：条数 + 最近一次缓存时间 */
+/** 缓存总览：条数、localStorage 近似占用字节数与最近缓存时间 */
 export const getCacheSummary = () => {
   const entries = listCachedEntries()
+  const store = storage()
+  let bytes = 0
+  if (store) {
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i)
+      if (key?.startsWith(`${VERSION_PREFIX}:`)) {
+        bytes += (key.length + (store.getItem(key) || '').length) * 2
+      }
+    }
+  }
   return {
     count: entries.length,
+    bytes,
     lastCachedAt: entries.length > 0 ? entries[0].cachedAt || 0 : 0,
   }
 }
@@ -146,8 +157,15 @@ export const removeCachedEntry = (kind, id) => {
 }
 
 export const clearCache = () => {
-  readIndex().forEach((e) => removeKey(entryKey(e.kind, e.id)))
-  removeKey(INDEX_KEY)
+  const store = storage()
+  const keys = []
+  if (store) {
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i)
+      if (key?.startsWith(`${VERSION_PREFIX}:`)) keys.push(key)
+    }
+  }
+  keys.forEach(removeKey)
   notifyChanged()
 }
 

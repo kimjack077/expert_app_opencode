@@ -6,9 +6,9 @@
         <div class="header-top">
           <div class="header-info">
             <h1 class="page-title">检查任务</h1>
-            <p class="page-subtitle">{{ totalCount }} 个任务</p>
+            <p class="page-subtitle">{{ offlineOnly ? filteredTasks.length : totalCount }} 个任务</p>
           </div>
-          <div class="header-actions">
+          <div class="header-actions" :class="{ 'has-active-filter': hasExtraFilter }" @click="showFilterSheet = true" role="button" aria-label="筛选与排序">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18"/>
               <path d="M7 12h10"/>
@@ -17,17 +17,17 @@
           </div>
         </div>
         <div class="stats-row">
-          <div class="stat-item">
+          <div class="stat-item" @click="selectStatusTab('pending')" style="cursor:pointer">
             <span class="stat-value">{{ statusCounts.pending }}</span>
             <span class="stat-label">待处理</span>
           </div>
           <div class="stat-divider"></div>
-          <div class="stat-item">
+          <div class="stat-item" @click="selectStatusTab('in_progress')" style="cursor:pointer">
             <span class="stat-value">{{ statusCounts.in_progress }}</span>
             <span class="stat-label">进行中</span>
           </div>
           <div class="stat-divider"></div>
-          <div class="stat-item">
+          <div class="stat-item" @click="selectStatusTab('completed')" style="cursor:pointer">
             <span class="stat-value">{{ statusCounts.completed }}</span>
             <span class="stat-label">已完成</span>
           </div>
@@ -59,7 +59,7 @@
         :key="tab.value"
         class="filter-tab"
         :class="{ active: activeFilter === tab.value }"
-        @click="activeFilter = tab.value"
+        @click="selectStatusTab(tab.value)"
       >
         {{ tab.label }}
       </div>
@@ -68,6 +68,8 @@
     <van-pull-refresh v-model="refreshing" @refresh="onRefresh" class="refresh-container">
       <van-list
         v-model:loading="loading"
+        v-model:error="loadError"
+        error-text="加载失败，点击重试"
         :finished="finished"
         finished-text=""
         @load="onLoad"
@@ -153,6 +155,15 @@
       </van-list>
     </van-pull-refresh>
 
+    <van-action-sheet
+      v-model:show="showFilterSheet"
+      title="筛选与排序"
+      :actions="extraFilterActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onSelectExtraFilter"
+    />
+
     <BottomNav />
   </div>
 </template>
@@ -162,7 +173,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getTasks, getTaskStatistics } from '../api/tasks.js'
 import { formatTaskDisplay, taskDescription } from '../utils/display.js'
-import { CACHE_EVENT, listCachedEntries } from '@/utils/offlineCache.js'
+import { CACHE_EVENT, getCachedEntry, listCachedEntries } from '@/utils/offlineCache.js'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
@@ -173,6 +184,8 @@ const tasks = ref([])
 const totalCount = ref(0)
 const stats = ref({ total: 0, pending: 0, in_progress: 0, completed: 0, cancelled: 0 })
 const loading = ref(false)
+const loadError = ref(false)
+let fetchSeq = 0
 const finished = ref(false)
 const refreshing = ref(false)
 const page = ref(1)
@@ -180,11 +193,23 @@ const pageSize = 10
 
 // 已缓存到本机的任务，列表上标「离线可用」
 const cachedTaskIds = ref(new Set())
+const cachedTasks = ref([])
 
 const syncCachedTasks = () => {
-  cachedTaskIds.value = new Set(
-    listCachedEntries().filter((e) => e.kind === 'task').map((e) => e.id),
-  )
+  const entries = listCachedEntries().filter((e) => e.kind === 'task')
+  cachedTaskIds.value = new Set(entries.map((e) => String(e.id)))
+  cachedTasks.value = entries.map((entry) => {
+    const task = getCachedEntry('task', entry.id)?.payload?.task
+    if (task) return { ...task, id: task.id || entry.id }
+    return {
+      id: entry.id,
+      title: entry.title || '检查任务',
+      target_name: entry.subtitle || '',
+      created_at: entry.cachedAt,
+      status: 'pending',
+      priority: 'normal',
+    }
+  })
 }
 
 const filterTabs = [
@@ -203,14 +228,68 @@ const statusCounts = computed(() => {
   }
 })
 
-const filteredTasks = computed(() => {
-  // 搜索交给后端（按标题/任务编号/检查对象模糊匹配），此处只做状态筛选，
-  // 避免用不存在的字段在本地二次过滤把后端命中的结果又丢掉。
-  let result = tasks.value
-  if (activeFilter.value !== 'all') {
-    result = result.filter(t => t.status === activeFilter.value)
+const showFilterSheet = ref(false)
+const priorityFilter = ref('')
+const offlineOnly = ref(false)
+const sortBy = ref('created_at')
+
+const hasExtraFilter = computed(() => !!(priorityFilter.value || offlineOnly.value || sortBy.value !== 'created_at'))
+
+const extraFilterActions = computed(() => [
+  { name: priorityFilter.value === '' && !offlineOnly.value && sortBy.value === 'created_at' ? '✓ 全部任务（默认排序）' : '全部任务（默认排序）', value: 'reset' },
+  { name: priorityFilter.value === 'high' ? '✓ 仅看高优先级' : '仅看高优先级', value: 'priority_high' },
+  { name: offlineOnly.value ? '✓ 仅看本机已缓存任务' : '仅看本机已缓存任务', value: 'offline_only' },
+  { name: sortBy.value === 'scheduled_at' ? '✓ 按计划时间排序' : '按计划时间排序', value: 'sort_scheduled' },
+])
+
+const selectStatusTab = (val) => {
+  if (activeFilter.value === val) return
+  activeFilter.value = val
+  resetAndFetch()
+}
+
+const matchesCachedTask = (task) => {
+  if (activeFilter.value !== 'all' && task.status !== activeFilter.value) return false
+  if (priorityFilter.value && task.priority !== priorityFilter.value) return false
+
+  const keyword = searchText.value.trim().toLowerCase()
+  if (!keyword) return true
+  return [task.title, task.task_no, task.target_name, task.target_address]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(keyword))
+}
+
+const compareCachedTasks = (left, right) => {
+  const field = sortBy.value === 'scheduled_at' ? 'scheduled_at' : 'created_at'
+  const leftTime = left[field] ? new Date(left[field]).getTime() : Number.NaN
+  const rightTime = right[field] ? new Date(right[field]).getTime() : Number.NaN
+
+  if (Number.isNaN(leftTime) && Number.isNaN(rightTime)) return 0
+  if (Number.isNaN(leftTime)) return 1
+  if (Number.isNaN(rightTime)) return -1
+  return rightTime - leftTime
+}
+
+const onSelectExtraFilter = (action) => {
+  if (action.value === 'reset') {
+    priorityFilter.value = ''
+    offlineOnly.value = false
+    sortBy.value = 'created_at'
+  } else if (action.value === 'priority_high') {
+    priorityFilter.value = priorityFilter.value === 'high' ? '' : 'high'
+  } else if (action.value === 'offline_only') {
+    offlineOnly.value = !offlineOnly.value
+  } else if (action.value === 'sort_scheduled') {
+    sortBy.value = sortBy.value === 'scheduled_at' ? 'created_at' : 'scheduled_at'
   }
-  return result
+  resetAndFetch()
+}
+
+const filteredTasks = computed(() => {
+  if (offlineOnly.value) {
+    return cachedTasks.value.filter(matchesCachedTask).sort(compareCachedTasks)
+  }
+  return tasks.value
 })
 
 const getStatusText = (status) => {
@@ -246,12 +325,29 @@ const formatDate = (dateStr) => {
 }
 
 const fetchTasks = async (isRefresh = false) => {
+  const seq = ++fetchSeq
+  loading.value = true
+  loadError.value = false
   try {
-    const res = await getTasks({
+    // 本机缓存筛选不能依赖服务端分页，否则缓存任务不在第一页时会被误判为不存在。
+    // 直接读取完整缓存列表，也支持断网时查看已缓存任务。
+    if (offlineOnly.value) {
+      syncCachedTasks()
+      finished.value = true
+      page.value = 2
+      return true
+    }
+
+    const queryParams = {
       page: page.value,
       page_size: pageSize,
       search: searchText.value,
-    })
+      sort_by: sortBy.value,
+    }
+    if (activeFilter.value !== 'all') queryParams.status = activeFilter.value
+    if (priorityFilter.value) queryParams.priority = priorityFilter.value
+    const res = await getTasks(queryParams)
+    if (seq !== fetchSeq) return false
 
     const items = res.data?.items || []
     if (isRefresh) {
@@ -265,8 +361,15 @@ const fetchTasks = async (isRefresh = false) => {
     if (items.length < pageSize) {
       finished.value = true
     }
+    page.value++
+    return true
   } catch (error) {
+    if (seq !== fetchSeq) return false
     console.error('获取任务失败:', error)
+    loadError.value = true
+    return false
+  } finally {
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
@@ -289,23 +392,26 @@ const fetchStatistics = async () => {
 
 const onLoad = async () => {
   await fetchTasks()
-  loading.value = false
-  page.value++
 }
 
 const onRefresh = async () => {
   page.value = 1
   finished.value = false
-  await Promise.all([fetchTasks(true), fetchStatistics()])
+  await Promise.all([
+    fetchTasks(true),
+    offlineOnly.value ? Promise.resolve() : fetchStatistics(),
+  ])
   refreshing.value = false
 }
 
-const onSearch = () => {
+const resetAndFetch = () => {
   page.value = 1
   finished.value = false
   tasks.value = []
   onLoad()
 }
+
+const onSearch = () => resetAndFetch()
 
 const clearSearch = () => {
   searchText.value = ''
@@ -327,6 +433,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  fetchSeq++
   window.removeEventListener(CACHE_EVENT, syncCachedTasks)
 })
 </script>

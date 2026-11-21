@@ -73,6 +73,35 @@
         </div>
       </div>
 
+      <!-- 现场快捷筛选与定位工具条 -->
+      <div v-if="totalCheckItems > 0" class="quick-filter-bar">
+        <div class="quick-filter-pills">
+          <button
+            v-for="pill in itemFilterPills"
+            :key="pill.value"
+            type="button"
+            class="qf-pill"
+            :class="{ active: itemFilterMode === pill.value }"
+            @click="itemFilterMode = pill.value"
+          >
+            {{ pill.label }}<span class="qf-count">{{ pill.count }}</span>
+          </button>
+        </div>
+        <div class="quick-filter-actions">
+          <button type="button" class="qf-action-btn" @click="toggleAllCategories">
+            {{ allCategoriesExpanded ? '折叠全部分类' : '展开全部分类' }}
+          </button>
+          <button
+            v-if="!isReadonlyMode && completedCount < totalCheckItems"
+            type="button"
+            class="qf-action-btn primary"
+            @click="jumpToNextIncomplete"
+          >
+            定位下一未填
+          </button>
+        </div>
+      </div>
+
       <!-- 检查项列表 -->
       <div class="items-container">
         <van-empty
@@ -96,7 +125,8 @@
 
           <!-- 检查项 - 带快速录入 -->
           <div
-            v-else-if="isItemVisible(item)"
+            v-else-if="isItemVisible(item) && matchesItemFilter(item)"
+            :data-item-id="item.id"
             class="check-item-card"
             :class="{ 'has-result': isItemCompleted(item) }"
             :style="{ paddingLeft: (item.level * 16 + 16) + 'px' }"
@@ -142,7 +172,7 @@
                   >{{ opt.label }}</van-radio>
                 </van-radio-group>
                 <div
-                  v-if="getItemResultOptions(item).some(o => o.value === 'not_applicable' || o.value === 'na')"
+                  v-if="quickInputs[item.id]?.radio_value === 'not_applicable' || quickInputs[item.id]?.radio_value === 'na'"
                   class="na-tip"
                 >
                   「不适用」= 该条款不涉及本次受审对象，不计入不合格、不触发整改、不纳入合规率
@@ -523,13 +553,14 @@ const resetState = () => {
   offlineMode.value = false
   cachedEntry.value = null
   offlineWriteWarned = false
+  itemFilterMode.value = 'all'
 }
 
 const flattenItems = computed(() => {
   if (!record.value?.template?.items) return []
 
   const result = []
-  const flatten = (items, level = 0) => {
+  const flatten = (items, level = 0, parentId = null) => {
     items.forEach(item => {
       const hasChildren = Array.isArray(item.children) && item.children.length > 0
       // 兜底：只要节点下挂着子项，就一律按「分类目录」处理，
@@ -538,10 +569,11 @@ const flattenItems = computed(() => {
       result.push({
         ...item,
         level,
+        parent_id: item.parent_id ?? parentId,
         is_category: item.is_category === true || hasChildren,
       })
       if (hasChildren) {
-        flatten(item.children, level + 1)
+        flatten(item.children, level + 1, item.id)
       }
     })
   }
@@ -1356,6 +1388,75 @@ const initExpandedItems = () => {
   expandedItems.value = flattenItems.value
     .filter(item => item.is_category)
     .map(item => item.id)
+}
+
+const itemFilterMode = ref('all')
+
+const allCategoryIds = computed(() =>
+  flattenItems.value.filter(i => i.is_category).map(i => i.id)
+)
+
+const allCategoriesExpanded = computed(() =>
+  allCategoryIds.value.length > 0 &&
+  allCategoryIds.value.every(id => expandedItems.value.includes(id))
+)
+
+const toggleAllCategories = () => {
+  if (allCategoriesExpanded.value) {
+    expandedItems.value = []
+  } else {
+    expandedItems.value = [...allCategoryIds.value]
+  }
+}
+
+const isItemFailed = (item) => {
+  const q = quickInputs.value[item.id]
+  const r = itemResults.value[item.id]
+  const rv = q?.radio_value || r?.radio_value || r?.result
+  return rv === 'fail' || rv === 'non_compliant'
+}
+
+const matchesItemFilter = (item) => {
+  if (item.is_category) return true
+  if (itemFilterMode.value === 'incomplete') return !isItemCompleted(item)
+  if (itemFilterMode.value === 'fail') return isItemFailed(item)
+  if (itemFilterMode.value === 'required') return item.is_required !== false
+  return true
+}
+
+const itemFilterPills = computed(() => {
+  const leaves = flattenItems.value.filter(i => !i.is_category)
+  return [
+    { value: 'all', label: '全部', count: leaves.length },
+    { value: 'incomplete', label: '未完成', count: leaves.filter(i => !isItemCompleted(i)).length },
+    { value: 'fail', label: '不合格', count: leaves.filter(i => isItemFailed(i)).length },
+    { value: 'required', label: '必填', count: leaves.filter(i => i.is_required !== false).length },
+  ]
+})
+
+const jumpToNextIncomplete = () => {
+  const leaves = flattenItems.value.filter(i => !i.is_category && !isItemCompleted(i))
+  const target = leaves.find(i => i.is_required !== false) || leaves[0]
+  if (!target) {
+    showToast('所有检查项均已完成')
+    return
+  }
+  // 确保目标项的所有父分类已展开
+  let pid = target.parent_id
+  while (pid) {
+    if (!expandedItems.value.includes(pid)) {
+      expandedItems.value.push(pid)
+    }
+    const parentNode = flattenItems.value.find(i => i.id === pid)
+    pid = parentNode?.parent_id
+  }
+  itemFilterMode.value = 'all'
+  setTimeout(() => {
+    const el = document.querySelector(`[data-item-id="${target.id}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, 60)
 }
 
 const toggleCategory = (itemId) => {
@@ -2793,5 +2894,77 @@ watch(
 
 :deep(.van-checkbox__label) {
   font-size: 14px;
+}
+
+.quick-filter-bar {
+  background: var(--bg-white, #fff);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-light, #e2e8f0);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quick-filter-pills {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.quick-filter-pills::-webkit-scrollbar {
+  display: none;
+}
+
+.qf-pill {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.qf-pill.active {
+  background: #0369a1;
+  border-color: #0369a1;
+  color: #fff;
+  font-weight: 500;
+}
+
+.qf-count {
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.quick-filter-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.qf-action-btn {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.qf-action-btn.primary {
+  border-color: #0369a1;
+  color: #0369a1;
+  background: #f0f9ff;
+  font-weight: 500;
 }
 </style>

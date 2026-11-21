@@ -25,6 +25,7 @@ export default function Tasks() {
   const [statusFilter, setStatusFilter] = useState<string | null>(
     searchParams.get('status')
   )
+  const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
   // 服务端搜索关键词（输入防抖后生效），搜索时重置回第一页
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -58,7 +59,7 @@ export default function Tasks() {
 
   useEffect(() => {
     void fetchTasks()
-  }, [statusFilter, searchKeyword, pagination.current, pagination.pageSize])
+  }, [statusFilter, priorityFilter, searchKeyword, pagination.current, pagination.pageSize])
 
   const fetchUsers = async () => {
     if (!isAdminRole(user?.role)) return
@@ -81,6 +82,7 @@ export default function Tasks() {
         limit: pagination.pageSize,
       }
       if (statusFilter) params.status = statusFilter
+      if (priorityFilter) params.priority = priorityFilter
       if (searchKeyword) params.search = searchKeyword
       const res: any = await taskApi.getTasks(params)
       setTasks(res.data?.items || [])
@@ -116,16 +118,6 @@ export default function Tasks() {
       fetchTasks()
     } catch (error: any) {
       message.error(error.response?.data?.message || error.response?.data?.detail || '创建失败')
-    }
-  }
-
-  const handleStart = async (id: string) => {
-    try {
-      await taskApi.startTask(id)
-      message.success('任务已开始')
-      fetchTasks()
-    } catch (error) {
-      message.error('操作失败')
     }
   }
 
@@ -167,9 +159,11 @@ export default function Tasks() {
               {d.primary}
             </Typography.Link>
             {d.secondary && (
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {d.secondary}
-              </Typography.Text>
+              <div style={{ marginTop: 2 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {d.secondary}
+                </Typography.Text>
+              </div>
             )}
             <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{record.task_no}</div>
           </div>
@@ -234,14 +228,16 @@ export default function Tasks() {
               查看检查结果
             </Button>
           )}
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => navigate(`/tasks/${record.id}`)}
-          >
-            查看
-          </Button>
+          {record.status !== 'completed' && (
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/tasks/${record.id}`)}
+            >
+              查看
+            </Button>
+          )}
           <Popconfirm
             title="确认删除"
             description="确定要删除这个任务吗？"
@@ -289,6 +285,24 @@ export default function Tasks() {
               { value: 'completed', label: '已完成' },
             ]}
           />
+          <Select
+            placeholder="优先级"
+            allowClear
+            style={{ width: 120 }}
+            value={priorityFilter}
+            onChange={(value) => {
+              setPriorityFilter(value || null)
+              setPagination((prev) => ({ ...prev, current: 1 }))
+            }}
+            options={[
+              { value: 'high', label: '高优先级' },
+              { value: 'normal', label: '普通' },
+              { value: 'low', label: '低优先级' },
+            ]}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => fetchTasks()} loading={loading}>
+            刷新
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
             新建任务
           </Button>

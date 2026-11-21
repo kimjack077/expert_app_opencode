@@ -8,7 +8,7 @@
             <h1 class="page-title">检查记录</h1>
             <p class="page-subtitle">共 {{ total }} 条记录</p>
           </div>
-          <div class="header-actions">
+          <div class="header-actions" @click="showFilterSheet = true" role="button" aria-label="按结论筛选或新建检查">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18"/>
               <path d="M7 12h10"/>
@@ -17,24 +17,24 @@
           </div>
         </div>
         <div class="stats-row">
-          <div class="stat-item">
+          <div class="stat-item" @click="toggleResultFilter('pass')" style="cursor:pointer">
             <span class="stat-value">{{ resultCounts.pass }}</span>
             <span class="stat-label">合格</span>
           </div>
           <div class="stat-divider"></div>
-          <div class="stat-item">
+          <div class="stat-item" @click="toggleResultFilter('partial_pass')" style="cursor:pointer">
             <span class="stat-value">{{ resultCounts.partial_pass }}</span>
             <span class="stat-label">基本合格</span>
           </div>
           <div class="stat-divider"></div>
-          <div class="stat-item">
+          <div class="stat-item" @click="toggleResultFilter('fail')" style="cursor:pointer">
             <span class="stat-value">{{ resultCounts.fail }}</span>
             <span class="stat-label">不合格</span>
           </div>
           <div class="stat-divider"></div>
           <!-- 待判定：草稿或未出总体结论的记录。
                此前徽章只有三档，三项之和不等于「共 N 条」，客户会问「剩下的是哪几条」。 -->
-          <div class="stat-item">
+          <div class="stat-item" @click="toggleResultFilter('pending')" style="cursor:pointer">
             <span class="stat-value">{{ resultCounts.pending }}</span>
             <span class="stat-label">待判定</span>
           </div>
@@ -59,7 +59,7 @@
         :key="tab.value"
         class="filter-tab"
         :class="{ active: activeFilter === tab.value }"
-        @click="activeFilter = tab.value"
+        @click="selectStatusTab(tab.value)"
       >
         {{ tab.label }}
       </div>
@@ -166,14 +166,23 @@
       </van-list>
     </van-pull-refresh>
 
+    <van-action-sheet
+      v-model:show="showFilterSheet"
+      title="结论筛选与快捷操作"
+      :actions="resultFilterActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onSelectResultAction"
+    />
+
     <BottomNav />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getRecords } from '../api/records'
+import { getRecords, getRecordStatistics } from '../api/records'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
@@ -197,14 +206,66 @@ const filterTabs = [
   { label: '已检查', value: 'submitted' },
 ]
 
+const showFilterSheet = ref(false)
+const resultFilter = ref('')
+const recordStats = ref(null)
+
+const fetchRecordStats = async () => {
+  try {
+    const res = await getRecordStatistics()
+    if (res?.data?.results) {
+      recordStats.value = res.data
+    }
+  } catch (e) {
+    console.error('获取记录统计失败:', e)
+  }
+}
+
 const resultCounts = computed(() => {
-  const pass = records.value.filter(r => r.overall_result === 'pass').length
-  const partial = records.value.filter(r => r.overall_result === 'partial_pass').length
-  const fail = records.value.filter(r => r.overall_result === 'fail').length
-  // 待判定 = 后端总数扣除已出结论的，保证「四项之和 = 共 N 条」在页面上闭合
-  const pending = Math.max(total.value - pass - partial - fail, 0)
-  return { pass, partial_pass: partial, fail, pending }
+  if (recordStats.value?.results) {
+    const r = recordStats.value.results
+    return {
+      pass: r.pass ?? 0,
+      partial_pass: r.partial_pass ?? 0,
+      fail: r.fail ?? 0,
+      pending: r.pending ?? 0,
+    }
+  }
+  return { pass: '—', partial_pass: '—', fail: '—', pending: '—' }
 })
+
+const resultFilterActions = computed(() => [
+  { name: resultFilter.value === '' ? '✓ 全部结论' : '全部结论', value: '' },
+  { name: resultFilter.value === 'pass' ? '✓ 仅看合格' : '仅看合格', value: 'pass' },
+  { name: resultFilter.value === 'partial_pass' ? '✓ 仅看基本合格' : '仅看基本合格', value: 'partial_pass' },
+  { name: resultFilter.value === 'fail' ? '✓ 仅看不合格' : '仅看不合格', value: 'fail' },
+  { name: resultFilter.value === 'pending' ? '✓ 仅看待判定' : '仅看待判定', value: 'pending' },
+  { name: '＋ 发起新日常检查', value: '__new__', color: '#0369A1' },
+])
+
+const selectStatusTab = (val) => {
+  if (activeFilter.value === val) return
+  activeFilter.value = val
+  resetAndFetch()
+}
+
+const toggleResultFilter = (val) => {
+  if (val === 'all') {
+    resultFilter.value = ''
+  } else {
+    resultFilter.value = resultFilter.value === val ? '' : val
+  }
+  resetAndFetch()
+}
+
+const onSelectResultAction = (action) => {
+  if (action.value === '__new__') {
+    router.push('/select-enterprise')
+    return
+  }
+  resultFilter.value = action.value
+  resetAndFetch()
+}
 
 const filteredRecords = computed(() => {
   // 关键词过滤已交给服务端 keyword 参数，这里只保留状态页签的本地筛选
@@ -259,6 +320,9 @@ const fetchRecords = async (isRefresh = false) => {
     }
     const keyword = searchText.value.trim()
     if (keyword) params.keyword = keyword
+    if (activeFilter.value !== 'all') params.status = activeFilter.value
+    if (resultFilter.value === 'pending') params.pending = true
+    else if (resultFilter.value) params.overall_result = resultFilter.value
     const res = await getRecords(params)
     if (seq !== fetchSeq) return
 
@@ -291,7 +355,7 @@ const onLoad = async () => {
 const onRefresh = async () => {
   page.value = 1
   finished.value = false
-  await fetchRecords(true)
+  await Promise.all([fetchRecords(true), fetchRecordStats()])
   refreshing.value = false
 }
 
@@ -311,6 +375,7 @@ watch(searchText, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(resetAndFetch, 300)
 })
+onMounted(() => { fetchRecordStats() })
 onUnmounted(() => clearTimeout(searchTimer))
 
 const onSearch = () => {

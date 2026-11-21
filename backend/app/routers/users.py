@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from typing import List, Optional
 from uuid import UUID
 
@@ -26,14 +26,28 @@ async def get_users(
     skip: int = 0,
     limit: int = 100,
     role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
     query = select(User).where(User.is_deleted == False)  # noqa: E712
     if role:
         query = query.where(User.role == role)
+    if is_active is not None:
+        query = query.where(User.is_active == is_active)
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                User.username.ilike(pattern),
+                User.full_name.ilike(pattern),
+                User.phone.ilike(pattern),
+                User.auditor_registration_no.ilike(pattern),
+            )
+        )
 
-    query = query.offset(skip).limit(limit)
+    query = query.order_by(User.created_at.desc(), User.id.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     users = result.scalars().all()
 

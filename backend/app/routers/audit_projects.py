@@ -1496,6 +1496,25 @@ async def update_nonconformity(
     return make_response(nc)
 
 
+@router.delete("/nonconformities/{nc_id}")
+async def delete_nonconformity(
+    nc_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除不符合项"""
+    result = await db.execute(
+        select(Nonconformity).where(Nonconformity.id == nc_id)
+    )
+    nc = result.scalar_one_or_none()
+    if not nc:
+        raise HTTPException(status_code=404, detail="不符合项不存在")
+    await ensure_project_access(db, nc.project_id, current_user, require_manage=True)
+    await db.delete(nc)
+    await db.commit()
+    return make_response({"id": str(nc_id), "deleted": True}, message="不符合项已删除")
+
+
 # ==================== AuditReport Routes ====================
 
 @router.post("/{project_id}/report")
@@ -1651,6 +1670,25 @@ async def update_meeting(
     await db.commit()
     await db.refresh(meeting)
     return make_response(meeting)
+
+
+@router.delete("/meetings/{meeting_id}")
+async def delete_meeting(
+    meeting_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """删除沟通会议记录"""
+    result = await db.execute(
+        select(CommunicationMeeting).where(CommunicationMeeting.id == meeting_id)
+    )
+    meeting = result.scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="沟通会议记录不存在")
+    await ensure_project_access(db, meeting.project_id, current_user, require_manage=True)
+    await db.delete(meeting)
+    await db.commit()
+    return make_response({"id": str(meeting_id), "deleted": True}, message="会议记录已删除")
 
 
 # ==================== Progress Tracking ====================

@@ -175,8 +175,11 @@ export default function Enterprises() {
       dataIndex: 'name', 
       key: 'name', 
       width: 200,
-      render: (name: string) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      render: (name: string, record: Enterprise) => (
+        <div
+          onClick={() => handleViewDetail(record.id)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+        >
           <div style={{
             width: 32,
             height: 32,
@@ -189,7 +192,7 @@ export default function Enterprises() {
           }}>
             <BankOutlined style={{ color: 'white', fontSize: 14 }} />
           </div>
-          <span style={{ fontWeight: 500 }}>{name}</span>
+          <span style={{ fontWeight: 500, color: 'var(--primary-color)' }}>{name}</span>
         </div>
       ),
     },
@@ -283,7 +286,11 @@ export default function Enterprises() {
             allowClear
             style={{ width: 160 }}
             value={searchParams.risk_level || undefined}
-            onChange={(v) => setSearchParams({ ...searchParams, risk_level: v || '' })}
+            onChange={(v) => {
+              const next = { ...searchParams, risk_level: v || '' }
+              setSearchParams(next)
+              fetchEnterprises(next, 1)
+            }}
           >
             <Select.Option value="A">A级（低风险）</Select.Option>
             <Select.Option value="B">B级（一般）</Select.Option>
@@ -295,7 +302,11 @@ export default function Enterprises() {
             allowClear
             style={{ width: 120 }}
             value={searchParams.status || undefined}
-            onChange={(v) => setSearchParams({ ...searchParams, status: v || '' })}
+            onChange={(v) => {
+              const next = { ...searchParams, status: v || '' }
+              setSearchParams(next)
+              fetchEnterprises(next, 1)
+            }}
           >
             <Select.Option value="active">正常</Select.Option>
             <Select.Option value="suspended">停业</Select.Option>

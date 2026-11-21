@@ -218,7 +218,9 @@ async def _sync_reaudited_task_to_formal_record(
 @router.get("", response_model=ApiResponse)
 async def get_tasks(
     status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None, description="按标题/任务编号/检查对象模糊搜索"),
+    priority: Optional[str] = Query(None, description="按优先级筛选: high / normal / low"),
+    search: Optional[str] = Query(None, description="按标题/任务编号/检查对象/地点模糊搜索"),
+    sort_by: Optional[str] = Query("created_at", description="排序字段: created_at / scheduled_at"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -237,6 +239,7 @@ async def get_tasks(
                 InspectionTask.title.ilike(pattern),
                 InspectionTask.task_no.ilike(pattern),
                 InspectionTask.target_name.ilike(pattern),
+                InspectionTask.target_address.ilike(pattern),
             )
         )
 
@@ -249,10 +252,18 @@ async def get_tasks(
         else:
             conditions.append(InspectionTask.status == status)
 
+    if priority and priority.strip():
+        conditions.append(InspectionTask.priority == priority.strip())
+
+    order_col = (
+        InspectionTask.scheduled_at.desc().nullslast()
+        if sort_by == "scheduled_at"
+        else InspectionTask.created_at.desc()
+    )
     base_query = (
         select(InspectionTask)
         .where(*conditions)
-        .order_by(InspectionTask.created_at.desc())
+        .order_by(order_col, InspectionTask.created_at.desc(), InspectionTask.id.desc())
     )
 
     # PERF：窗口函数随分页查询一次取回数据 + total，任何页都只需 1 次 DB 往返

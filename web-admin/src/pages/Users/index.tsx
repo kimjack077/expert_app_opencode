@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, Table, Button, Space, Modal, Form, Input, Select, Switch, message, Tag, Divider, Typography } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import { userApi } from '@/services/api';
 
 const { Option } = Select;
@@ -18,22 +18,50 @@ const Users: React.FC = () => {
     const [modalVisible, setModalVisible] = useState(false);
     const [form] = Form.useForm();
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [searchText, setSearchText] = useState('');
+    const [roleFilter, setRoleFilter] = useState<string | undefined>(undefined);
+    const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+    const requestSeq = useRef(0);
+    const [listPage, setListPage] = useState(1);
+    const [listPageSize, setListPageSize] = useState(10);
 
     const fetchData = async () => {
+        const seq = ++requestSeq.current;
         setLoading(true);
         try {
-            const res: any = await userApi.getUsers({ limit: 100 });
-            setData(res.data || []);
+            const items: any[] = [];
+            const limit = 100;
+            for (let skip = 0; ; skip += limit) {
+                const res: any = await userApi.getUsers({
+                    skip,
+                    limit,
+                    search: searchText.trim() || undefined,
+                    role: roleFilter,
+                    is_active: statusFilter ? statusFilter === 'active' : undefined,
+                });
+                if (seq !== requestSeq.current) return;
+                const batch = res.data || [];
+                items.push(...batch);
+                if (batch.length < limit) break;
+            }
+            setData(items);
         } catch (error) {
+            if (seq !== requestSeq.current) return;
+            setData([]);
             message.error('获取用户列表失败');
         } finally {
-            setLoading(false);
+            if (seq === requestSeq.current) setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        setListPage(1);
+        const timer = setTimeout(fetchData, 300);
+        return () => {
+            clearTimeout(timer);
+            requestSeq.current++;
+        };
+    }, [searchText, roleFilter, statusFilter]);
 
     const handleAdd = () => {
         setEditingId(null);
@@ -84,9 +112,10 @@ const Users: React.FC = () => {
             }
             setModalVisible(false);
             fetchData();
-        } catch (error) {
+        } catch (error: any) {
+            if (error?.errorFields) return;
             console.error(error);
-            message.error('操作失败，请检查输入或重试');
+            message.error(error?.response?.data?.message || error?.response?.data?.detail || '操作失败，请检查输入或重试');
         }
     };
 
@@ -106,14 +135,15 @@ const Users: React.FC = () => {
             dataIndex: 'role',
             key: 'role',
             render: (role: string) => {
-                const roles: Record<string, string> = {
-                    super_admin: '超级管理员',
-                    admin: '管理员',
-                    manager: '主管',
-                    expert: '专家',
-                    auditor: '审核员',
+                const roleMeta: Record<string, { label: string; color: string }> = {
+                    super_admin: { label: '超级管理员', color: 'magenta' },
+                    admin: { label: '管理员', color: 'blue' },
+                    manager: { label: '主管', color: 'cyan' },
+                    expert: { label: '专家', color: 'green' },
+                    auditor: { label: '审核员', color: 'default' },
                 };
-                return roles[role] || role;
+                const item = roleMeta[role] || { label: role, color: 'default' };
+                return <Tag color={item.color}>{item.label}</Tag>;
             },
         },
         {
@@ -143,11 +173,15 @@ const Users: React.FC = () => {
             title: '状态',
             dataIndex: 'is_active',
             key: 'is_active',
-            render: (active: boolean) => (active ? '启用' : '禁用'),
+            render: (active: boolean) => (
+                <Tag color={active ? 'success' : 'default'}>{active ? '启用' : '禁用'}</Tag>
+            ),
         },
         {
             title: '操作',
             key: 'action',
+            width: 150,
+            fixed: 'right' as const,
             render: (_: any, record: any) => (
                 <Space size="middle">
                     <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
@@ -171,12 +205,60 @@ const Users: React.FC = () => {
                     </Button>
                 }
             >
+                <Space wrap style={{ marginBottom: 16 }}>
+                    <Input
+                        allowClear
+                        prefix={<SearchOutlined />}
+                        placeholder="搜索登录名、姓名、手机号或注册号"
+                        style={{ width: 260 }}
+                        value={searchText}
+                        onChange={(e) => setSearchText(e.target.value)}
+                    />
+                    <Select
+                        placeholder="角色筛选"
+                        allowClear
+                        style={{ width: 140 }}
+                        value={roleFilter}
+                        onChange={(val) => setRoleFilter(val)}
+                        options={[
+                            { value: 'super_admin', label: '超级管理员' },
+                            { value: 'admin', label: '管理员' },
+                            { value: 'expert', label: '专家' },
+                            { value: 'auditor', label: '审核员' },
+                        ]}
+                    />
+                    <Select
+                        placeholder="状态筛选"
+                        allowClear
+                        style={{ width: 120 }}
+                        value={statusFilter}
+                        onChange={(val) => setStatusFilter(val)}
+                        options={[
+                            { value: 'active', label: '启用' },
+                            { value: 'inactive', label: '禁用' },
+                        ]}
+                    />
+                    {(searchText || roleFilter || statusFilter) && (
+                        <Button onClick={() => { setSearchText(''); setRoleFilter(undefined); setStatusFilter(undefined); }}>
+                            重置
+                        </Button>
+                    )}
+                    <Button icon={<ReloadOutlined />} onClick={() => fetchData()} loading={loading}>
+                        刷新
+                    </Button>
+                </Space>
                 <Table
                     columns={columns}
                     dataSource={data}
                     rowKey="id"
                     loading={loading}
-                    pagination={{ defaultPageSize: 10 }}
+                    pagination={{
+                        current: listPage,
+                        pageSize: listPageSize,
+                        onChange: (page, pageSize) => { setListPage(page); setListPageSize(pageSize); },
+                        showSizeChanger: true,
+                        showTotal: (t) => `共 ${t} 人`,
+                    }}
                     scroll={{ x: 1200 }}
                 />
             </Card>
