@@ -159,7 +159,7 @@ tests_e2e_*/
 /本地性能*.md
 /性能优化*.md
 /TEST_*.md
-/test_*.md
+/test_*
 /MVP 实施总结.md
 /MVP 完成报告.md
 /_*
@@ -179,4 +179,10 @@ deploy_web_admin.py
 deploy_h5_task_fix.py
 cleanup_server.py
 upload_project_docs.py
+# 本地宣传/视频/输出产物
+/easyaudit-dark-keynote/
+/marketing/
+/output/
+/outputs/
+/videos/
 
