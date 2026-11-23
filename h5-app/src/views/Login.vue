@@ -189,12 +189,13 @@
 
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { showToast, showDialog } from 'vant'
 import { login } from '../api/auth.js'
 import EasyAuditLogo from '../components/brand/EasyAuditLogo.vue'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const rememberMe = ref(true)
 const showPassword = ref(false)
@@ -269,7 +270,11 @@ const onSubmit = async () => {
 
       showToast({ type: 'success', message: '登录成功', duration: 1000 })
       setTimeout(() => {
-        router.push('/today-audit')
+        // 登录前被拦截的页面（如分享的审核任务链接），登录后直接回到该页
+        const redirect = route.query.redirect
+        const target = typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('/login')
+          ? redirect : '/today-audit'
+        router.replace(target)
       }, 400)
     } else {
       throw new Error('未获取到有效认证凭据')

@@ -47,6 +47,14 @@ api.interceptors.response.use(
 
 export default api
 
+/** 智审 Agent 主动提醒（复审到期 / NC 超期 / 草稿积压，由后端定时巡检生成） */
+export const notificationApi = {
+  list: (status: 'unread' | 'read' | 'all' = 'unread') =>
+    api.get('/agent/notifications', { params: { status } }),
+  update: (id: string, status: 'read' | 'dismissed' | 'unread') =>
+    api.put(`/agent/notifications/${id}`, { status }),
+}
+
 export const authApi = {
   login: (username: string, password: string) =>
     api.post('/auth/login', { username, password }),
@@ -88,6 +96,7 @@ export const taskApi = {
   deleteTask: (id: string) => api.delete(`/tasks/${id}`),
   startTask: (id: string) => api.post(`/tasks/${id}/start`),
   completeTask: (id: string) => api.post(`/tasks/${id}/complete`),
+  cancelTask: (id: string) => api.post(`/tasks/${id}/cancel`),
 
   getTaskRecords: (taskId: string) => api.get(`/tasks/${taskId}/records`),
   createRecord: (taskId: string, data: any) => api.post(`/tasks/${taskId}/records`, data),
@@ -105,7 +114,6 @@ export const mediaApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
-  getTaskMedia: (taskId: string) => api.get(`/media/task/${taskId}`),
   deleteMedia: (id: string) => api.delete(`/media/${id}`),
 }
 
@@ -128,6 +136,8 @@ export const analyticsApi = {
 export const enterpriseApi = {
   getEnterprises: (params?: any) => api.get('/enterprises', { params }),
   getEnterprise: (id: string) => api.get(`/enterprises/${id}`),
+  /** 企业风险档案（真实统计：检查次数/不合格/待整改/NC） */
+  getRiskProfile: (id: string) => api.get(`/enterprises/${id}/risk-profile`),
   createEnterprise: (data: any) => api.post('/enterprises', data),
   updateEnterprise: (id: string, data: any) => api.put(`/enterprises/${id}`, data),
   deleteEnterprise: (id: string) => api.delete(`/enterprises/${id}`),
@@ -135,16 +145,28 @@ export const enterpriseApi = {
   getQualifications: (enterpriseId: string) => api.get(`/enterprises/${enterpriseId}/qualifications`),
   createQualification: (enterpriseId: string, data: any) =>
     api.post(`/enterprises/${enterpriseId}/qualifications`, data),
+  updateQualification: (qualId: string, data: any) =>
+    api.put(`/enterprises/qualifications/${qualId}`, data),
+  deleteQualification: (qualId: string) =>
+    api.delete(`/enterprises/qualifications/${qualId}`),
 
   getProducts: (enterpriseId: string) => api.get(`/enterprises/${enterpriseId}/products`),
   createProduct: (enterpriseId: string, data: any) =>
     api.post(`/enterprises/${enterpriseId}/products`, data),
+  updateProduct: (enterpriseId: string, productId: string, data: any) =>
+    api.put(`/enterprises/${enterpriseId}/products/${productId}`, data),
+  deleteProduct: (enterpriseId: string, productId: string) =>
+    api.delete(`/enterprises/${enterpriseId}/products/${productId}`),
 
 
   getRectifications: (enterpriseId: string) =>
-    api.get('/enterprises/rectifications/', { params: { enterprise_id: enterpriseId } }),
+    api.get('/enterprises/rectifications/', { params: { enterprise_id: enterpriseId, limit: 100 } }),
   createRectification: (enterpriseId: string, data: any) =>
     api.post('/enterprises/rectifications/', { ...data, enterprise_id: enterpriseId }),
+  updateRectification: (rectId: string, data: any) =>
+    api.put(`/enterprises/rectifications/${rectId}`, data),
+  reviewRectification: (rectId: string, data: { status: string; rectification_result?: string }) =>
+    api.post(`/enterprises/rectifications/${rectId}/review`, data),
 }
 
 export const knowledgeApi = {
@@ -152,10 +174,6 @@ export const knowledgeApi = {
   getDocument: (id: string) => api.get(`/knowledge/documents/${id}`),
   createDocument: (data: any) => api.post('/knowledge/documents', data),
   updateDocument: (id: string, data: any) => api.put(`/knowledge/documents/${id}`, data),
-  uploadDocument: (data: FormData) => api.post('/knowledge/documents/upload', data, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 120000,
-  }),
   deleteDocument: (id: string) => api.delete(`/knowledge/documents/${id}`),
 
   /** 第一阶段：解析文件，返回 Markdown 预览（不写 DB） */
@@ -210,6 +228,8 @@ export const knowledgeApi = {
 
   getGuidelines: (params?: any) => api.get('/knowledge/guidelines', { params }),
   createGuideline: (data: any) => api.post('/knowledge/guidelines', data),
+  updateGuideline: (id: string, data: any) => api.put(`/knowledge/guidelines/${id}`, data),
+  deleteGuideline: (id: string) => api.delete(`/knowledge/guidelines/${id}`),
 }
 
 
@@ -240,14 +260,6 @@ export const recordApi = {
 }
 
 export const aiExtractApi = {
-  extractItems: (file: File) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return api.post('/ai-extract/extract', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 180000,
-    })
-  },
   extractItemsStream: async function* (
     file: File,
     onStatus?: (status: string) => void
@@ -308,15 +320,8 @@ export const aiExtractApi = {
       clearTimeout(timeoutId)
     }
   },
-  previewItems: (items: any[]) =>
-    api.post('/ai-extract/preview', items),
   applyItems: (templateId: string, items: any[]) =>
     api.post(`/ai-extract/apply/${templateId}`, items),
-  refineItems: (items: any[], instruction: string) => {
-    return api.post('/ai-extract/refine', { items, instruction }, {
-      timeout: 120000,
-    })
-  },
   refineItemsStream: async function* (
     items: any[],
     instruction: string
@@ -376,7 +381,6 @@ export const aiExtractApi = {
 export const industryApi = {
   getTree: (params?: any) => api.get('/industries/tree', { params }),
   getIndustries: (params?: any) => api.get('/industries', { params }),
-  getIndustry: (id: string) => api.get(`/industries/${id}`),
   createIndustry: (data: any) => api.post('/industries', data),
   updateIndustry: (id: string, data: any) => api.put(`/industries/${id}`, data),
   deleteIndustry: (id: string) => api.delete(`/industries/${id}`),
@@ -386,7 +390,6 @@ export const userApi = {
   getUsers: (params?: any) => api.get('/users', { params }),
   // 轻量选员列表：所有登录用户可用（GET /users 仅管理员），返回 {id,username,full_name,role}
   getUserOptions: (params?: any) => api.get('/users/options', { params }),
-  getUser: (id: string) => api.get(`/users/${id}`),
   createUser: (data: any) => api.post('/users', data),
   updateUser: (id: string, data: any) => api.put(`/users/${id}`, data),
   deleteUser: (id: string) => api.delete(`/users/${id}`),

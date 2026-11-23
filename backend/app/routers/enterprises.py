@@ -566,13 +566,55 @@ async def get_enterprise_risk_profile(
     elif risk_score >= 40:
         risk_level = "medium"
 
+    # 待整改：日常检查整改单中尚未结束的（状态非完成/关闭/通过）
+    finished_rect_status = ["completed", "closed", "verified", "approved", "passed", "rejected_closed"]
+    pending_rect_result = await db.execute(
+        select(func.count(RectificationRecord.id))
+        .where(RectificationRecord.enterprise_id == enterprise_id)
+        .where(or_(RectificationRecord.status.is_(None), RectificationRecord.status.notin_(finished_rect_status)))
+    )
+    pending_rectifications = pending_rect_result.scalar() or 0
+
+    # 不符合项：该企业所有审核项目中已确认的 NC（排除 AI 草稿）
+    from app.models.audit_project import AuditProject, Nonconformity
+
+    nc_base = (
+        select(func.count(Nonconformity.id))
+        .join(AuditProject, AuditProject.id == Nonconformity.project_id)
+        .where(AuditProject.enterprise_id == enterprise_id)
+        .where(AuditProject.is_deleted == False)  # noqa: E712
+        .where(or_(
+            Nonconformity.status.is_(None),
+            Nonconformity.status.notin_(["draft", "rejected"]),
+        ))
+    )
+    nc_count = (await db.execute(nc_base)).scalar() or 0
+    open_nc_count = (
+        await db.execute(nc_base.where(Nonconformity.status.notin_(["closed", "verified"])))
+    ).scalar() or 0
+
+    last_inspection_date = None
+    if history_records and history_records[0].inspection_date:
+        last_inspection_date = history_records[0].inspection_date.isoformat()
+
     return make_response(data={
         "enterprise_id": str(enterprise_id),
         "enterprise_name": enterprise.name,
         "risk_level": risk_level,
         "risk_score": round(risk_score, 1),
+        "raw_risk_level": enterprise.risk_level,
         "history_records": history_list,
         "focus_points": focus_points[:5],
         "total_inspections": total_records,
-        "fail_inspections": fail_records
+        "fail_inspections": fail_records,
+        "pass_inspections": max(0, total_records - fail_records),
+        "last_inspection_date": last_inspection_date,
+        "statistics": {
+            "total_inspections": total_records,
+            "pass_count": max(0, total_records - fail_records),
+            "fail_count": fail_records,
+            "pending_rectifications": pending_rectifications,
+            "nc_count": nc_count,
+            "open_nc_count": open_nc_count,
+        },
     })

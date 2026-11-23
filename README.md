@@ -164,7 +164,8 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
     │   └── tests/
     ├── web-admin/                   # React 审核管理端
     ├── h5-app/                      # Vue 移动现场审核端
-    ├── deploy_server.py             # 生产部署脚本
+    ├── fast_deploy.py               # 日常部署（后端代码 + 前端 dist）
+    ├── deploy.py                    # 全量部署（服务器上装依赖并构建）
     └── README.md
 
 ## 快速开始
@@ -302,7 +303,8 @@ AI 会话、现场证据、草稿、媒体、NC 和制品均带有 project_id。
 
 生产部署目标由下列文件统一维护：
 
-- deploy_server.py
+- fast_deploy.py / deploy.py
+- deploy/nginx-easyaudit.conf
 - web-admin/.env.production
 - h5-app/.env.production
 

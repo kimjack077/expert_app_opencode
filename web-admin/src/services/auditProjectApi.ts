@@ -149,6 +149,10 @@ export const nonconformityApi = {
   update: (ncId: string, data: any) => 
     api.put(`/api/audit-projects/nonconformities/${ncId}`, data),
 
+  // 删除不符合项（含驳回 AI 草稿）
+  delete: (ncId: string) =>
+    api.delete(`/api/audit-projects/nonconformities/${ncId}`),
+
   // 确认 AI 生成的不符合项草稿。新 Agent 接口按项目隔离，避免跨项目写入。
   confirm: (projectId: string, ncId: string, data?: Record<string, unknown>) =>
     api.post(
@@ -187,18 +191,6 @@ async function downloadWithAuth(url: string, filename: string) {
 }
 
 export const auditReportApi = {
-  // 创建审核报告
-  create: (projectId: string, data: any) => 
-    api.post(`/api/audit-projects/${projectId}/report`, data),
-  
-  // 获取审核报告列表
-  list: (projectId: string) => 
-    api.get(`/api/audit-projects/${projectId}/report`),
-  
-  // 更新审核报告
-  update: (reportId: string, data: any) => 
-    api.put(`/api/audit-projects/report/${reportId}`, data),
-  
   // 导出 Word 格式报告
   exportWord: (projectId: string, filename?: string) =>
     downloadWithAuth(
@@ -228,6 +220,10 @@ export const meetingApi = {
   // 更新沟通会议记录
   update: (meetingId: string, data: any) => 
     api.put(`/api/audit-projects/meetings/${meetingId}`, data),
+
+  // 删除沟通会议记录
+  delete: (meetingId: string) =>
+    api.delete(`/api/audit-projects/meetings/${meetingId}`),
 }
 
 // ==================== 我的任务 API ====================
@@ -409,12 +405,6 @@ export const projectArtifactApi = {
       `${PROJECT_AGENT_BASE}/${projectId}/artifacts/${artifactId}/download`,
       { responseType: 'blob', timeout: 120000 }
     ),
-
-  downloadPackage: (projectId: string) =>
-    api.get(`${PROJECT_AGENT_BASE}/${projectId}/package`, {
-      responseType: 'blob',
-      timeout: 180000,
-    }),
 }
 
 export const saveDownloadedBlob = (
@@ -441,10 +431,6 @@ export const saveDownloadedBlob = (
 // ==================== AI Agent API ====================
 
 export const auditAIApi = {
-  // AI 审核准备建议（普通）
-  prepareAudit: (projectId: string) => 
-    api.post(`/api/audit-projects/${projectId}/ai/prepare`),
-
   // AI 审核准备建议（流式 SSE）
   prepareAuditStream: async function* (
     projectId: string,
@@ -495,10 +481,6 @@ export const auditAIApi = {
       params: data
     }),
   
-  // AI 生成审核报告（普通）
-  generateReport: (projectId: string) => 
-    api.post(`/api/audit-projects/${projectId}/ai/generate-report`),
-
   // AI 生成审核报告（流式 SSE）
   generateReportStream: async function* (
     projectId: string,
@@ -538,15 +520,4 @@ export const auditAIApi = {
       }
     }
   },
-  
-  // AI 建议不符合项
-  suggestNC: (projectId: string, data: {
-    evidence: string
-    clause_no: string
-    certification_system: string
-  }) => 
-    api.post(`/api/audit-projects/${projectId}/ai/suggest-nc`, null, {
-      params: data
-    }),
 }
-

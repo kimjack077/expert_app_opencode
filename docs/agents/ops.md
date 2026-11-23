@@ -66,9 +66,10 @@ python -m pytest test_mvp_api.py -v
 python test_all_crud.py                  # 需先起后端
 ```
 
-`scripts/` 下还有端到端与前端冒烟：`full_system_e2e_test.py` ·
-`test_agent_runtime_e2e.py` · `test_p2_features.py` · `frontend_page_smoke.py` ·
-`playwright_frontend_full_test.js`，以及数据清理 `clear_db_records.py`。
+根目录 `scripts/` 只保留数据维护与演示准备脚本（`db_health_check.py`、`check_orphan_data.py`、`archive_orphan_data.py`、
+`audit_trail.py`、`compare_db_schema.py`、`demo_readiness_check.py`、`setup_new_demo_assets.py`、`reset_demo_task.py`、
+`clear_db_records.py` 等）。早期的一次性探测 / 冒烟脚本（`probe_*`、`test_*`、`run_remote_*`、`full_system_e2e_test.py`、
+`playwright_frontend_full_test.js` 等）已于 2026-11-23 移到根目录 `_已停用_可直接删除/临时测试文件/scripts/`。
 
 前端没有测试脚本，校验手段是 `npx tsc --noEmit`（web-admin）/ `npm run type-check`（h5）。
 
@@ -90,61 +91,47 @@ python test_all_crud.py                  # 需先起后端
 
 部署由仓库根目录的 Python 脚本驱动（没有 Docker，也没有 Makefile）：
 
-| 脚本 | 范围 | 可用性 |
-|------|------|--------|
-| `deploy.py` | 全量：后端 + 两个前端，含重装依赖与重建 | ✅ 可用 |
-| `scripts/deploy_backend_only.py` | 仅后端：不重装依赖、不重建前端 | ✅ **后端改动时的首选** |
-| `deploy_server.py` | 仅后端 | ⛔ **禁用**，见下方警告 |
-| `deploy_web_admin.py` | 仅管理后台 | ✅ 可用 |
-| `redeploy_h5.py` | 仅 H5 | ⚠️ 目标机 `62.234.0.182` **已不可达**（实测连接超时） |
-| `setup_nginx.py` · `update_frontend_serving.py` | 静态服务配置 | 未使用（线上无 nginx） |
+| 脚本 | 范围 | 说明 |
+|------|------|------|
+| `fast_deploy.py` | 后端代码 + 两个前端 dist（可单选 `backend` / `web` / `h5`） | ✅ **日常首选**。前端需先在本地 `npm run build`；后端上传 `backend/app` 后 `systemctl restart expert-backend` |
+| `deploy.py` | 全量：上传源码、服务器上 `npm install` + `npm run build`、重装 nginx 配置 | ✅ 改了依赖（`requirements.txt` / `package.json`）时用 |
+| `scripts/deploy_backend_only.py` | 仅后端（nohup uvicorn 方式） | ⚠️ 备用。线上后端已改由 systemd `expert-backend` 管理，优先用 `fast_deploy.py backend` |
 
-> [!CAUTION]
-> **`deploy_server.py` 不可使用。** 它会在服务器上执行 `alembic upgrade`，
-> 而本地与线上**共用同一个远程生产库**（`db_expert_claude`）——
-> 这会让生产库结构被迁移脚本改动。运维约定是「迁移只在本地跑一次，部署不再迁移」。
+2026-11-23 起，`deploy_server.py`（会在服务器跑 alembic，禁用）、`deploy_web_admin.py`、`redeploy_h5.py`（目标机已不可达）、
+`setup_nginx.py`、`update_frontend_serving.py`、`cleanup_server.py`、`upload_project_docs.py`、`deploy_h5_task_fix.py`，
+以及旧拓扑的 `efis-backend.service` / `efis-nginx.conf`，已移到 `_已停用_可直接删除/旧部署脚本/`。
 
-### 线上真实拓扑（2026-09-17 实测）
+### 线上真实拓扑（2026-11-23）
 
 ```
 49.232.213.79  /home/ubuntu/expert_app/
-  backend/      nohup uvicorn app.main:app --host 0.0.0.0 --port 8000
-  web-admin/    nohup npx vite preview --host 0.0.0.0 --port 3000
-  h5-app/       nohup npx vite preview --host 0.0.0.0 --port 5173
+  backend/          systemd 单元 expert-backend（uvicorn :8000，Restart=always）
+  web-admin/dist/   nginx :3000（配置见 deploy/nginx-easyaudit.conf）
+  h5-app/dist/      nginx :5173，/h5/ 前缀映射回 dist 根
 ```
 
 | 服务 | 地址 |
 |------|------|
 | 后端 API | `http://49.232.213.79:8000`（`/api/health` 应返回 200） |
 | Web Admin | `http://49.232.213.79:3000` |
-| H5 App | `http://49.232.213.79:5173` |
+| H5 App | `http://49.232.213.79:5173/h5/` |
 
-**访问方式是按端口直连，不是 80 端口。** 该机器上 nginx 处于 `inactive`
-（`sites-enabled` 里只有 `carbon-peak` / `perinatal-dashboard` 两个与本项目无关的站点），
-80 端口无任何服务。
-
-> [!IMPORTANT]
-> 仓库里的 `efis-backend.service`(systemd) 与 `efis-nginx.conf` 描述的是
-> **另一套已不在使用的拓扑**（`/opt/efis/...`）。实测该机器上
-> **不存在 `/opt/efis`，也不存在 `efis-backend` systemd 单元**。
-> `backend/app/main.py` 里 `WEB_ADMIN_DIR = "/opt/efis/web-admin"` 的 SPA catch-all
-> 同样永不生效（目录不存在），属遗留代码。
-> **不要照 `efis-nginx.conf` 或 systemd 单元去排查线上问题。**
+**访问方式是按端口直连，不是 80 端口。**
+`backend/app/main.py` 里 `WEB_ADMIN_DIR = "/opt/efis/web-admin"` 的 SPA catch-all 永不生效（目录不存在），属遗留代码。
 
 ### 部署流程
 
-**后端改动（最常见）**：
-
 ```bash
-git push                                          # 先提交推送
-python scripts/deploy_backend_only.py --dry-run   # 先看要做什么
-python scripts/deploy_backend_only.py             # 上传 backend/ + 重启 uvicorn
+cd web-admin && npm run build && cd ..    # 改了 Web 时
+cd h5-app && npm run build && cd ..       # 改了 H5 时
+python fast_deploy.py                     # 或 python fast_deploy.py backend / web / h5
 ```
 
-停机约数秒，前端不受影响。脚本会校验新模块是否**真的**落到服务器，
-避免「服务活着但跑的还是旧代码」这种假象。
+`fast_deploy.py` 只上传有变化的文件（大小不同，或本地文件比服务器上的新）。
 
-**前端改动**：用 `deploy.py`（全量）或 `deploy_web_admin.py`。
+**核对后端是否真的换成了新代码**：打开 `http://49.232.213.79:8000/openapi.json` 看接口参数是否与本地一致。
+若不一致，常见原因是 `deploy.py` 曾用 nohup 起过一个 uvicorn 占着 8000 端口，systemd 重启的新进程绑不上端口、
+旧进程继续服务。排查：`sudo ss -ltnp | grep 8000`、`systemctl status expert-backend`，杀掉多余的 uvicorn 后再重启服务。
 
 **任何情况下都不要跑数据库迁移**：本地与线上共库，迁移只在本地执行一次。
 

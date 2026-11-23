@@ -126,13 +126,7 @@
             </div>
             
             <div class="card-footer">
-              <div class="task-priority" :class="task.priority || 'normal'">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
-                  <line x1="4" y1="22" x2="4" y2="15"/>
-                </svg>
-                {{ getPriorityText(task.priority) }}
-              </div>
+              <span></span>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="arrow-icon">
                 <path d="m9 18 6-6-6-6"/>
               </svg>
@@ -207,7 +201,6 @@ const syncCachedTasks = () => {
       target_name: entry.subtitle || '',
       created_at: entry.cachedAt,
       status: 'pending',
-      priority: 'normal',
     }
   })
 }
@@ -229,15 +222,13 @@ const statusCounts = computed(() => {
 })
 
 const showFilterSheet = ref(false)
-const priorityFilter = ref('')
 const offlineOnly = ref(false)
 const sortBy = ref('created_at')
 
-const hasExtraFilter = computed(() => !!(priorityFilter.value || offlineOnly.value || sortBy.value !== 'created_at'))
+const hasExtraFilter = computed(() => !!(offlineOnly.value || sortBy.value !== 'created_at'))
 
 const extraFilterActions = computed(() => [
-  { name: priorityFilter.value === '' && !offlineOnly.value && sortBy.value === 'created_at' ? '✓ 全部任务（默认排序）' : '全部任务（默认排序）', value: 'reset' },
-  { name: priorityFilter.value === 'high' ? '✓ 仅看高优先级' : '仅看高优先级', value: 'priority_high' },
+  { name: !offlineOnly.value && sortBy.value === 'created_at' ? '✓ 全部任务（默认排序）' : '全部任务（默认排序）', value: 'reset' },
   { name: offlineOnly.value ? '✓ 仅看本机已缓存任务' : '仅看本机已缓存任务', value: 'offline_only' },
   { name: sortBy.value === 'scheduled_at' ? '✓ 按计划时间排序' : '按计划时间排序', value: 'sort_scheduled' },
 ])
@@ -250,7 +241,6 @@ const selectStatusTab = (val) => {
 
 const matchesCachedTask = (task) => {
   if (activeFilter.value !== 'all' && task.status !== activeFilter.value) return false
-  if (priorityFilter.value && task.priority !== priorityFilter.value) return false
 
   const keyword = searchText.value.trim().toLowerCase()
   if (!keyword) return true
@@ -272,11 +262,8 @@ const compareCachedTasks = (left, right) => {
 
 const onSelectExtraFilter = (action) => {
   if (action.value === 'reset') {
-    priorityFilter.value = ''
     offlineOnly.value = false
     sortBy.value = 'created_at'
-  } else if (action.value === 'priority_high') {
-    priorityFilter.value = priorityFilter.value === 'high' ? '' : 'high'
   } else if (action.value === 'offline_only') {
     offlineOnly.value = !offlineOnly.value
   } else if (action.value === 'sort_scheduled') {
@@ -300,15 +287,6 @@ const getStatusText = (status) => {
     'cancelled': '已取消',
   }
   return texts[status] || status
-}
-
-const getPriorityText = (priority) => {
-  const texts = {
-    'high': '高优先级',
-    'normal': '普通',
-    'low': '低优先级',
-  }
-  return texts[priority] || '普通'
 }
 
 const formatDate = (dateStr) => {
@@ -345,7 +323,6 @@ const fetchTasks = async (isRefresh = false) => {
       sort_by: sortBy.value,
     }
     if (activeFilter.value !== 'all') queryParams.status = activeFilter.value
-    if (priorityFilter.value) queryParams.priority = priorityFilter.value
     const res = await getTasks(queryParams)
     if (seq !== fetchSeq) return false
 

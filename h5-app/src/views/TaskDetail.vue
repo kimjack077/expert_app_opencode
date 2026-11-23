@@ -61,15 +61,6 @@
                 <span class="info-value">{{ task.assignee || '未分配' }}</span>
               </div>
             </div>
-            <div class="info-item">
-              <div class="info-icon">
-                <van-icon name="flag-o" size="18" />
-              </div>
-              <div class="info-content">
-                <span class="info-label">优先级</span>
-                <span class="info-value" :class="task.priority">{{ getPriorityText(task.priority) }}</span>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -327,15 +318,6 @@ const getStatusDesc = (status) => {
     'cancelled': '任务已取消',
   }
   return descs[status] || ''
-}
-
-const getPriorityText = (priority) => {
-  const texts = {
-    'high': '高',
-    'normal': '普通',
-    'low': '低',
-  }
-  return texts[priority] || '普通'
 }
 
 const formatDate = (dateStr) => {

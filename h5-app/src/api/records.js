@@ -40,11 +40,6 @@ export const submitRecord = (id) => {
   return request.post(`/records/${id}/submit`)
 }
 
-// 获取记录的检查项列表
-export const getRecordItems = (recordId, config) => {
-  return request.get(`/records/${recordId}/items`, config)
-}
-
 // 获取单个检查项详情
 export const getRecordItem = (recordId, itemId, config) => {
   return request.get(`/records/${recordId}/items/${itemId}`, config)
@@ -53,26 +48,6 @@ export const getRecordItem = (recordId, itemId, config) => {
 // 创建/更新记录项（快速检查使用）
 export const createOrUpdateRecordItem = (recordId, data) => {
   return request.post(`/records/${recordId}/items`, data)
-}
-
-// 创建/更新记录项
-export const createRecordItem = (recordId, data) => {
-  return request.post(`/records/${recordId}/items`, data)
-}
-
-// 更新记录项
-export const updateRecordItem = (recordId, itemId, data) => {
-  return request.put(`/records/${recordId}/items/${itemId}`, data)
-}
-
-// AI生成建议
-export const generateAISuggestion = (recordId, itemId) => {
-  return request.post(`/records/${recordId}/items/${itemId}/ai`)
-}
-
-// 采纳AI建议
-export const acceptAISuggestion = (recordId, itemId) => {
-  return request.post(`/records/${recordId}/items/${itemId}/accept-ai`)
 }
 
 // 获取模板列表（用于选择模板）

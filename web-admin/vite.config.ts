@@ -4,6 +4,8 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  // 生产包压缩时去掉调试日志（保留 console.warn / console.error 便于排障）
+  esbuild: { pure: ['console.log', 'console.debug'] },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

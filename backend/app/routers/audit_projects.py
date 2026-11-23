@@ -1720,7 +1720,12 @@ async def get_project_progress(
     nc_result = await db.execute(
         select(Nonconformity).where(Nonconformity.project_id == project_id)
     )
-    nonconformities = nc_result.scalars().all()
+    all_ncs = nc_result.scalars().all()
+    # 已驳回的 AI 草稿不是正式不符合项，不计入项目 NC 数（此前顶部「不符合项 (N)」把它也算进去）
+    nonconformities = [nc for nc in all_ncs if (nc.status or "") != "rejected"]
+    # 等待人工确认的 AI 草稿单独计数，便于界面提示
+    draft_ncs = sum(1 for nc in nonconformities if (nc.status or "") == "draft")
+    open_ncs = sum(1 for nc in nonconformities if (nc.status or "") not in ("draft", "verified", "closed"))
 
     major_nc = sum(1 for nc in nonconformities if nc.severity == "major")
     minor_nc = sum(1 for nc in nonconformities if nc.severity == "minor")
@@ -1737,6 +1742,8 @@ async def get_project_progress(
         },
         "nonconformities": {
             "total": len(nonconformities),
+            "open": open_ncs,
+            "draft": draft_ncs,
             "major": major_nc,
             "minor": minor_nc,
             "observations": observations,

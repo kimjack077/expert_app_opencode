@@ -82,7 +82,7 @@ AiDraftRecord --确认--> InspectionRecordItem / Nonconformity
 
 | # | 链路 | 谁在用 |
 |---|------|--------|
-| 1 | `InspectionTask → TaskItemRecord` | mobile-app 的 QuickCheck / Inspection 页 |
+| 1 | `InspectionTask → TaskItemRecord` | 原 mobile-app 的 QuickCheck / Inspection 页（mobile-app 已于 2026-11-23 停用；表与接口仍在，H5 任务流也会写入） |
 | 2 | `InspectionRecord → InspectionRecordItem` | h5-app 与 web-admin 的 Agent 写回（`/api/records/*`） |
 | 3 | `AuditProject → AuditAreaRecord → InspectionRecordItem` + 证据管线 | 正式审核流（最完整、最面向未来） |
 

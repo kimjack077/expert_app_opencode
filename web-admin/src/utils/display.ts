@@ -56,7 +56,18 @@ export function formatTaskDisplay(task: {
     .replace(/^Codex\s+P\d+\s+/i, '')
     .trim()
 
-  const parts = cleaned.split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean)
+  // 先把日期片段保护起来再按连字符切分（与 H5 端一致）。否则「华为子公司 - 采购部 - 2026-08-27」
+  // 会被切成 2026 / 08 / 27，列表显示成「华为子公司 · 采购部 · 2026」+「08 · 27」（远程实测发现）。
+  const DATE_LIKE = /\d{4}\s*[-/.]\s*\d{1,2}\s*[-/.]\s*\d{1,2}|\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日/g
+  const preserved: string[] = []
+  const masked = cleaned.replace(DATE_LIKE, (m) => {
+    preserved.push(m)
+    return `\u0000${preserved.length - 1}\u0000`
+  })
+  const parts = masked
+    .split(/\s*[-–—]\s*/)
+    .map((p) => p.replace(/\u0000(\d+)\u0000/g, (_, i) => preserved[Number(i)]).trim())
+    .filter(Boolean)
   if (parts.length >= 3) {
     const dateHint = parts[parts.length - 1]
     const area = parts[parts.length - 2]

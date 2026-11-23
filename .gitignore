@@ -185,4 +185,6 @@ upload_project_docs.py
 /output/
 /outputs/
 /videos/
+# 已停止维护的移动端（mobile-app、Flutter inspection_app），可直接删除
+/_已停用_可直接删除/
 

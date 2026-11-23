@@ -19,41 +19,25 @@
               </svg>
             </div>
             <div class="item-content">
-              <span class="item-label">消息通知</span>
-              <span class="item-desc">接收任务提醒和系统通知</span>
+              <span class="item-label">智审提醒角标</span>
+              <span class="item-desc">在「我的」页显示复审到期、NC 超期等未读提醒数</span>
             </div>
             <van-switch v-model="settings.notification" size="22" @click.stop @change="onSettingToggle('notification')" />
           </div>
-          
-          <div class="settings-item" @click="toggleSound">
+          <!-- 提示音 / 震动反馈开关此前只保存设置、从未生效，已移除，避免误导 -->
+          <div class="settings-item" @click="router.push('/messages')">
             <div class="item-icon">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                <path d="M4 6h16M4 12h16M4 18h10"/>
               </svg>
             </div>
             <div class="item-content">
-              <span class="item-label">提示音</span>
-              <span class="item-desc">操作反馈声音</span>
+              <span class="item-label">查看全部提醒</span>
+              <span class="item-desc">已读、未读的智审提醒记录</span>
             </div>
-            <van-switch v-model="settings.sound" size="22" @click.stop @change="onSettingToggle('sound')" />
-          </div>
-          
-          <div class="settings-item" @click="toggleVibration">
-            <div class="item-icon">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M2 12h2"/>
-                <path d="M20 12h2"/>
-                <path d="M6 12a6 6 0 0 0 12 0"/>
-                <rect x="8" y="4" width="8" height="16" rx="4"/>
-              </svg>
-            </div>
-            <div class="item-content">
-              <span class="item-label">震动反馈</span>
-              <span class="item-desc">操作时震动提示</span>
-            </div>
-            <van-switch v-model="settings.vibration" size="22" @click.stop @change="onSettingToggle('vibration')" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="item-arrow">
+              <path d="m9 18 6-6-6-6"/>
+            </svg>
           </div>
         </div>
       </div>
@@ -119,7 +103,7 @@
       </div>
 
       <div class="version-info">
-        <span>当前版本: v1.0.0</span>
+        <span>当前版本：v{{ appVersion }}</span>
       </div>
     </div>
 
@@ -166,6 +150,8 @@ import { getRecords } from '../api/records.js'
 import { clearCache as clearOfflineCache, getCacheSummary } from '@/utils/offlineCache.js'
 
 const router = useRouter()
+// 与「关于」页同源，避免两处显示不同版本号
+const appVersion = import.meta.env.VITE_APP_VERSION || '2.4.0'
 
 const settings = ref({
   notification: true,

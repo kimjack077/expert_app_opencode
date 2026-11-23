@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, Table, Button, Modal, Form, Input, Select, DatePicker, message, Space, Tag, Popconfirm, Typography } from 'antd'
-import { PlusOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons'
+import { PlusOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, DeleteOutlined, SearchOutlined, EditOutlined, StopOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { taskApi, templateApi, userApi } from '@/services/api'
 import { formatTaskDisplay } from '@/utils/display'
@@ -19,13 +19,13 @@ export default function Tasks() {
   const user = useAuthStore(state => state.user)
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
+  const [editingTask, setEditingTask] = useState<any>(null)
   const [form] = Form.useForm()
   // 初值取 URL 的 ?status=：工作台「待办/进行中」卡片是带参数跳进来的，
   // 不解析的话列表不过滤，卡片数字与列表条数就会对不上。
   const [statusFilter, setStatusFilter] = useState<string | null>(
     searchParams.get('status')
   )
-  const [priorityFilter, setPriorityFilter] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
   // 服务端搜索关键词（输入防抖后生效），搜索时重置回第一页
   const [searchKeyword, setSearchKeyword] = useState('')
@@ -59,7 +59,7 @@ export default function Tasks() {
 
   useEffect(() => {
     void fetchTasks()
-  }, [statusFilter, priorityFilter, searchKeyword, pagination.current, pagination.pageSize])
+  }, [statusFilter, searchKeyword, pagination.current, pagination.pageSize])
 
   const fetchUsers = async () => {
     if (!isAdminRole(user?.role)) return
@@ -82,7 +82,6 @@ export default function Tasks() {
         limit: pagination.pageSize,
       }
       if (statusFilter) params.status = statusFilter
-      if (priorityFilter) params.priority = priorityFilter
       if (searchKeyword) params.search = searchKeyword
       const res: any = await taskApi.getTasks(params)
       setTasks(res.data?.items || [])
@@ -105,19 +104,65 @@ export default function Tasks() {
     }
   }
 
+  const errorText = (error: any, fallback: string) => {
+    const detail = error?.response?.data?.message || error?.response?.data?.detail
+    return typeof detail === 'string' ? detail : fallback
+  }
+
+  const openCreate = () => {
+    setEditingTask(null)
+    form.resetFields()
+    setModalVisible(true)
+  }
+
+  const openEdit = (record: any) => {
+    setEditingTask(record)
+    form.resetFields()
+    form.setFieldsValue({
+      title: record.title,
+      template_id: record.template_id,
+      assigned_to: record.assigned_to,
+      target_name: record.target_name,
+      target_address: record.target_address,
+      target_contact: record.target_contact,
+      target_phone: record.target_phone,
+      scheduled_at: record.scheduled_at ? dayjs(record.scheduled_at) : undefined,
+      remarks: record.remarks,
+    })
+    setModalVisible(true)
+  }
+
   const handleCreate = async (values: any) => {
     try {
       const data = {
         ...values,
         scheduled_at: values.scheduled_at?.toISOString(),
       }
-      await taskApi.createTask(data)
-      message.success('任务创建成功')
+      if (editingTask) {
+        // 已开始的任务不允许换模板，避免已填报记录与新模板错位
+        if (editingTask.status !== 'pending') delete data.template_id
+        await taskApi.updateTask(editingTask.id, data)
+        message.success('任务已更新')
+      } else {
+        await taskApi.createTask(data)
+        message.success('任务创建成功')
+      }
       setModalVisible(false)
+      setEditingTask(null)
       form.resetFields()
       fetchTasks()
     } catch (error: any) {
-      message.error(error.response?.data?.message || error.response?.data?.detail || '创建失败')
+      message.error(errorText(error, editingTask ? '更新失败' : '创建失败'))
+    }
+  }
+
+  const handleCancelTask = async (id: string) => {
+    try {
+      await taskApi.cancelTask(id)
+      message.success('任务已取消')
+      fetchTasks()
+    } catch (error) {
+      message.error(errorText(error, '取消失败'))
     }
   }
 
@@ -127,7 +172,7 @@ export default function Tasks() {
       message.success('任务已删除')
       fetchTasks()
     } catch (error) {
-      message.error('删除失败')
+      message.error(errorText(error, '删除失败'))
     }
   }
 
@@ -179,6 +224,20 @@ export default function Tasks() {
       render: (v: string) => v || '-',
     },
     {
+      // 此前列表看不到任务派给了谁，必须点进编辑才知道（远程实测发现）
+      title: '检查员',
+      dataIndex: 'assigned_to',
+      key: 'assigned_to',
+      width: 110,
+      ellipsis: true,
+      render: (v: string, record: any) => {
+        if (!v) return <Typography.Text type="secondary">未分配</Typography.Text>
+        if (user?.id && v === user.id) return '我'
+        const u = users.find((x) => x.id === v)
+        return u ? u.full_name || u.username : record.assignee_name || '—'
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
@@ -189,13 +248,23 @@ export default function Tasks() {
       title: '计划时间',
       dataIndex: 'scheduled_at',
       key: 'scheduled_at',
-      width: 150,
-      render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD HH:mm') : '-'),
+      width: 170,
+      // 计划时间已过仍未完成的任务标红提示，避免逾期任务混在列表里不被发现
+      render: (date: string, record: any) => {
+        if (!date) return '-'
+        const overdue = ['pending', 'in_progress'].includes(record.status) && dayjs(date).isBefore(dayjs(), 'day')
+        return (
+          <span style={{ color: overdue ? '#EF4444' : undefined }}>
+            {dayjs(date).format('YYYY-MM-DD HH:mm')}
+            {overdue && <Tag color="error" style={{ marginLeft: 6 }}>已逾期</Tag>}
+          </span>
+        )
+      },
     },
     {
       title: '操作',
       key: 'action',
-      width: 280,
+      width: 340,
       fixed: 'right' as const,
       render: (_: any, record: any) => (
         <Space wrap>
@@ -237,6 +306,28 @@ export default function Tasks() {
             >
               查看
             </Button>
+          )}
+          {isAdminRole(user?.role) && ['pending', 'in_progress'].includes(record.status) && (
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {['pending', 'in_progress'].includes(record.status) && (
+            <Popconfirm
+              title="取消任务"
+              description={
+                record.status === 'in_progress'
+                  ? '任务已在进行中，取消后不可再填报，确定取消？'
+                  : '确定取消该任务吗？'
+              }
+              onConfirm={() => handleCancelTask(record.id)}
+              okText="确认取消"
+              cancelText="再想想"
+            >
+              <Button type="link" size="small" icon={<StopOutlined />}>
+                取消
+              </Button>
+            </Popconfirm>
           )}
           <Popconfirm
             title="确认删除"
@@ -283,27 +374,13 @@ export default function Tasks() {
               { value: 'in_progress', label: '进行中' },
               { value: 'pending', label: '待开始' },
               { value: 'completed', label: '已完成' },
-            ]}
-          />
-          <Select
-            placeholder="优先级"
-            allowClear
-            style={{ width: 120 }}
-            value={priorityFilter}
-            onChange={(value) => {
-              setPriorityFilter(value || null)
-              setPagination((prev) => ({ ...prev, current: 1 }))
-            }}
-            options={[
-              { value: 'high', label: '高优先级' },
-              { value: 'normal', label: '普通' },
-              { value: 'low', label: '低优先级' },
+              { value: 'cancelled', label: '已取消' },
             ]}
           />
           <Button icon={<ReloadOutlined />} onClick={() => fetchTasks()} loading={loading}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建任务
           </Button>
         </Space>
@@ -315,7 +392,7 @@ export default function Tasks() {
           columns={columns}
           rowKey="id"
           loading={loading}
-          scroll={{ x: 900 }}
+          scroll={{ x: 1100 }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -328,18 +405,26 @@ export default function Tasks() {
       </Card>
 
       <Modal
-        title="新建检查任务"
+        title={editingTask ? `编辑任务：${editingTask.task_no || ''}` : '新建检查任务'}
         open={modalVisible}
-        onCancel={() => setModalVisible(false)}
+        onCancel={() => {
+          setModalVisible(false)
+          setEditingTask(null)
+        }}
         onOk={() => form.submit()}
+        okText={editingTask ? '保存' : '创建'}
+        cancelText="取消"
         width={600}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}>
-          <Form.Item name="title" label="任务标题" rules={[{ required: true }]}>
-            <Input />
+          <Form.Item name="title" label="任务标题" rules={[{ required: true, message: '请输入任务标题' }]}>
+            <Input placeholder="例如：XX 公司季度日常检查" />
           </Form.Item>
-          <Form.Item name="template_id" label="检查模板" rules={[{ required: true }]}>
+          <Form.Item name="template_id" label="检查模板" rules={[{ required: true, message: '请选择检查模板' }]}>
             <Select
+              showSearch
+              optionFilterProp="label"
+              disabled={!!editingTask && editingTask.status !== 'pending'}
               placeholder="选择检查模板"
               options={templates.map((t) => ({ value: t.id, label: t.name }))}
             />
@@ -348,6 +433,8 @@ export default function Tasks() {
             <Select
               placeholder="选择检查人员"
               allowClear
+              showSearch
+              optionFilterProp="label"
               options={users.map((u) => ({ value: u.id, label: u.full_name || u.username }))}
             />
           </Form.Item>

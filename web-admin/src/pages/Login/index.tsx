@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Form, Input, Button, Checkbox, Segmented, message } from 'antd'
 import {
   SafetyCertificateFilled,
@@ -16,21 +16,27 @@ import {
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 import { EasyAuditLogo, EasyAuditLogoIcon } from '@/components/brand/EasyAuditLogo'
+import { applyRememberChoice } from '@/utils/sessionGuard'
 import './Login.css'
 
 export default function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
   const login = useAuthStore((state) => state.login)
   const [loading, setLoading] = useState(false)
   const [selectedRole, setSelectedRole] = useState<'admin' | 'expert' | 'custom'>('admin')
   const [form] = Form.useForm()
 
-  const onFinish = async (values: { username: string; password: string }) => {
+  const onFinish = async (values: { username: string; password: string; remember?: boolean }) => {
     setLoading(true)
     try {
       await login(values.username, values.password)
+      applyRememberChoice(values.remember !== false)
       message.success('登录成功，正在进入系统...')
-      navigate('/dashboard')
+      // 登录前被拦截的页面（如分享出来的项目链接）登录后直接回到原页面
+      const from = (location.state as any)?.from
+      const target = from?.pathname && from.pathname !== '/login' ? `${from.pathname}${from.search || ''}` : '/dashboard'
+      navigate(target, { replace: true })
     } catch (error: any) {
       message.error(error.response?.data?.detail || error.response?.data?.message || '登录失败，请检查用户名和密码')
     } finally {

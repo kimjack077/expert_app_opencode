@@ -9,6 +9,8 @@ export default defineConfig({
     vue(),
   ],
   base: '/h5/',
+  // 生产包压缩时去掉调试日志（保留 console.warn / console.error 便于排障）
+  esbuild: { pure: ['console.log', 'console.debug'] },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

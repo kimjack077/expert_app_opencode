@@ -213,6 +213,22 @@ export function getConversation(conversationId) {
   return request.get(`/agent/conversations/${conversationId}`)
 }
 
+/**
+ * 智审主动提醒（复审到期 / NC 超期 / AI 草稿积压），由后端定时巡检生成。
+ * @param {'unread'|'read'|'all'} status
+ */
+export function getNotifications(status = 'unread') {
+  return request.get('/agent/notifications', { params: { status }, skipErrorToast: true })
+}
+
+/**
+ * @param {string} id
+ * @param {'read'|'dismissed'|'unread'} status
+ */
+export function updateNotification(id, status) {
+  return request.put(`/agent/notifications/${id}`, { status })
+}
+
 export default {
   chatWithAgent,
   getInspectionBriefing,
@@ -221,4 +237,6 @@ export default {
   getAgentActionRegistry,
   getConversations,
   getConversation,
+  getNotifications,
+  updateNotification,
 }

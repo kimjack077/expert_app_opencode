@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Card, Table, Tag, Tabs } from 'antd'
+import { Card, Table, Tag, Tabs, Tooltip } from 'antd'
 import { analyticsApi } from '@/services/api'
 import dayjs from 'dayjs'
 
@@ -14,6 +14,64 @@ const CALL_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   evidence_analysis: { label: '证据分析', color: 'volcano' },
   planner_plan: { label: 'Agent 规划', color: 'geekblue' },
   planner_synthesis: { label: '规划汇总', color: 'geekblue' },
+}
+
+/** 审计日志「METHOD /api/xxx/...」→ 业务动作（动词 + 对象），未匹配的原样显示 */
+const AUDIT_RESOURCES: Array<[RegExp, string]> = [
+  [/^\/api\/auth\/login/, '登录系统'],
+  [/^\/api\/auth\/logout/, '退出登录'],
+  [/^\/api\/auth\/me\/password/, '修改密码'],
+  [/^\/api\/agent\/notifications/, '智审提醒'],
+  [/^\/api\/agent\/actions\/confirm/, '确认 Agent 动作'],
+  [/^\/api\/agent\/chat/, '智审 Agent 对话'],
+  [/^\/api\/audit-projects\/[^/]+\/sessions\/[^/]+\/evidence/, '现场证据'],
+  [/^\/api\/audit-projects\/[^/]+\/sessions\/[^/]+\/submit/, '提交现场审核'],
+  [/^\/api\/audit-projects\/[^/]+\/sessions/, '现场审核会话'],
+  [/^\/api\/audit-projects\/[^/]+\/nonconformities\/[^/]+\/confirm/, '确认不符合项草稿'],
+  [/^\/api\/audit-projects\/(?:[^/]+\/)?nonconformities/, '不符合项'],
+  [/^\/api\/audit-projects\/(?:[^/]+\/)?meetings/, '会议记录'],
+  [/^\/api\/audit-projects\/(?:[^/]+\/)?team/, '审核组成员'],
+  [/^\/api\/audit-projects\/(?:[^/]+\/)?plan/, '审核计划'],
+  [/^\/api\/audit-projects\/[^/]+\/documents/, '项目资料'],
+  [/^\/api\/audit-projects\/[^/]+\/artifacts/, '报告/资料包'],
+  [/^\/api\/audit-projects/, '审核项目'],
+  [/^\/api\/enterprises\/rectifications\/[^/]+\/review/, '复核整改'],
+  [/^\/api\/enterprises\/rectifications/, '企业整改'],
+  [/^\/api\/enterprises\/(?:[^/]+\/)?qualifications/, '企业资质'],
+  [/^\/api\/enterprises\/[^/]+\/products/, '企业产品'],
+  [/^\/api\/enterprises/, '企业'],
+  [/^\/api\/tasks\/[^/]+\/start/, '开始检查任务'],
+  [/^\/api\/tasks\/[^/]+\/complete/, '完成检查任务'],
+  [/^\/api\/tasks\/[^/]+\/cancel/, '取消检查任务'],
+  [/^\/api\/tasks\/(?:[^/]+\/)?records/, '检查项填报'],
+  [/^\/api\/tasks/, '检查任务'],
+  [/^\/api\/records\/[^/]+\/submit/, '提交检查记录'],
+  [/^\/api\/records\/[^/]+\/items/, '检查项填报'],
+  [/^\/api\/records/, '检查记录'],
+  [/^\/api\/templates/, '检查模板'],
+  [/^\/api\/knowledge\/guidelines/, '审查细则'],
+  [/^\/api\/knowledge/, '知识库文档'],
+  [/^\/api\/media/, '附件'],
+  [/^\/api\/users/, '用户'],
+  [/^\/api\/industries/, '行业分类'],
+]
+
+const AUDIT_VERBS: Record<string, { text: string; color: string }> = {
+  POST: { text: '新增/提交', color: 'green' },
+  PUT: { text: '修改', color: 'blue' },
+  PATCH: { text: '修改', color: 'blue' },
+  DELETE: { text: '删除', color: 'red' },
+}
+
+function describeAuditAction(action?: string): { verb: string; target: string; color: string } {
+  const m = /^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)/.exec(action || '')
+  if (!m) return { verb: '操作', target: action || '-', color: 'default' }
+  const [, method, path] = m
+  const target = AUDIT_RESOURCES.find(([re]) => re.test(path))?.[1] || path
+  // 登录/退出/确认/提交/开始等本身已含动作的，不再叠加「新增」
+  const selfDescribing = /登录|退出|确认|提交|开始|完成|取消|复核|对话|修改密码/.test(target)
+  const verb = AUDIT_VERBS[method] || { text: method, color: 'default' }
+  return { verb: selfDescribing ? '操作' : verb.text, target, color: selfDescribing ? 'purple' : verb.color }
 }
 
 export default function Analytics() {
@@ -48,10 +106,32 @@ export default function Analytics() {
   }
 
   const auditColumns = [
-    { title: '用户', dataIndex: 'username', key: 'username', width: 120 },
-    { title: '操作', dataIndex: 'action', key: 'action', width: 200 },
-    { title: '资源类型', dataIndex: 'resource_type', key: 'resource_type', width: 100 },
-    { title: '资源ID', dataIndex: 'resource_id', key: 'resource_id', ellipsis: true },
+    {
+      title: '用户',
+      dataIndex: 'username',
+      key: 'username',
+      width: 120,
+      // 登录请求发生在认证之前，日志里没有用户名
+      render: (v: string, r: any) => v || (/auth\/login/.test(r.action || '') ? '（登录请求）' : '-'),
+    },
+    {
+      // 审计中间件记录的是「METHOD /api/xxx」原始路径，管理员看不懂；这里翻译成业务动作，原始路径放在悬浮提示里
+      title: '操作',
+      dataIndex: 'action',
+      key: 'action',
+      width: 260,
+      render: (action: string) => {
+        const info = describeAuditAction(action)
+        return (
+          <Tooltip title={action}>
+            <span>
+              <Tag color={info.color} style={{ marginInlineEnd: 6 }}>{info.verb}</Tag>
+              {info.target}
+            </span>
+          </Tooltip>
+        )
+      },
+    },
     { title: 'IP地址', dataIndex: 'ip_address', key: 'ip_address', width: 140 },
     {
       title: '时间',

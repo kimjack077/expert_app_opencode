@@ -23,8 +23,6 @@
 | `backend/` | FastAPI + PostgreSQL + SQLAlchemy(async) + Alembic，Python 3.11+ | 8000 |
 | `web-admin/` | React 18 + TS + Ant Design + Vite | 3000 |
 | `h5-app/` | Vue 3 + Vant + Vite（base path `/h5/`） | 5174 |
-| `mobile-app/` | React 18 + antd-mobile（早期端，Agent 写回已禁用） | 3001 |
-| `inspection_app/` | Flutter 3.x + Riverpod + Dio + GoRouter（在建） | — |
 
 核心业务能力：审核项目全生命周期 · AI Agent 辅助审核（RAG + LLM）·
 检查模板设计与复用 · 现场检查记录采集 · 审核报告自动生成 · 知识库智能问答。
@@ -51,7 +49,7 @@ cd h5-app && npm install && npm run dev           # npm run build / type-check /
 | 文档 | 什么时候读 |
 |------|-----------|
 | [docs/agents/backend.md](docs/agents/backend.md) | 改后端。路由前缀表、服务层地图、统一响应体 / 角色 / 软删除 / 审计 / 异常处理约定、Python 代码风格 |
-| [docs/agents/frontend.md](docs/agents/frontend.md) | 改前端。三端目录结构、代理与别名、React/Vue 风格规则、离线能力的真实状态 |
+| [docs/agents/frontend.md](docs/agents/frontend.md) | 改前端。Web / H5 两端目录结构、代理与别名、React/Vue 风格规则、离线能力的真实状态 |
 | [docs/agents/data-model.md](docs/agents/data-model.md) | 碰数据库或业务流程。42 张表分域清单、哪些表是软删除、关键关系、**三套并行记录模型的架构债**、角色权限、迁移流程 |
 | [docs/agents/ai-agent.md](docs/agents/ai-agent.md) | 碰 LLM / RAG / Agent。共享运行时 `app/agents/`、工具循环与人在回路、证据管线、Agent 端点清单、已知缺口 |
 | [docs/agents/ops.md](docs/agents/ops.md) | 配环境、跑测试、部署。全部环境变量、两类测试文件的区别、部署脚本与线上拓扑 |

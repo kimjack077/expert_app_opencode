@@ -13,7 +13,7 @@
           <EasyAuditLogo :size="52" :show-text="false" />
         </div>
         <h1 class="app-name">易审通 EasyAudit</h1>
-        <p class="app-version">版本 2.4.0 SaaS Pro</p>
+        <p class="app-version">版本 {{ appVersion }}</p>
         <p class="app-desc">新一代认证审核与现场评审智能云平台，提供项目策划、智能排期、智审 Agent 现场辅助与一键报告交付全流程支持。</p>
       </div>
 
@@ -73,21 +73,22 @@
       </div>
 
       <div class="info-card">
-        <h3 class="card-title">联系我们</h3>
+        <h3 class="card-title">帮助与支持</h3>
         <div class="contact-list">
-          <div class="contact-item">
+          <div class="contact-item" @click="openManual">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
             </svg>
-            <span>support@example.com</span>
+            <span>在线使用文档与操作指南</span>
           </div>
-          <div class="contact-item">
+          <div v-if="supportContact" class="contact-item">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
             </svg>
-            <span>400-123-4567</span>
+            <span>{{ supportContact }}</span>
           </div>
+          <p v-else class="contact-tip">账号、权限或密码问题，请联系所在机构的系统管理员。</p>
         </div>
       </div>
 
@@ -119,21 +120,60 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
-import { showToast } from 'vant'
+import { showDialog } from 'vant'
 import EasyAuditLogo from '../components/brand/EasyAuditLogo.vue'
 
 const router = useRouter()
 
+// 版本号与支持联系方式通过构建环境变量配置（.env.production），未配置时不展示占位假信息
+const appVersion = import.meta.env.VITE_APP_VERSION || '2.4.0'
+const supportContact = import.meta.env.VITE_SUPPORT_CONTACT || ''
+
 const goBack = () => {
-  router.back()
+  if (window.history.length > 1) router.back()
+  else router.replace('/profile')
 }
 
+// 文档中心部署在 Web 管理端 /docs；H5 与 Web 不同端口时通过 VITE_DOCS_URL 配置完整地址
+const openManual = () => {
+  const fallback = `${window.location.protocol}//${window.location.hostname}:3000/docs`
+  window.open(import.meta.env.VITE_DOCS_URL || fallback, '_blank')
+}
+
+const TERMS = [
+  '1. 本系统仅供经授权的审核机构人员用于认证审核、现场检查及相关管理工作。',
+  '2. 账号仅限本人使用，不得转借；因账号保管不当造成的后果由账号持有人承担。',
+  '3. 用户应保证录入的检查记录、证据照片真实、准确，并对提交内容负责。',
+  '4. 智审 Agent 生成的条款判断、不符合项草稿仅作辅助参考，正式结论以审核员人工确认为准。',
+  '5. 不得利用本系统上传违法违规内容，或进行与审核业务无关的操作。',
+  '6. 平台可根据业务需要对功能进行调整，重大变更将通过系统内提示告知。',
+]
+
+const PRIVACY = [
+  '1. 收集范围：账号信息、检查与审核记录、现场照片/语音、操作日志，以及拍照时您授权获取的位置信息。',
+  '2. 使用目的：仅用于完成审核业务、生成报告、追溯审核过程及改进系统服务。',
+  '3. AI 处理：调用智审 Agent 时，相关文字、照片会发送至机构配置的模型服务用于分析，不用于其他用途。',
+  '4. 存储与共享：数据存储于机构部署的服务器，除法律法规要求或机构授权外，不向第三方提供。',
+  '5. 本地缓存：离线缓存数据仅保存在本机浏览器，可在「设置 → 清除缓存」中随时删除。',
+  '6. 如需查询、更正或删除个人信息，请联系所在机构的系统管理员。',
+]
+
 const showTerms = () => {
-  showToast('用户协议页面开发中')
+  showDialog({
+    title: '用户协议',
+    message: TERMS.join('\n'),
+    messageAlign: 'left',
+    confirmButtonText: '我知道了',
+  })
 }
 
 const showPrivacy = () => {
-  showToast('隐私政策页面开发中')
+  showDialog({
+    title: '隐私政策',
+    message: PRIVACY.join('\n'),
+    messageAlign: 'left',
+    confirmButtonText: '我知道了',
+  })
 }
 </script>
 
@@ -331,5 +371,15 @@ const showPrivacy = () => {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.8;
+}
+
+.contact-item {
+  cursor: pointer;
+}
+
+.contact-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0 0;
 }
 </style>

@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authApi } from '@/services/api'
 import AgentSidebar from '@/components/agent/AgentSidebar'
+import NotificationBell from '@/components/NotificationBell'
 import { roleLabel } from '@/utils/display'
 import { isAdminRole } from '@/utils/roles'
 import { EasyAuditLogoIcon } from '@/components/brand/EasyAuditLogo'
@@ -278,6 +279,9 @@ export default function MainLayout() {
               <span>智审服务在线</span>
             </div>
 
+            {/* 智审主动提醒：复审到期 / NC 超期 / 草稿积压 */}
+            <NotificationBell />
+
             {/* 快捷知识库检索 */}
             <Tooltip title="知识库与审核标准">
               <Button
@@ -298,14 +302,14 @@ export default function MainLayout() {
               />
             </Tooltip>
 
-            {/*后端 Swagger 挂在 /api/docs（见 backend/app/main.py docs_url） */}
-            <Tooltip title="API 文档 (新标签页查看)">
+            {/* 面向业务用户的在线使用文档（/docs）；开发者 Swagger 仍可通过 /api/docs 访问 */}
+            <Tooltip title="使用文档与操作指南（新标签页）">
               <Button
                 type="text"
                 className="header-icon-btn"
                 style={{ color: '#0284c7' }}
                 icon={<QuestionCircleOutlined style={{ fontSize: 16 }} />}
-                onClick={() => window.open('/api/docs', '_blank')}
+                onClick={() => window.open('/docs', '_blank')}
               />
             </Tooltip>
 

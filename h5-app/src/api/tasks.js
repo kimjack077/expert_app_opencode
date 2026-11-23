@@ -23,16 +23,8 @@ export const getTaskStatistics = () => {
   return request.get('/tasks/statistics')
 }
 
-export const createTask = (data) => {
-  return request.post('/tasks', data)
-}
-
 export const updateTask = (id, data) => {
   return request.put(`/tasks/${id}`, data)
-}
-
-export const deleteTask = (id) => {
-  return request.delete(`/tasks/${id}`)
 }
 
 export const startTask = (id) => {

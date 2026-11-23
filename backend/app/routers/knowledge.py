@@ -393,6 +393,7 @@ async def delete_document(
 async def get_guidelines(
     product_category: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(True),
+    include_inactive: bool = Query(False, description="为 true 时同时返回已停用的指南（管理页使用）"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -402,7 +403,7 @@ async def get_guidelines(
 
     if product_category:
         query = query.where(InspectionGuideline.product_category.ilike(f"%{product_category}%"))
-    if is_active is not None:
+    if is_active is not None and not include_inactive:
         query = query.where(InspectionGuideline.is_active == is_active)
 
     query = query.order_by(InspectionGuideline.created_at.desc()).offset(skip).limit(limit)
@@ -455,3 +456,56 @@ async def create_guideline(
     await db.refresh(guideline)
 
     return make_response(data={"id": str(guideline.id), "name": guideline.name})
+
+
+class GuidelineUpdate(BaseModel):
+    name: Optional[str] = None
+    product_category: Optional[str] = None
+    content: Optional[str] = None
+    code: Optional[str] = None
+    legal_basis: Optional[str] = None
+    version: Optional[str] = None
+    is_active: Optional[bool] = None
+    effective_date: Optional[datetime] = None
+
+
+async def _get_guideline_or_404(db: AsyncSession, guideline_id: str) -> InspectionGuideline:
+    from uuid import UUID
+
+    try:
+        gid = UUID(guideline_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="检查指南不存在")
+    guideline = await db.get(InspectionGuideline, gid)
+    if not guideline:
+        raise HTTPException(status_code=404, detail="检查指南不存在")
+    return guideline
+
+
+@router.put("/guidelines/{guideline_id}", response_model=ApiResponse)
+async def update_guideline(
+    guideline_id: str,
+    data: GuidelineUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """编辑检查指南（含停用/启用）"""
+    guideline = await _get_guideline_or_404(db, guideline_id)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(guideline, key, value)
+    await db.commit()
+    await db.refresh(guideline)
+    return make_response(data={"id": str(guideline.id), "name": guideline.name})
+
+
+@router.delete("/guidelines/{guideline_id}", response_model=ApiResponse)
+async def delete_guideline(
+    guideline_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """删除检查指南"""
+    guideline = await _get_guideline_or_404(db, guideline_id)
+    await db.delete(guideline)
+    await db.commit()
+    return make_response(message="检查指南已删除")

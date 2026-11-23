@@ -218,7 +218,6 @@ async def _sync_reaudited_task_to_formal_record(
 @router.get("", response_model=ApiResponse)
 async def get_tasks(
     status: Optional[str] = Query(None),
-    priority: Optional[str] = Query(None, description="按优先级筛选: high / normal / low"),
     search: Optional[str] = Query(None, description="按标题/任务编号/检查对象/地点模糊搜索"),
     sort_by: Optional[str] = Query("created_at", description="排序字段: created_at / scheduled_at"),
     skip: int = Query(0, ge=0),
@@ -251,9 +250,6 @@ async def get_tasks(
             conditions.append(InspectionTask.status.in_(statuses))
         else:
             conditions.append(InspectionTask.status == status)
-
-    if priority and priority.strip():
-        conditions.append(InspectionTask.priority == priority.strip())
 
     order_col = (
         InspectionTask.scheduled_at.desc().nullslast()

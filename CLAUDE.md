@@ -10,8 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Backend**: FastAPI (Python 3.11+) with PostgreSQL
 - **Web Admin**: React 18 + TypeScript + Ant Design + Vite
 - **H5 Mobile App**: Vue 3 + Vant UI + Vite (for field inspectors, base path `/h5/`)
-- **Mobile App**: React 18 + TypeScript + antd-mobile + Vite (port 3001)
-- **Inspection App (Flutter)**: Flutter 3.x + Riverpod + Dio/Retrofit + GoRouter (in development)
+
+> 2026-11-23：`mobile-app`（React + antd-mobile）与 `inspection_app`（Flutter）已停止维护并移出项目，移动端只保留 H5。
 
 > A companion **`AGENTS.md`** at the repo root is a short index of hard constraints plus pointers into five topic docs under `docs/agents/` — `backend.md` (router map, service map, cross-cutting conventions, Python style), `frontend.md` (three clients' structure and style), `data-model.md` (table map, soft-delete scope, the three-parallel-record-models debt, migration flow), `ai-agent.md` (shared agent runtime, tool loop, evidence pipeline, endpoints), `ops.md` (env vars, tests, deployment). Read the relevant topic doc before writing backend or frontend code.
 
@@ -59,25 +59,6 @@ npm run format   # Format code with oxfmt (no semicolons, single quotes)
 
 **Node version requirement**: `^20.19.0 || >=22.12.0`
 Vite dev proxies `/api` and `/uploads` to `http://localhost:8000`. `@` aliases `src/`. Base path is `/h5/`.
-
-### Mobile App (React)
-```bash
-cd mobile-app
-npm install
-npm run dev      # Development server on port 3001
-npm run build    # Production build
-```
-
-### Inspection App (Flutter)
-```bash
-cd inspection_app
-flutter pub get          # Install dependencies
-flutter run              # Development (select device)
-flutter build apk        # Build Android APK
-flutter build appbundle  # Build Android App Bundle
-flutter build ios        # Build iOS
-```
-**Flutter SDK requirement**: `>=3.0.0`
 
 ## Environment Configuration
 
@@ -148,20 +129,6 @@ h5-app/src/
 ├── api/                  # API modules (auth, tasks, records, media) - JavaScript
 ├── utils/                # photoUtils.js, offlineStorage.js, uploadQueue.js
 └── main.js               # Vue app entry with Vant components
-
-mobile-app/src/
-├── pages/                # Page components (Login, TaskList, QuickCheck, Profile, Inspection)
-├── components/           # Shared components (BottomNav)
-├── services/api.ts       # Axios API client
-└── stores/auth.ts        # Zustand state
-
-inspection_app/lib/
-├── models/               # Data models
-├── screens/              # Page screens
-├── services/             # API service layer
-├── providers/            # State management (Riverpod)
-├── router/               # GoRouter configuration
-└── theme/                # App theme
 
 ## Backend Dependencies
 
@@ -324,7 +291,7 @@ Template items support multiple check types via `check_type` field:
 > 2. **严禁自动推送 GitHub**：除非用户明确指定“推送到 GitHub / git push”，否则**严禁自动执行 `git push`**。
 > 3. 代码修改后仅在本地完成测试与构建校验（如 `npm run build`、`pytest`），并在对话中向用户汇报。
 
-Deployment is driven by **Python scripts at the repo root** (no Docker/Makefile): `deploy.py` (full), plus targeted scripts `deploy_server.py`, `deploy_web_admin.py`, `redeploy_h5.py`, `setup_nginx.py`, `update_frontend_serving.py`. Infra config lives at root: `efis-backend.service` (systemd), `efis-nginx.conf` (nginx).
+Deployment is driven by **Python scripts at the repo root** (no Docker/Makefile): `fast_deploy.py` (daily: uploads `backend/app` + locally built `web-admin/dist` / `h5-app/dist`, restarts systemd `expert-backend`; targets `backend` / `web` / `h5`) and `deploy.py` (full, reinstalls deps and builds on the server). Nginx config: `deploy/nginx-easyaudit.conf`. Old one-off deploy scripts were moved to `_已停用_可直接删除/旧部署脚本/` on 2026-11-23. See `docs/agents/ops.md`.
 
 When explicitly requested by the user: commit to GitHub → `python deploy.py` (**skips DB migrations** — see Shared Remote Database) → verify at `http://49.232.213.79` (API `:8000`, Web Admin `:3000`, H5 `:5173`).
 

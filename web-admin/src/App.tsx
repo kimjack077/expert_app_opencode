@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Spin } from 'antd'
 import { useAuthStore } from '@/stores/auth'
 import { isAdminRole } from '@/utils/roles'
@@ -38,10 +38,15 @@ const AuditItemDetail = lazy(() => import('@/pages/AuditItemDetail'))
 const AuditRecordEdit = lazy(() => import('@/pages/AuditRecordEdit'))
 // 在线使用文档模块
 const DocsPage = lazy(() => import('@/pages/Docs'))
+const NotFound = lazy(() => import('@/pages/NotFound'))
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated)
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
+  const location = useLocation()
+  // 记录被拦截的地址，登录后回到原页面（例如同事分享的项目链接）
+  return isAuthenticated
+    ? <>{children}</>
+    : <Navigate to="/login" replace state={{ from: location }} />
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -92,7 +97,9 @@ function App() {
             <Route path="my-audit-tasks" element={<MyAuditTasks />} />
             {/* 检查项详情 */}
             <Route path="audit-item/:recordId/:itemId" element={<AuditItemDetail />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

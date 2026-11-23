@@ -87,7 +87,7 @@ GET    /api/agent/notifications            # 主动通知（PUT /{id} 标记已�
 - 引用自校验 / 反思环节按需求暂缓，未实现。
 - 无分布式任务队列，主动巡检是进程内轮询。
 - 前端尚未接入新端点（反馈看板、通知铃铛、规划器入口）——后端已就绪。
-- mobile-app 的 Agent 写回被故意禁用（`advisoryOnly`），原因见
+- （历史）mobile-app 的 Agent 写回被故意禁用（`advisoryOnly`）；mobile-app 已于 2026-11-23 停用。原因见
   [data-model.md](data-model.md) 的三套记录模型。
 
 ## 前端调用示例（流式）

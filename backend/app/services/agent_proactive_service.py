@@ -44,17 +44,29 @@ async def _upsert_notification(
     project_id: Optional[UUID] = None,
     payload: Optional[dict] = None,
 ) -> bool:
-    """存在同键未读通知则跳过，否则新建。返回是否新建。"""
-    existing = (await db.execute(
-        select(AgentNotification.id).where(
+    """幂等写入提醒，返回是否新建。
+
+    此前只按「同键未读」去重：用户一标记已读或忽略，下一轮巡检就会重新生成同一条提醒，
+    铃铛永远清不掉。现在按同键最近一条判断：
+    - 未读：跳过；
+    - 已忽略：不再提醒；
+    - 已读：7 天内不重复提醒，超过 7 天问题仍存在则再提醒一次。
+    """
+    latest = (await db.execute(
+        select(AgentNotification.status, AgentNotification.created_at).where(
             AgentNotification.kind == kind,
             AgentNotification.dedupe_key == dedupe_key,
-            AgentNotification.status == "unread",
             AgentNotification.user_id.is_(user_id) if user_id is None else AgentNotification.user_id == user_id,
-        ).limit(1)
-    )).scalar_one_or_none()
-    if existing:
-        return False
+        ).order_by(AgentNotification.created_at.desc()).limit(1)
+    )).first()
+    if latest:
+        status, created_at = latest
+        if status in ("unread", "dismissed"):
+            return False
+        if status == "read" and created_at is not None:
+            ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            if ts > datetime.now(timezone.utc) - timedelta(days=7):
+                return False
     db.add(AgentNotification(
         user_id=user_id, kind=kind, dedupe_key=dedupe_key, title=title, body=body,
         severity=severity, enterprise_id=enterprise_id, project_id=project_id,
@@ -88,22 +100,32 @@ class AgentProactiveService:
                 created["reaudit_due"] += 1
 
         # 2) 不符合项超期未关闭
+        # 草稿（未经人工确认）与已驳回的 AI 草稿不属于正式 NC，不应提醒超期
         overdue_ncs = (await db.execute(
             select(Nonconformity, AuditProject)
             .join(AuditProject, Nonconformity.project_id == AuditProject.id)
             .where(
-                Nonconformity.status.notin_(("verified", "closed", "cancelled")),
+                Nonconformity.status.notin_(("verified", "closed", "cancelled", "draft", "rejected")),
                 Nonconformity.due_date.isnot(None),
                 Nonconformity.due_date < now,
+                AuditProject.is_deleted == False,  # noqa: E712
             ).limit(200)
         )).all()
+        nc_status_text = {
+            "open": "待整改",
+            "pending_rectification": "待整改",
+            "corrected": "已整改·待验证",
+            "pending_verification": "待验证",
+        }
         for nc, project in overdue_ncs:
+            clause = (nc.clause_no or "").strip()
+            status_text = nc_status_text.get(nc.status or "", nc.status or "待整改")
             if await _upsert_notification(
                 db, user_id=project.created_by, kind="open_nonconformity", dedupe_key=str(nc.id),
-                title=f"不符合项超期未整改：{nc.clause_no or ''}",
-                body=f"项目「{project.title}」的不符合项已超过整改期限（{nc.due_date}），当前状态：{nc.status}。",
+                title=f"不符合项超期未整改{'：条款 ' + clause if clause else ''}{('（' + nc.nc_no + '）') if getattr(nc, 'nc_no', None) else ''}",
+                body=f"项目「{project.title}」的不符合项已超过整改期限（{nc.due_date}），当前状态：{status_text}。",
                 severity="urgent", enterprise_id=project.enterprise_id, project_id=project.id,
-                payload={"nc_id": str(nc.id)},
+                payload={"nc_id": str(nc.id), "tab": "nonconformities"},
             ):
                 created["open_nonconformity"] += 1
 

@@ -13,9 +13,9 @@
             </div>
           </div>
           <div class="user-info">
-            <h1 class="username">{{ user?.username || '未登录' }}</h1>
+            <h1 class="username">{{ user?.full_name || user?.username || '未登录' }}</h1>
             <div class="user-badges">
-              <span class="user-badge">{{ user?.role || '普通用户' }}</span>
+              <span class="user-badge">{{ roleLabel(user?.role) }}</span>
               <span class="user-badge verified">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -49,6 +49,38 @@
       <div class="menu-card">
         <h3 class="menu-title">功能菜单</h3>
         <div class="menu-list">
+          <div class="menu-item" @click="router.push('/messages')">
+            <div class="menu-icon orange">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+            </div>
+            <div class="menu-content">
+              <span class="menu-label">智审提醒</span>
+              <span class="menu-desc">复审到期、NC 超期、AI 草稿待确认</span>
+            </div>
+            <van-badge v-if="notifyEnabled && unreadCount > 0" :content="unreadCount > 99 ? '99+' : unreadCount" />
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="menu-arrow">
+              <path d="m9 18 6-6-6-6"/>
+            </svg>
+          </div>
+          <div class="menu-item" @click="router.push('/audit-tasks')">
+            <div class="menu-icon purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                <rect x="8" y="2" width="8" height="4" rx="1"/>
+                <path d="m9 14 2 2 4-4"/>
+              </svg>
+            </div>
+            <div class="menu-content">
+              <span class="menu-label">我的审核任务</span>
+              <span class="menu-desc">认证审核项目中分配给我的任务</span>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="menu-arrow">
+              <path d="m9 18 6-6-6-6"/>
+            </svg>
+          </div>
           <div class="menu-item" @click="goToTasks">
             <div class="menu-icon blue">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -57,8 +89,8 @@
               </svg>
             </div>
             <div class="menu-content">
-              <span class="menu-label">我的任务</span>
-              <span class="menu-desc">查看和管理检查任务</span>
+              <span class="menu-label">检查任务</span>
+              <span class="menu-desc">按检查表逐项填报的任务</span>
             </div>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="menu-arrow">
               <path d="m9 18 6-6-6-6"/>
@@ -161,10 +193,15 @@ import { useRouter } from 'vue-router'
 import { showConfirmDialog, showToast } from 'vant'
 import { getCurrentUser, logout as logoutApi } from '../api/auth.js'
 import { getTaskStatistics } from '../api/tasks.js'
+import { getNotifications } from '../api/agent.js'
+import { roleLabel } from '../utils/display.js'
+import { isNotificationEnabled } from '../utils/appSettings.js'
 import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
 const user = ref(null)
+const unreadCount = ref(0)
+const notifyEnabled = ref(isNotificationEnabled())
 const stats = ref({
   pending: 0,
   inProgress: 0,
@@ -192,6 +229,16 @@ const fetchStats = async () => {
     }
   } catch (error) {
     console.error('获取统计数据失败:', error)
+  }
+}
+
+const fetchUnread = async () => {
+  if (!notifyEnabled.value) return
+  try {
+    const res = await getNotifications('unread')
+    unreadCount.value = (res?.data?.items || []).length
+  } catch {
+    unreadCount.value = 0
   }
 }
 
@@ -245,7 +292,7 @@ onMounted(async () => {
     await new Promise((resolve) => setTimeout(resolve, 300))
     await fetchUser()
   }
-  await fetchStats()
+  await Promise.all([fetchStats(), fetchUnread()])
 })
 </script>
 

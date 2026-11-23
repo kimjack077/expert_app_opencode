@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -16,7 +17,7 @@ import {
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { EditOutlined, PlusOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 import { auditTeamApi, meetingApi } from '@/services/auditProjectApi'
@@ -148,6 +149,16 @@ export default function MeetingManagement({ projectId }: Props) {
     }
   }
 
+  const handleDelete = async (item: MeetingItem) => {
+    try {
+      await meetingApi.delete(item.id)
+      message.success('会议记录已删除')
+      await fetchData()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || error.response?.data?.message || '删除会议记录失败')
+    }
+  }
+
   const hasOpening = meetings.some((item) => item.meeting_type === 'opening')
   const hasClosing = meetings.some((item) => item.meeting_type === 'closing')
 
@@ -181,11 +192,23 @@ export default function MeetingManagement({ projectId }: Props) {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 160,
       render: (_, item) => (
-        <Button type="link" icon={<EditOutlined />} onClick={() => showEdit(item)}>
-          编辑
-        </Button>
+        <Space size={0}>
+          <Button type="link" icon={<EditOutlined />} onClick={() => showEdit(item)}>
+            编辑
+          </Button>
+          <Popconfirm
+            title="删除会议记录"
+            description="删除后案卷中将缺少该会议记录，确定删除？"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => handleDelete(item)}
+          >
+            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ]

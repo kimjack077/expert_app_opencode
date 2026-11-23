@@ -1,3 +1,5 @@
+// 必须最先执行：处理「未勾选记住登录状态」时的会话清理（早于登录态水合）
+import './utils/sessionGuard'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ConfigProvider, App as AntApp } from 'antd'

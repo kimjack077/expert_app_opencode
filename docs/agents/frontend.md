@@ -1,17 +1,16 @@
 # 前端约定
 
-四个客户端。日常开发只有前两个活跃，后两个是历史/在建产物。
+两个客户端（2026-11-23 起 `mobile-app` 与 Flutter `inspection_app` 停止维护，已移出项目）。
 
 | 客户端 | 技术栈 | 开发端口 | 说明 |
 |--------|--------|----------|------|
 | `web-admin/` | React 18 + TS + Ant Design + Vite | 3000 | 管理后台（主战场） |
 | `h5-app/` | Vue 3 + Vant + Vite | 5174 | 现场审核员移动端，base path `/h5/` |
-| `mobile-app/` | React 18 + TS + antd-mobile | 3001 | 早期移动端，Agent 写回被禁用（见 data-model.md） |
-| `inspection_app/` | Flutter 3.x + Riverpod + Dio/GoRouter | — | 在建 |
 
-两个活跃客户端的 Vite dev server 都把 `/api` 和 `/uploads` 代理到
+两个客户端的 Vite dev server 都把 `/api` 和 `/uploads` 代理到
 `http://localhost:8000`，`@` 别名指向 `src/`。API 地址由 `VITE_API_URL` 控制
 （`.env.development` / `.env.production`）。
+生产构建用 `esbuild.pure` 去掉 `console.log/debug`（`console.error/warn` 保留）。
 
 ## 命令
 
@@ -28,12 +27,6 @@ npm run dev          # :5174
 npm run build        # run-p type-check build-only
 npm run type-check   # vue-tsc --build
 npm run format       # oxfmt src/
-
-# mobile-app
-cd mobile-app && npm install && npm run dev   # :3001
-
-# inspection_app（Flutter SDK >=3.0.0）
-cd inspection_app && flutter pub get && flutter run
 ```
 
 ## web-admin 结构
@@ -42,19 +35,27 @@ cd inspection_app && flutter pub get && flutter run
 web-admin/src/
 ├── pages/          # 按路由组织，每个目录一个页面
 │   ├── AuditProjects/  # 审核项目管理（核心页面）
+│   │                   # Detail.tsx 支持 ?tab=（team/plan/records/meetings/nonconformities/documents/artifacts），地址栏随页签同步
 │   ├── AuditStatistics/ AuditItemDetail/ AuditRecordEdit/ MyAuditTasks/
-│   ├── Templates/ Records/ Tasks/ Inspection/ NewInspection/ RecordInspection/
-│   ├── Knowledge/ Enterprises/ Industries/ Users/ Analytics/ Dashboard/ Login/
+│   ├── Templates/ Records/ Tasks/ TaskDetail/ NewInspection/
+│   ├── Enterprises/    # index.tsx + EnterpriseSubResources.tsx（资质 / 产品 / 整改单）
+│   ├── Knowledge/ Industries/ Users/ Analytics/ Dashboard/ Login/ Docs/ NotFound/
 ├── components/
-│   ├── MainLayout.tsx      # 侧边栏 + 顶栏骨架
+│   ├── MainLayout.tsx      # 侧边栏 + 顶栏骨架（顶栏"?"打开 /docs）
+│   ├── NotificationBell.tsx # 智审提醒铃铛：未读角标、2 分钟轮询、按类型跳转
 │   ├── agent/              # Agent 侧边栏与对话组件
 │   ├── brand/              # EasyAuditLogo.tsx 等品牌资产
-│   ├── common/ InspectionForm/ EnterpriseRiskProfile/
-├── router/
+│   ├── common/ InspectionForm/
+│   ├── EnterpriseRiskProfile/  # 读真实 /enterprises/{id}/risk-profile
 ├── stores/         # Zustand：auth.ts、app.ts
 ├── services/       # api.ts（通用）、auditProjectApi.ts（审核项目域）
-└── utils/
+└── utils/          # display.ts / roles.ts / completion.ts / resultOptions.ts
+                    # sessionGuard.ts：main.tsx 第一个 import；未勾"记住登录状态"时关浏览器即退出
 ```
+
+路由在 `App.tsx`（没有 `router/` 目录）。未登录访问受保护页面会跳 `/login`，登录后回到原页面；未知路径显示 404。
+
+日常检查任务**没有优先级字段**（`inspection_tasks` 表无此列），列表只按状态和关键词筛选。
 
 **风格**：导入顺序 React → 第三方库 → `@/` 本地。组件用函数式 + hooks，
 `export default` 且组件名 PascalCase；变量/函数 camelCase；类型 PascalCase。
@@ -68,19 +69,23 @@ Ant Design 表单用 `Form` + `form.submit()`，提示用 `message.success()` / 
 h5-app/src/
 ├── views/          # 页面组件
 │   ├── AiAuditSession.vue / AuditSessionResult.vue   # AI 审核会话（Agent 主路径）
-│   ├── TodayAudit.vue / AuditTasks.vue / AuditTaskDetail.vue
-│   ├── InspectionExecution.vue / InspectList.vue / InspectItem.vue
+│   ├── TodayAudit.vue / AuditTasks.vue / AuditTaskDetail.vue（旧链接跳转页）
+│   ├── InspectionExecution.vue / InspectItem.vue
 │   ├── Records.vue / RecordDetail.vue / ReportPreview.vue / Statistics.vue
-│   └── Home.vue / Login.vue / Profile.vue / Settings.vue / About.vue
+│   ├── Messages.vue  # 智审提醒（左滑标已读 / 忽略）
+│   └── Home.vue / Login.vue / Profile.vue / Settings.vue / About.vue / NotFound.vue
 │       SelectEnterprise.vue / SelectTemplate.vue / Tasks.vue / TaskDetail.vue
-├── api/            # JavaScript 模块：request.js(拦截器) auth tasks records media
-│                   #                   agent.js auditProjects.js
+├── api/            # JavaScript 模块：request.js(拦截器) auth tasks records agent auditProjects
 ├── components/     # BottomNav / OfflineBanner / RiskAlertPopup / TreeItem
-│                   # agent/（AgentChat、AiAssistCard 等）、brand/
-├── utils/          # display.js / photoUtils.js / offlineCache.js
+│                   # agent/（AgentChatPanel、AgentMessage、AgentActionCard、AgentFab）、brand/
+├── utils/          # display.js / photoUtils.js / offlineCache.js / appSettings.js（通知开关等本机设置）
 ├── styles/
 └── main.js         # 实际入口（index.html 引用 main.js；同目录的 main.ts 未被使用）
 ```
+
+底部导航：今日审核 / 检查任务 / 记录 / 我的。根路径按登录状态跳 `/today-audit` 或 `/login`，
+登录后按 `redirect` 参数回跳；未知路径显示 NotFound。
+可选环境变量（`.env.production`）：`VITE_APP_VERSION`、`VITE_SUPPORT_CONTACT`、`VITE_DOCS_URL`。
 
 **风格**：oxfmt——无分号、单引号。变量 camelCase，组件文件 PascalCase。
 `<script setup>` + `ref()`。Vant 组件用 `van-` 前缀，无限滚动用

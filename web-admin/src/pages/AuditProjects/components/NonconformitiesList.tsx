@@ -17,7 +17,7 @@ import {
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { CheckOutlined, EditOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 import { nonconformityApi } from '@/services/auditProjectApi'
@@ -85,6 +85,7 @@ export default function NonconformitiesList({ projectId }: Props) {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<NonconformityItem>()
   const [nonconformities, setNonconformities] = useState<NonconformityItem[]>([])
+  const [statusFilter, setStatusFilter] = useState<string>()
 
   const fetchNonconformities = async () => {
     setLoading(true)
@@ -115,10 +116,40 @@ export default function NonconformitiesList({ projectId }: Props) {
     }
   }
 
+  /** 驳回 AI 草稿：保留记录（便于统计 AI 采纳率），但不进入整改流程 */
+  const handleReject = async (item: NonconformityItem) => {
+    setConfirmingId(item.id)
+    try {
+      await nonconformityApi.update(item.id, { status: 'rejected' })
+      message.success('已驳回该 AI 草稿，不会进入整改流程')
+      await fetchNonconformities()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || error.response?.data?.message || '驳回失败')
+    } finally {
+      setConfirmingId(undefined)
+    }
+  }
+
+  const handleDelete = async (item: NonconformityItem) => {
+    try {
+      await nonconformityApi.delete(item.id)
+      message.success('不符合项已删除')
+      await fetchNonconformities()
+    } catch (error: any) {
+      message.error(error.response?.data?.detail || error.response?.data?.message || '删除失败')
+    }
+  }
+
   const showCreate = () => {
     setEditing(undefined)
     form.resetFields()
-    form.setFieldsValue({ severity: 'minor', certification_system: 'Q', status: 'open' })
+    // 默认给出 30 天整改期限（可修改）。此前不填期限就保存，列表显示「-」，也不会触发超期提醒
+    form.setFieldsValue({
+      severity: 'minor',
+      certification_system: 'Q',
+      status: 'open',
+      due_date: dayjs().add(30, 'day'),
+    })
     setModalOpen(true)
   }
 
@@ -181,6 +212,13 @@ export default function NonconformitiesList({ projectId }: Props) {
   }
 
   const draftCount = nonconformities.filter((item) => item.status === 'draft').length
+  const openCount = nonconformities.filter((item) =>
+    ['open', 'pending_rectification', 'corrected', 'pending_verification', 'verified'].includes(item.status || '')
+  ).length
+  const overdueCount = nonconformities.filter((item) =>
+    item.due_date && dayjs(item.due_date).isBefore(dayjs(), 'day') && ['open', 'pending_rectification'].includes(item.status || '')
+  ).length
+  const visibleList = statusFilter ? nonconformities.filter((item) => (item.status || '') === statusFilter) : nonconformities
 
   const columns: TableColumnsType<NonconformityItem> = [
     {
@@ -223,6 +261,17 @@ export default function NonconformitiesList({ projectId }: Props) {
       ellipsis: true,
     },
     {
+      title: '整改期限',
+      dataIndex: 'due_date',
+      key: 'due_date',
+      width: 120,
+      render: (value?: string, item?: NonconformityItem) => {
+        if (!value) return '-'
+        const overdue = dayjs(value).isBefore(dayjs(), 'day') && ['open', 'pending_rectification'].includes(item?.status || '')
+        return <Text type={overdue ? 'danger' : undefined}>{dayjs(value).format('YYYY-MM-DD')}{overdue ? ' 逾期' : ''}</Text>
+      },
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
@@ -235,9 +284,9 @@ export default function NonconformitiesList({ projectId }: Props) {
     {
       title: '操作',
       key: 'actions',
-      width: 230,
+      width: 300,
       render: (_, item) => (
-        <Space size="small">
+        <Space size="small" wrap>
           {item.status === 'draft' && (
             <Popconfirm
               title="确认不符合项草稿"
@@ -256,9 +305,36 @@ export default function NonconformitiesList({ projectId }: Props) {
               </Button>
             </Popconfirm>
           )}
-          <Button size="small" icon={<EditOutlined />} onClick={() => showEdit(item)}>
-            {item.status === 'draft' ? '复核编辑' : '整改/验证'}
-          </Button>
+          {item.status === 'draft' && (
+            <Popconfirm
+              title="驳回 AI 草稿"
+              description="驳回后该条不会进入整改流程（记录保留，用于统计 AI 采纳率）。"
+              okText="确认驳回"
+              cancelText="取消"
+              onConfirm={() => handleReject(item)}
+            >
+              <Button size="small" danger icon={<CloseOutlined />} loading={confirmingId === item.id}>
+                驳回
+              </Button>
+            </Popconfirm>
+          )}
+          {item.status !== 'rejected' && (
+            <Button size="small" icon={<EditOutlined />} onClick={() => showEdit(item)}>
+              {item.status === 'draft' ? '复核编辑' : '整改/验证'}
+            </Button>
+          )}
+          {item.status !== 'draft' && item.status !== 'closed' && (
+            <Popconfirm
+              title="删除不符合项"
+              description="仅用于删除误开具的不符合项，删除后不可恢复。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => handleDelete(item)}
+            >
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} aria-label="删除" />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },
@@ -275,15 +351,32 @@ export default function NonconformitiesList({ projectId }: Props) {
         />
       )}
 
-      <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={showCreate}>
           人工开具不符合项
         </Button>
+        <Space wrap>
+          <Text type="secondary">
+            共 {nonconformities.length} 项 · 未关闭 {openCount} 项
+            {overdueCount > 0 && <Text type="danger">（逾期 {overdueCount} 项）</Text>}
+          </Text>
+          <Select
+            allowClear
+            placeholder="全部状态"
+            style={{ width: 150 }}
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={['draft', 'open', 'corrected', 'verified', 'closed', 'rejected'].map((value) => ({
+              value,
+              label: statusConfig[value].text,
+            }))}
+          />
+        </Space>
       </div>
 
       <Table<NonconformityItem>
         columns={columns}
-        dataSource={nonconformities}
+        dataSource={visibleList}
         rowKey="id"
         loading={loading}
         scroll={{ x: 900 }}

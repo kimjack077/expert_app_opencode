@@ -15,6 +15,8 @@ import {
   Steps,
   Progress,
   Alert,
+  Popconfirm,
+  Switch,
 } from 'antd'
 import {
   PlusOutlined,
@@ -58,6 +60,7 @@ export default function Knowledge() {
   const [docForm] = Form.useForm()
   const [guidelineForm] = Form.useForm()
   const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [editingGuideline, setEditingGuideline] = useState<any>(null)
   const [selectedDocType, setSelectedDocType] = useState<string | null>(null)
   const [searchKeyword, setSearchKeyword] = useState('')
 
@@ -109,7 +112,8 @@ export default function Knowledge() {
 
   const fetchGuidelines = async () => {
     try {
-      const res: any = await knowledgeApi.getGuidelines()
+      // 管理页需要同时看到已停用的细则，便于重新启用
+      const res: any = await knowledgeApi.getGuidelines({ include_inactive: true, limit: 100 })
       setGuidelines(res.data || [])
     } catch (error) {
       console.error('Failed to fetch guidelines:', error)
@@ -313,13 +317,48 @@ export default function Knowledge() {
 
   const handleCreateGuideline = async (values: any) => {
     try {
-      await knowledgeApi.createGuideline(values)
-      message.success('审查细则创建成功')
+      const payload = { ...values, effective_date: values.effective_date || undefined }
+      if (editingGuideline) {
+        await knowledgeApi.updateGuideline(editingGuideline.id, payload)
+        message.success('审查细则已更新')
+      } else {
+        await knowledgeApi.createGuideline(payload)
+        message.success('审查细则创建成功')
+      }
       setGuidelineModalVisible(false)
+      setEditingGuideline(null)
       guidelineForm.resetFields()
       fetchGuidelines()
-    } catch (error) {
-      message.error('创建失败')
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : editingGuideline ? '更新失败' : '创建失败')
+    }
+  }
+
+  const openCreateGuideline = () => {
+    setEditingGuideline(null)
+    guidelineForm.resetFields()
+    setGuidelineModalVisible(true)
+  }
+
+  const openEditGuideline = (record: any) => {
+    setEditingGuideline(record)
+    guidelineForm.resetFields()
+    guidelineForm.setFieldsValue({
+      ...record,
+      effective_date: record.effective_date ? dayjs(record.effective_date).format('YYYY-MM-DD') : undefined,
+    })
+    setGuidelineModalVisible(true)
+  }
+
+  const handleDeleteGuideline = async (id: string) => {
+    try {
+      await knowledgeApi.deleteGuideline(id)
+      message.success('审查细则已删除')
+      fetchGuidelines()
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail
+      message.error(typeof detail === 'string' ? detail : '删除失败')
     }
   }
 
@@ -449,6 +488,28 @@ export default function Knowledge() {
       width: 120,
       render: (date: string) => (date ? dayjs(date).format('YYYY-MM-DD') : '-'),
     },
+    {
+      title: '操作',
+      key: 'action',
+      width: 150,
+      render: (_: any, record: any) => (
+        <Space size={0}>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditGuideline(record)}>
+            编辑
+          </Button>
+          <Popconfirm
+            title="删除审查细则"
+            description="删除后不可恢复。若只是暂不使用，建议编辑为「停用」。"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => handleDeleteGuideline(record.id)}
+          >
+            <Button type="link" size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
   ]
 
   return (
@@ -524,7 +585,7 @@ export default function Knowledge() {
           <Card
             title="审查细则管理"
             extra={
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setGuidelineModalVisible(true)}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateGuideline}>
                 新增细则
               </Button>
             }
@@ -810,9 +871,12 @@ export default function Knowledge() {
 
       {/* 新增审查细则 Modal */}
       <Modal
-        title="新增审查细则"
+        title={editingGuideline ? `编辑审查细则：${editingGuideline.name || ''}` : '新增审查细则'}
         open={guidelineModalVisible}
-        onCancel={() => setGuidelineModalVisible(false)}
+        onCancel={() => {
+          setGuidelineModalVisible(false)
+          setEditingGuideline(null)
+        }}
         footer={null}
         width={800}
       >
@@ -833,6 +897,11 @@ export default function Knowledge() {
             <Form.Item name="effective_date" label="生效日期">
               <Input type="date" />
             </Form.Item>
+            {editingGuideline && (
+              <Form.Item name="is_active" label="状态" valuePropName="checked">
+                <Switch checkedChildren="有效" unCheckedChildren="停用" />
+              </Form.Item>
+            )}
           </div>
           <Form.Item name="legal_basis" label="法律依据">
             <TextArea rows={3} />
@@ -842,9 +911,9 @@ export default function Knowledge() {
           </Form.Item>
           <Form.Item style={{ marginTop: 16, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setGuidelineModalVisible(false)}>取消</Button>
+              <Button onClick={() => { setGuidelineModalVisible(false); setEditingGuideline(null) }}>取消</Button>
               <Button type="primary" htmlType="submit">
-                确定
+                {editingGuideline ? '保存' : '确定'}
               </Button>
             </Space>
           </Form.Item>

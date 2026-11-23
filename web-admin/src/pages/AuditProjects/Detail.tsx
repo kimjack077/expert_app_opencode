@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Card, Descriptions, Tag, Tabs, Button, Space, message, Progress, Dropdown, Modal, Spin, Alert, Typography, Tooltip, Result } from 'antd'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { 
   EditOutlined, 
   ArrowLeftOutlined, 
@@ -52,7 +52,27 @@ export default function AuditProjectDetail() {
   const [aiStreamingText, setAiStreamingText] = useState('')
   const [aiIsStreaming, setAiIsStreaming] = useState(false)
   const aiAbortControllerRef = useRef<AbortController | null>(null)
-  const [activeTab, setActiveTab] = useState('team')
+  // 支持 ?tab=nonconformities 等直达指定页签（智审提醒、工作台卡片跳转用）
+  const [searchParams, setSearchParams] = useSearchParams()
+  const TAB_KEYS = ['team', 'plan', 'records', 'meetings', 'nonconformities', 'documents', 'artifacts']
+  const initialTab = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState(initialTab && TAB_KEYS.includes(initialTab) ? initialTab : 'team')
+  useEffect(() => {
+    if (initialTab && TAB_KEYS.includes(initialTab)) setActiveTab(initialTab)
+  }, [initialTab])
+
+  // 切换页签时刷新顶部进度/不符合项计数（此前在某个页签里新增或删除后，顶部数字不变）
+  const firstTabRender = useRef(true)
+  useEffect(() => {
+    // 地址栏同步当前页签，刷新或分享链接时停留在同一页签（此前一直保留进入时的 ?tab=）
+    if (searchParams.get('tab') !== activeTab) {
+      const next = new URLSearchParams(searchParams)
+      if (activeTab === 'team') next.delete('tab'); else next.set('tab', activeTab)
+      setSearchParams(next, { replace: true })
+    }
+    if (firstTabRender.current) { firstTabRender.current = false; return }
+    if (id) fetchProgress()
+  }, [activeTab])
 
   useEffect(() => {
     if (id) {
@@ -464,6 +484,9 @@ export default function AuditProjectDetail() {
           <Tabs
             activeKey={activeTab}
             onChange={setActiveTab}
+            // 非当前页签卸载，切回时重新加载数据。此前各页签组件常驻内存，
+            // 在 Agent 侧栏或其他页签改动后，切回来看到的仍是旧数据
+            destroyInactiveTabPane
             items={[
               {
                 key: 'team',

@@ -3,6 +3,8 @@ import { Card, Table, Button, Modal, Form, Input, Select, message, Space, Tag, T
 import { PlusOutlined, EyeOutlined, EditOutlined, DeleteOutlined, SearchOutlined, BankOutlined, EnvironmentOutlined, PhoneOutlined, UserOutlined } from '@ant-design/icons'
 import { enterpriseApi } from '@/services/api'
 import dayjs from 'dayjs'
+import EnterpriseRiskProfile from '@/components/EnterpriseRiskProfile'
+import { QualificationsPanel, ProductsPanel, RectificationsPanel } from './EnterpriseSubResources'
 
 const { TextArea } = Input
 
@@ -35,6 +37,8 @@ export default function Enterprises() {
   const [modalVisible, setModalVisible] = useState(false)
   const [detailVisible, setDetailVisible] = useState(false)
   const [currentEnterprise, setCurrentEnterprise] = useState<any>(null)
+  // 详情弹窗内资质/产品数量：子面板增删后回传，标签上的数字随之更新
+  const [subCounts, setSubCounts] = useState<{ qual?: number; prod?: number }>({})
   const [editingEnterprise, setEditingEnterprise] = useState<Enterprise | null>(null)
   const [form] = Form.useForm()
   const [searchParams, setSearchParams] = useState({
@@ -123,6 +127,7 @@ export default function Enterprises() {
     try {
       const res: any = await enterpriseApi.getEnterprise(id)
       setCurrentEnterprise(res.data)
+      setSubCounts({ qual: res.data?.qualifications?.length || 0, prod: res.data?.products?.length || 0 })
       setDetailVisible(true)
     } catch (error) {
       message.error('获取详情失败')
@@ -525,10 +530,14 @@ export default function Enterprises() {
         footer={null}
         width={900}
         centered
+        // 关闭时销毁内容：此前关掉再打开同一家企业，资质/产品/整改仍是上次的旧数据（远程实测发现）
+        destroyOnClose
       >
         {currentEnterprise && (
           <Tabs
             defaultActiveKey="basic"
+            // 切换标签时重新加载，避免在其他地方改动后看到旧数据
+            destroyInactiveTabPane
             style={{ marginTop: 16 }}
             items={[
               {
@@ -558,42 +567,36 @@ export default function Enterprises() {
                 ),
               },
               {
+                key: 'risk',
+                label: '风险档案',
+                children: <EnterpriseRiskProfile enterpriseId={currentEnterprise.id} />,
+              },
+              {
                 key: 'qualifications',
-                label: '资质信息',
+                label: `资质信息${subCounts.qual ? ` (${subCounts.qual})` : ''}`,
                 children: (
-                  <Table
-                    dataSource={currentEnterprise.qualifications || []}
-                    rowKey="id"
-                    size="middle"
-                    pagination={false}
-                    locale={{ emptyText: '暂无资质信息' }}
-                  >
-                    <Table.Column title="资质类型" dataIndex="qual_type" />
-                    <Table.Column title="证书编号" dataIndex="cert_no" />
-                    <Table.Column title="产品名称" dataIndex="product_name" />
-                    <Table.Column title="有效期至" dataIndex="valid_until" render={(v) => v ? dayjs(v).format('YYYY-MM-DD') : '-'} />
-                    <Table.Column title="状态" dataIndex="status" render={(s) => s === 'valid' ? <Tag color="success">有效</Tag> : <Tag color="error">失效</Tag>} />
-                  </Table>
+                  <QualificationsPanel
+                    enterpriseId={currentEnterprise.id}
+                    initial={currentEnterprise.qualifications || []}
+                    onCount={(n) => setSubCounts((c) => ({ ...c, qual: n }))}
+                  />
                 ),
               },
               {
                 key: 'products',
-                label: '产品信息',
+                label: `产品信息${subCounts.prod ? ` (${subCounts.prod})` : ''}`,
                 children: (
-                  <Table
-                    dataSource={currentEnterprise.products || []}
-                    rowKey="id"
-                    size="middle"
-                    pagination={false}
-                    locale={{ emptyText: '暂无产品信息' }}
-                  >
-                    <Table.Column title="产品名称" dataIndex="name" />
-                    <Table.Column title="产品类别" dataIndex="category" />
-                    <Table.Column title="规格型号" dataIndex="specification" />
-                    <Table.Column title="年产量" dataIndex="annual_output" />
-                    <Table.Column title="获证状态" dataIndex="cert_status" />
-                  </Table>
+                  <ProductsPanel
+                    enterpriseId={currentEnterprise.id}
+                    initial={currentEnterprise.products || []}
+                    onCount={(n) => setSubCounts((c) => ({ ...c, prod: n }))}
+                  />
                 ),
+              },
+              {
+                key: 'rectifications',
+                label: '整改记录',
+                children: <RectificationsPanel enterpriseId={currentEnterprise.id} />,
               },
             ]}
           />

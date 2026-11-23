@@ -26,14 +26,15 @@ interface RiskProfile {
     total_inspections: number
     pass_count: number
     fail_count: number
-    pending_rectifications: number
-    nc_count: number
+    pending_rectifications: number | null
+    nc_count: number | null
+    open_nc_count?: number | null
   }
+  focusPoints: string[]
   recentRecords: Array<{
-    id: string
-    inspection_date: string
+    date: string
     result: string
-    template_name: string
+    fail_count?: number | null
   }>
 }
 
@@ -56,37 +57,41 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
   const fetchRiskProfile = async () => {
     setLoading(true)
     try {
-      // 获取企业详情和风险档案
-      const res: any = await enterpriseApi.getEnterprise(enterpriseId)
+      // 使用后端真实风险档案接口（此前用企业详情 + 随机数兜底，数字每次刷新都会变）
+      const res: any = await enterpriseApi.getRiskProfile(enterpriseId)
 
       // 检查返回数据是否有效
       if (!res || !res.data) {
-        setLoading(false)
+        setProfile(null)
         return
       }
 
-      // 模拟数据 - 实际应该使用API返回的真实数据
-      const mockProfile: RiskProfile = {
+      const d = res.data
+      const stats = d.statistics || {}
+      const total = Number(stats.total_inspections ?? d.total_inspections ?? 0)
+      const fail = Number(stats.fail_count ?? d.fail_inspections ?? 0)
+      const level = ['high', 'medium', 'low'].includes(d.risk_level) ? d.risk_level : 'low'
+      setProfile({
         enterprise: {
-          name: res.data?.name || '未知企业',
-          risk_level: (res.data?.risk_level as 'high' | 'medium' | 'low') || 'low',
-          risk_score: res.data?.risk_score ?? Math.floor(Math.random() * 100),
-          last_inspection_date: res.data?.last_inspection_date,
+          name: d.enterprise_name || '未知企业',
+          risk_level: level,
+          risk_score: typeof d.risk_score === 'number' ? d.risk_score : undefined,
+          last_inspection_date: d.last_inspection_date || undefined,
         },
         statistics: {
-          total_inspections: res.data?.statistics?.total_inspections ?? Math.floor(Math.random() * 10) + 1,
-          pass_count: res.data?.statistics?.pass_count ?? Math.floor(Math.random() * 8),
-          fail_count: res.data?.statistics?.fail_count ?? Math.floor(Math.random() * 3),
-          pending_rectifications: res.data?.statistics?.pending_rectifications ?? Math.floor(Math.random() * 2),
-          nc_count: res.data?.statistics?.nc_count ?? Math.floor(Math.random() * 5),
+          total_inspections: total,
+          pass_count: Number(stats.pass_count ?? Math.max(0, total - fail)),
+          fail_count: fail,
+          pending_rectifications: stats.pending_rectifications ?? null,
+          nc_count: stats.nc_count ?? null,
+          open_nc_count: stats.open_nc_count ?? null,
         },
-        recentRecords: res.data?.recent_records || [],
-      }
-
-      setProfile(mockProfile)
+        focusPoints: Array.isArray(d.focus_points) ? d.focus_points : [],
+        recentRecords: Array.isArray(d.history_records) ? d.history_records : [],
+      })
     } catch (error) {
       console.error('获取企业风险档案失败:', error)
-      // 不设置profile，保持为null
+      setProfile(null)
     } finally {
       setLoading(false)
     }
@@ -189,11 +194,46 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
           <Col span={8}>
             <Statistic
               title="待整改"
-              value={profile.statistics.pending_rectifications}
+              value={profile.statistics.pending_rectifications ?? '-'}
               valueStyle={{ fontSize: 16, color: '#F59E0B' }}
             />
           </Col>
         </Row>
+
+        {profile.enterprise.last_inspection_date && (
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+            最近检查：{String(profile.enterprise.last_inspection_date).slice(0, 10)}
+          </div>
+        )}
+
+        {/* 重点关注（来自上次不合格项与风险等级） */}
+        {profile.focusPoints.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>本次重点关注</div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
+              {profile.focusPoints.map((point, idx) => (
+                <li key={idx}>{point}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* 近期检查结论 */}
+        {profile.recentRecords.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>近期检查</div>
+            <Space size={[4, 4]} wrap>
+              {profile.recentRecords.map((r, idx) => (
+                <Tag
+                  key={idx}
+                  color={r.result === '不合格' ? 'error' : r.result === '基本合格' ? 'warning' : 'success'}
+                >
+                  {r.date} {r.result}{r.fail_count ? `（${r.fail_count}项）` : ''}
+                </Tag>
+              ))}
+            </Space>
+          </div>
+        )}
       </Card>
     )
   }
@@ -274,7 +314,7 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
               <Card size="small" variant="borderless" style={{ background: 'rgba(245, 158, 11, 0.1)' }}>
                 <Statistic
                   title="待整改项"
-                  value={profile.statistics.pending_rectifications}
+                  value={profile.statistics.pending_rectifications ?? '-'}
                   prefix={<ClockCircleOutlined style={{ color: '#F59E0B' }} />}
                   valueStyle={{ color: '#F59E0B' }}
                 />
@@ -283,8 +323,12 @@ export default function EnterpriseRiskProfile({ enterpriseId, compact = false }:
             <Col span={12}>
               <Card size="small" variant="borderless" style={{ background: 'var(--bg-color)' }}>
                 <Statistic
-                  title="不符合项总数"
-                  value={profile.statistics.nc_count}
+                  title="不符合项（未关闭 / 总数）"
+                  value={
+                    profile.statistics.nc_count == null
+                      ? '-'
+                      : `${profile.statistics.open_nc_count ?? 0} / ${profile.statistics.nc_count}`
+                  }
                   prefix={<WarningOutlined style={{ color: 'var(--accent-color)' }} />}
                 />
               </Card>

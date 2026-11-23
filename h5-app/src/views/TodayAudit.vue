@@ -28,6 +28,14 @@
             <span class="stat-value">{{ completedCount }}</span>
             <span class="stat-label">已完成</span>
           </div>
+          <!-- 今日统计只算今天的安排；逾期未完成单独显示，避免出现「进行中 0」但下方一堆待办的矛盾观感 -->
+          <template v-if="overdueTasks.length">
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+              <span class="stat-value">{{ overdueTasks.length }}</span>
+              <span class="stat-label">逾期</span>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -40,9 +48,12 @@
             <p class="eyebrow">优先处理</p>
             <h2 id="priority-title">当前优先任务</h2>
           </div>
-          <van-tag :type="statusType(priorityTask.status)" size="medium">
-            {{ statusText(priorityTask.status) }}
-          </van-tag>
+          <span>
+            <van-tag v-if="isOverdue(priorityTask)" type="danger" size="medium" style="margin-right:6px">已逾期</van-tag>
+            <van-tag :type="statusType(priorityTask.status)" size="medium">
+              {{ statusText(priorityTask.status) }}
+            </van-tag>
+          </span>
         </div>
 
         <article class="priority-card">
@@ -123,6 +134,45 @@
         </article>
       </section>
 
+      <!-- 逾期未完成：计划日期已过但仍未完成的审核任务，此前今日页完全看不到，容易遗漏 -->
+      <section v-if="!loading && overdueTasks.length" class="task-list-section" aria-labelledby="overdue-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow" style="color: var(--error-color)">需尽快补完</p>
+            <h2 id="overdue-title">逾期未完成（{{ overdueTasks.length }}）</h2>
+          </div>
+          <button class="text-action" type="button" @click="router.push('/audit-tasks')">查看全部</button>
+        </div>
+        <div class="task-list">
+          <button
+            v-for="task in visibleOverdueTasks"
+            :key="task.id"
+            type="button"
+            class="task-row task-row--exception"
+            @click="openTask(task)"
+          >
+            <span class="task-row__status" :class="`status-${task.status}`" aria-hidden="true"></span>
+            <span class="task-row__content">
+              <span class="task-row__context">{{ taskContextText(task) }}</span>
+              <strong>{{ task.area_name || '审核任务' }}</strong>
+              <small>计划 {{ formatSchedule(task) }} · {{ systemText(task) }}</small>
+              <span class="record-progress-label">{{ taskProgressText(task) }} · {{ taskCompletionRate(task) }}%</span>
+            </span>
+            <span class="task-row__action">{{ actionButtonText(task) }}</span>
+            <van-icon name="arrow" class="task-row__arrow" aria-hidden="true" />
+          </button>
+        </div>
+        <button
+          v-if="overdueTasks.length > OVERDUE_PREVIEW"
+          type="button"
+          class="text-action"
+          style="display:block;margin:10px auto 0"
+          @click="showAllOverdue = !showAllOverdue"
+        >
+          {{ showAllOverdue ? '收起' : `展开其余 ${overdueTasks.length - OVERDUE_PREVIEW} 项` }}
+        </button>
+      </section>
+
       <section class="task-list-section" aria-labelledby="task-list-title">
         <div class="section-heading">
           <div>
@@ -133,8 +183,12 @@
         </div>
 
         <van-skeleton v-if="loading" title :row="4" class="loading-card" />
-        <van-empty v-else-if="tasks.length === 0" image="search" description="今天没有分配给你的审核区域">
-          <p class="empty-hint">可能原因：计划未指派、非今日计划、或账号角色不匹配</p>
+        <van-empty
+          v-else-if="tasks.length === 0"
+          image="search"
+          :description="overdueTasks.length ? '今天没有新的审核安排，请优先处理上方逾期任务' : '今天没有分配给你的审核区域'"
+        >
+          <p v-if="!overdueTasks.length" class="empty-hint">可能原因：计划未指派、非今日计划、或账号角色不匹配</p>
           <van-button type="primary" size="small" @click="router.push('/audit-tasks')">查看全部审核任务</van-button>
           <van-button plain size="small" style="margin-left:8px" @click="router.push('/home')">返回工作台</van-button>
         </van-empty>
@@ -199,6 +253,12 @@ import BottomNav from '../components/BottomNav.vue'
 
 const router = useRouter()
 const tasks = ref([])
+const overdueTasks = ref([])
+// 逾期项可能很多，默认只展示前几条，避免把今日安排挤到页面最下方
+const OVERDUE_PREVIEW = 3
+const showAllOverdue = ref(false)
+const visibleOverdueTasks = computed(() =>
+  showAllOverdue.value ? overdueTasks.value : overdueTasks.value.slice(0, OVERDUE_PREVIEW))
 const loading = ref(true)
 const refreshing = ref(false)
 const openingTaskId = ref('')
@@ -254,8 +314,19 @@ const sortedTasks = computed(() => [...tasks.value].sort((left, right) => {
 
 // 仅从未完成任务中选优先项；全部完成后不再回退到已完成任务
 const priorityTask = computed(() =>
-  sortedTasks.value.find((task) => task.status === 'in_progress' || task.status === 'pending') || null
+  sortedTasks.value.find((task) => task.status === 'in_progress' || task.status === 'pending') ||
+  overdueTasks.value[0] ||
+  null
 )
+
+const localToday = () => {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+const isOverdue = (task) =>
+  Boolean(task?.plan_date) && String(task.plan_date).slice(0, 10) < localToday() &&
+  task.status !== 'completed' && task.status !== 'cancelled'
 const allTasksDone = computed(
   () => tasks.value.length > 0 && tasks.value.every((task) => task.status === 'completed' || task.status === 'cancelled')
 )
@@ -305,10 +376,12 @@ const taskCompletionRate = (task) => {
 const taskProgressText = (task) => {
   const confirmed = Number(task?.confirmed_record_count || 0)
   const total = Number(task?.total_clause_count || 0)
+  // 统计口径是「已人工确认的条款记录数 / 计划条款数」，文案写清楚，避免被误读成整体完成度
   if (total > 0) {
-    return `已确认 ${confirmed}/${total} 项`
+    return `条款已确认 ${confirmed}/${total}`
   }
-  return confirmed > 0 ? `已确认 ${confirmed} 项` : '未开始'
+  if (task?.status === 'completed') return '已完成'
+  return confirmed > 0 ? `条款已确认 ${confirmed} 条` : '未开始'
 }
 
 const hasTaskException = (task) => Boolean(task?.has_nc || Number(task?.exception_count || 0) > 0)
@@ -329,8 +402,19 @@ const formatSchedule = (task) => {
 const loadTasks = async () => {
   if (!refreshing.value) loading.value = true
   try {
-    const response = await getMyAuditTasks({ today_only: true })
+    const [response, allResponse] = await Promise.all([
+      getMyAuditTasks({ today_only: true }),
+      // 全量任务只用于找出逾期未完成项；失败不影响今日列表
+      getMyAuditTasks({}).catch(() => null),
+    ])
     tasks.value = Array.isArray(response?.data) ? response.data : []
+    const all = Array.isArray(allResponse?.data) ? allResponse.data : []
+    const todayIds = new Set(tasks.value.map((t) => String(t.id)))
+    overdueTasks.value = all
+      .filter((t) => isOverdue(t) && !todayIds.has(String(t.id)))
+      // 进行中的排前面，其次按计划日期从早到晚
+      .sort((a, b) => (a.status === 'in_progress' ? 0 : 1) - (b.status === 'in_progress' ? 0 : 1) ||
+        String(a.plan_date).localeCompare(String(b.plan_date)))
   } catch (error) {
     showToast(error?.message || '获取今日审核任务失败，请下拉重试')
   } finally {

@@ -31,11 +31,15 @@ const AuditTaskDetail = () => import('./views/AuditTaskDetail.vue')
 const TodayAudit = () => import('./views/TodayAudit.vue')
 const AiAuditSession = () => import('./views/AiAuditSession.vue')
 const AuditSessionResult = () => import('./views/AuditSessionResult.vue')
+const Messages = () => import('./views/Messages.vue')
+const NotFound = () => import('./views/NotFound.vue')
 
 const routes = [
-  { path: '/', redirect: '/login' },
+  // 已登录直接进「今日审核」，未登录再去登录页（此前无论是否登录都跳登录页）
+  { path: '/', redirect: () => (localStorage.getItem('token') ? '/today-audit' : '/login') },
   { path: '/login', component: Login },
   { path: '/home', component: Home },
+  { path: '/messages', component: Messages },
   { path: '/select-enterprise', component: SelectEnterprise },
   { path: '/select-template', component: SelectTemplate },
   { path: '/tasks', component: Tasks },
@@ -57,6 +61,8 @@ const routes = [
   { path: '/audit-session/:sessionId', component: AiAuditSession, name: 'AiAuditSession' },
   // 已完成审核：只读结果页（非现场录入界面）
   { path: '/audit-result/:sessionId', component: AuditSessionResult, name: 'AuditSessionResult' },
+  // 兜底：不存在的地址给出友好提示，而不是白屏
+  { path: '/:pathMatch(.*)*', component: NotFound },
 ]
 
 const router = createRouter({
@@ -67,7 +73,12 @@ const router = createRouter({
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
   if (to.path !== '/login' && !token) {
-    next('/login')
+    // 带上原地址，登录后回跳
+    const keep = to.fullPath && to.fullPath !== '/' && !to.fullPath.startsWith('/login')
+    next(keep ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
+  } else if (to.path === '/login' && token && !to.query.redirect) {
+    // 已登录再访问登录页，直接回到今日审核
+    next('/today-audit')
   } else {
     next()
   }

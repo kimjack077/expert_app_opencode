@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, Button, Space, Tag, Modal, Form, Select, message } from 'antd'
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { auditTeamApi } from '@/services/auditProjectApi'
 import { userApi } from '@/services/api'
 import type { ColumnsType } from 'antd/es/table'
@@ -35,6 +35,7 @@ export default function TeamManagement({ projectId, canManage }: Props) {
   const [loading, setLoading] = useState(false)
   const [members, setMembers] = useState<TeamMember[]>([])
   const [modalVisible, setModalVisible] = useState(false)
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null)
   const [users, setUsers] = useState<any[]>([])
   const [form] = Form.useForm()
 
@@ -66,14 +67,40 @@ export default function TeamManagement({ projectId, canManage }: Props) {
 
   const handleAdd = async (values: any) => {
     try {
-      await auditTeamApi.add(projectId, { ...values, project_id: projectId })
-      message.success('添加成员成功')
+      if (editingMember) {
+        const { member_id: _ignored, ...rest } = values
+        await auditTeamApi.update(editingMember.id, rest)
+        message.success('成员信息已更新')
+      } else {
+        await auditTeamApi.add(projectId, { ...values, project_id: projectId })
+        message.success('添加成员成功')
+      }
       setModalVisible(false)
+      setEditingMember(null)
       form.resetFields()
       fetchMembers()
     } catch (error: any) {
-      message.error(error.response?.data?.message || '添加成员失败')
+      const detail = error.response?.data?.detail || error.response?.data?.message
+      message.error(typeof detail === 'string' ? detail : editingMember ? '更新失败' : '添加成员失败')
     }
+  }
+
+  const openAdd = () => {
+    setEditingMember(null)
+    form.resetFields()
+    setModalVisible(true)
+  }
+
+  const openEdit = (record: TeamMember) => {
+    setEditingMember(record)
+    form.resetFields()
+    form.setFieldsValue({
+      member_id: record.member_id,
+      role: record.role,
+      responsible_systems: record.responsible_systems || [],
+      qualification_codes: record.qualification_codes || [],
+    })
+    setModalVisible(true)
   }
 
   const handleRemove = (id: string) => {
@@ -155,18 +182,23 @@ export default function TeamManagement({ projectId, canManage }: Props) {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 150,
       fixed: 'right',
       render: (_, record) => canManage ? (
-        <Button
-          type="link"
-          danger
-          size="small"
-          icon={<DeleteOutlined />}
-          onClick={() => handleRemove(record.id)}
-        >
-          移除
-        </Button>
+        <Space size={0}>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          <Button
+            type="link"
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => handleRemove(record.id)}
+          >
+            移除
+          </Button>
+        </Space>
       ) : null,
     },
   ]
@@ -174,7 +206,7 @@ export default function TeamManagement({ projectId, canManage }: Props) {
   return (
     <>
       {canManage && <div style={{ marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalVisible(true)}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
           添加成员
         </Button>
       </div>}
@@ -189,13 +221,16 @@ export default function TeamManagement({ projectId, canManage }: Props) {
       />
 
       <Modal
-        title="添加审核组成员"
+        title={editingMember ? `编辑成员：${editingMember.member_name || editingMember.member_username || ''}` : '添加审核组成员'}
         open={modalVisible}
         onCancel={() => {
           setModalVisible(false)
+          setEditingMember(null)
           form.resetFields()
         }}
         onOk={() => form.submit()}
+        okText={editingMember ? '保存' : '添加'}
+        cancelText="取消"
       >
         <Form form={form} layout="vertical" onFinish={handleAdd}>
           <Form.Item
@@ -205,15 +240,22 @@ export default function TeamManagement({ projectId, canManage }: Props) {
           >
             <Select
               placeholder="请选择审核员"
+              disabled={!!editingMember}
               showSearch
               optionFilterProp="children"
               filterOption={(input, option) =>
                 (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
-              options={users.map((u) => ({
-                label: `${u.full_name || u.username} (${u.username})`,
-                value: u.id,
-              }))}
+              options={[
+                ...users.map((u) => ({
+                  label: `${u.full_name || u.username} (${u.username})`,
+                  value: u.id,
+                })),
+                // 编辑时当前成员可能不在可选列表中（已入组），补一项用于显示姓名
+                ...(editingMember && !users.some((u) => u.id === editingMember.member_id)
+                  ? [{ label: editingMember.member_name || editingMember.member_username || '当前成员', value: editingMember.member_id }]
+                  : []),
+              ]}
             />
           </Form.Item>
 
